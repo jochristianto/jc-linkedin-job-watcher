@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "LinkedIn Job Watcher",
+  "version": "0.1.0",
+  "description": "Watches saved LinkedIn job searches on a background alarm and notifies you of genuinely new postings.",
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "alarms",
+    "notifications",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://www.linkedin.com/*",
+    "https://api.telegram.org/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.linkedin.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "LinkedIn Job Watcher"
+  },
+  "options_page": "options.html"
+}

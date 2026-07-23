@@ -2,6 +2,11 @@
 
 > **Does a tab you can't see actually load the job list?**
 
+> **Spike, not the product.** This folder is the issue #5 measurement rig. It is
+> **not** part of the build: `vite.config.ts` (ticket 01) never lists it as an
+> input, so `npm run build` emits only the real extension into `dist/`. Load the
+> product from `dist/`; load *this* folder directly only to re-run the probe.
+
 The smallest possible MV3 extension that answers the load-bearing assumption of
 PRD §9: an alarm opens a background tab (`active: false`), injects a script,
 scrolls the lazy results column, counts the job cards, `console.log`s the count,
