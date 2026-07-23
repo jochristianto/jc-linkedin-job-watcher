@@ -12,6 +12,8 @@
 import "./tokens.css";
 import * as storage from "./storage.ts";
 import { esc } from "./render.ts";
+import { PUSH_FAILING_MESSAGE, OK_PUSH_HEALTH } from "./health.ts";
+import { sendPush, type PushJob } from "./push.ts";
 import type { Settings, Watch } from "./types.ts";
 import {
   settingsToForm,
@@ -20,6 +22,18 @@ import {
   makeBlockedCompany,
   type OptionsFormValues,
 } from "./options-form.ts";
+
+/** The sample batch the Send-test button pushes (PRD §8): one job that exercises
+ *  HTML escaping and a tappable link, so the phone check is representative of a
+ *  real cycle's message without needing a scan to have run. */
+const TEST_PUSH_JOBS: PushJob[] = [
+  {
+    title: "Test message ✓ (Senior Engineer & Lead)",
+    company: "LinkedIn Job Watcher",
+    location: "Send test message",
+    url: "https://www.linkedin.com/jobs/",
+  },
+];
 
 const root = document.getElementById("app");
 if (root) void mount(root);
@@ -30,11 +44,16 @@ async function mount(root: HTMLElement): Promise<void> {
   let base: Settings = await storage.get("settings");
   let form: OptionsFormValues = settingsToForm(base);
   let editingWatchId: string | null = null;
+  // The §16.7 soft warning, read once at load: shown in the Telegram card when push
+  // has failed the threshold times in a row. A good Send-test resets it in storage;
+  // we don't repaint mid-session (that would drop unsaved edits), so the banner
+  // clears on the next open, which is enough — the AC only needs it to appear.
+  const pushWarn = (await storage.get("pushHealth")).warn;
 
   paint();
 
   function paint(): void {
-    root.innerHTML = shell(form);
+    root.innerHTML = shell(form, pushWarn);
     renderWatches();
     renderTags("company");
     renderTags("keyword");
@@ -99,8 +118,41 @@ async function mount(root: HTMLElement): Promise<void> {
     byId("company-tags").addEventListener("click", (e) => onTagDelete(e, "company"));
     byId("keyword-tags").addEventListener("click", (e) => onTagDelete(e, "keyword"));
 
+    byId("send-test").addEventListener("click", onSendTest);
+
     byId("save").addEventListener("click", onSave);
     byId("reset").addEventListener("click", onReset);
+  }
+
+  /** Prove the Telegram config end-to-end (PRD §8): send one real message with the
+   *  values currently in the fields (not the last-saved ones) and report success or
+   *  failure inline, so a wrong chat id shows up here instead of failing silently
+   *  for days. Forces `enabled: true` for the test — the toggle governs cycle pushes,
+   *  not this deliberate check — and a good send clears any §16.7 warning. */
+  async function onSendTest(): Promise<void> {
+    const cfg = {
+      enabled: true,
+      botToken: byId<HTMLInputElement>("pushBotToken").value.trim(),
+      chatId: byId<HTMLInputElement>("pushChatId").value.trim(),
+    };
+    if (!cfg.botToken || !cfg.chatId) {
+      setTestStatus("Enter a bot token and chat id first.", "err");
+      return;
+    }
+    setTestStatus("Sending…", "");
+    const ok = await sendPush(TEST_PUSH_JOBS, cfg);
+    if (ok) {
+      setTestStatus("Sent — check your phone.", "ok");
+      await storage.set("pushHealth", OK_PUSH_HEALTH); // one good send resets §16.7
+    } else {
+      setTestStatus("Telegram rejected it — re-check the bot token and chat id.", "err");
+    }
+  }
+
+  function setTestStatus(message: string, kind: "ok" | "err" | ""): void {
+    const el = byId("test-status");
+    el.textContent = message;
+    el.className = `test-result ${kind}`.trim();
   }
 
   function onWatchListClick(e: Event): void {
@@ -215,6 +267,9 @@ async function mount(root: HTMLElement): Promise<void> {
       openedJobDays: byId<HTMLInputElement>("openedJobDays").value,
       unopenedJobDays: byId<HTMLInputElement>("unopenedJobDays").value,
       seenHardCap: byId<HTMLInputElement>("seenHardCap").value,
+      pushEnabled: byId<HTMLInputElement>("push-enabled").checked,
+      pushBotToken: byId<HTMLInputElement>("pushBotToken").value,
+      pushChatId: byId<HTMLInputElement>("pushChatId").value,
     };
 
     clearErrors();
@@ -271,7 +326,7 @@ function numField(id: string, label: string, value: string, min: number): string
     </div>`;
 }
 
-function shell(f: OptionsFormValues): string {
+function shell(f: OptionsFormValues, pushWarn: boolean): string {
   return `
     <div class="opt-wrap">
       <h1>LinkedIn Job Watcher — Settings</h1>
@@ -345,6 +400,33 @@ function shell(f: OptionsFormValues): string {
             <input id="quietEnd" type="time" value="${esc(f.quietEnd)}" />
             <div class="field-error" data-err="quietEnd"></div>
           </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Telegram push</h2>
+        <p class="hint">
+          Optional: also deliver new jobs to your phone via a Telegram bot,
+          additive to the desktop notification (PRD §8). Nothing here is stored
+          anywhere but this browser — never committed. Use <b>Send test message</b>
+          to confirm the credentials before trusting it.
+        </p>
+        ${pushWarn ? `<div class="banner banner-warn">${esc(PUSH_FAILING_MESSAGE)}</div>` : ""}
+        <label class="switch" style="display: block; margin: 8px 0">
+          <input id="push-enabled" type="checkbox" ${f.pushEnabled ? "checked" : ""} />
+          Send new jobs to Telegram
+        </label>
+        <div class="field">
+          <label for="pushBotToken">Bot token</label>
+          <input id="pushBotToken" type="password" autocomplete="off" value="${esc(f.pushBotToken)}" placeholder="123456:ABC-DEF…" />
+        </div>
+        <div class="field">
+          <label for="pushChatId">Chat id</label>
+          <input id="pushChatId" type="text" autocomplete="off" value="${esc(f.pushChatId)}" placeholder="987654321" />
+        </div>
+        <div class="field-row" style="align-items: center; gap: 12px">
+          <button class="btn ghost" id="send-test">Send test message</button>
+          <span id="test-status" class="test-result"></span>
         </div>
       </section>
 

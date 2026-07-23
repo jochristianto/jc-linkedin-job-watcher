@@ -33,6 +33,9 @@ function validForm(overrides: Partial<OptionsFormValues> = {}): OptionsFormValue
     openedJobDays: "7",
     unopenedJobDays: "30",
     seenHardCap: "50000",
+    pushEnabled: false,
+    pushBotToken: "",
+    pushChatId: "",
     ...overrides,
   };
 }
@@ -100,17 +103,30 @@ test("parseSettingsForm merges a valid form onto the base settings", () => {
   assert.deepEqual(r.settings.blockedCompanies, [{ display: "Acme", normalized: "acme" }]);
 });
 
-test("parseSettingsForm carries through fields the page does not edit (push, pacing)", () => {
-  const base: Settings = {
-    ...DEFAULT_SETTINGS,
-    push: { enabled: true, botToken: "secret", chatId: "42" },
-  };
-  const r = parseSettingsForm(validForm(), base);
+test("parseSettingsForm carries through fields the page does not edit (pacing, backoff)", () => {
+  const r = parseSettingsForm(validForm(), DEFAULT_SETTINGS);
   assert.ok(r.ok);
-  // The Telegram section is #22 — a save here must not wipe it.
-  assert.deepEqual(r.settings.push, { enabled: true, botToken: "secret", chatId: "42" });
-  assert.deepEqual(r.settings.pacing, base.pacing);
-  assert.deepEqual(r.settings.backoff, base.backoff);
+  assert.deepEqual(r.settings.pacing, DEFAULT_SETTINGS.pacing);
+  assert.deepEqual(r.settings.backoff, DEFAULT_SETTINGS.backoff);
+});
+
+test("parseSettingsForm reads the Telegram push config off the form (#22), trimming secrets", () => {
+  const r = parseSettingsForm(
+    validForm({ pushEnabled: true, pushBotToken: "  123:ABC  ", pushChatId: "  42  " }),
+    DEFAULT_SETTINGS,
+  );
+  assert.ok(r.ok);
+  assert.deepEqual(r.settings.push, { enabled: true, botToken: "123:ABC", chatId: "42" });
+});
+
+test("settingsToForm fills the push fields from stored settings", () => {
+  const form = settingsToForm({
+    ...DEFAULT_SETTINGS,
+    push: { enabled: true, botToken: "123:ABC", chatId: "42" },
+  });
+  assert.equal(form.pushEnabled, true);
+  assert.equal(form.pushBotToken, "123:ABC");
+  assert.equal(form.pushChatId, "42");
 });
 
 test("parseSettingsForm rejects a zero interval and writes nothing", () => {

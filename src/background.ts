@@ -40,12 +40,14 @@ import {
   aggregateOutcome,
   classifyPage,
   fieldMissingAcrossAll,
+  reducePushHealth,
   reduceScanHealth,
   shouldRunScan,
   type PageOutcome,
   type PageSignals,
   type Severity,
 } from "./health.ts";
+import { sendPush } from "./push.ts";
 import { buildScanNotification, jobsTabToFocus, SCAN_NOTIFICATION_ID } from "./notify.ts";
 import type { HealthState, Job, Settings } from "./types.ts";
 
@@ -109,6 +111,26 @@ async function fireHealthNotification(health: HealthState): Promise<void> {
     title: "LinkedIn Job Watcher",
     message: health.message,
   });
+}
+
+// ── Telegram push ────────────────────────────────────────────────────────────
+
+/** Deliver the cycle's new jobs to the phone (PRD §8), additive to the desktop
+ *  notification, never a replacement. `sendPush` already no-ops when push is
+ *  disabled/unconfigured or the batch is empty and never throws — an offline phone
+ *  or a wrong chat id can never break the scan or the badge (§8). Only an actually
+ *  attempted send moves the §16.7 failure counter, so a cycle that pushes nothing
+ *  (disabled, unconfigured, or zero new jobs) leaves `pushHealth` untouched; three
+ *  real failures in a row raise the soft warning, and one good send resets it. */
+async function firePush(settings: Settings, newJobs: Job[]): Promise<void> {
+  const cfg = settings.push;
+  if (!cfg.enabled || !cfg.botToken || !cfg.chatId || newJobs.length === 0) return;
+  const ok = await sendPush(newJobs, cfg);
+  const prior = await get("pushHealth");
+  await set(
+    "pushHealth",
+    reducePushHealth(ok, prior.consecutivePushFailures, settings.pushFailWarnThreshold),
+  );
 }
 
 /** Land the user in our own list (PRD §3/§9): focus an already-open jobs.html tab
@@ -292,6 +314,9 @@ async function runCycle(settings: Settings, pages: number): Promise<void> {
     // fired after the badge so the surfaces agree.
     await fireNewJobsNotification(newJobs);
     await fireHealthNotification(health);
+    // Additive Telegram push (PRD §8), after the badge and desktop notification so
+    // its failure — swallowed by sendPush — can never affect either.
+    await firePush(settings, newJobs);
   } finally {
     clearInterval(keepalive);
   }

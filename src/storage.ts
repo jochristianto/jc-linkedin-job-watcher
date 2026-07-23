@@ -10,19 +10,21 @@
 
 import { DEFAULT_SETTINGS, type Settings, type Job, type ScanState, type HealthState } from "./types.ts";
 import { IDLE_LIFECYCLE } from "./lifecycle.ts";
-import { OK_HEALTH } from "./health.ts";
+import { OK_HEALTH, OK_PUSH_HEALTH, type PushHealthState } from "./health.ts";
 import type { SeenMap } from "./dedupe.ts";
 
 /** `jobId → full Job record` — the `jobs` key of §6 (feeds the list view). */
 export type JobsMap = Record<string, Job>;
 
-/** The five §6 top-level keys and the shape each holds. */
+/** The §6 top-level keys and the shape each holds. `pushHealth` (§16.7) tracks
+ *  consecutive Telegram-push failures separately from scan `health`. */
 export type StorageShape = {
   settings: Settings;
   seen: SeenMap;
   jobs: JobsMap;
   scanState: ScanState;
   health: HealthState;
+  pushHealth: PushHealthState;
 };
 
 /** The documented default each key returns when it is missing (§5/§16/§17). */
@@ -32,6 +34,7 @@ const DEFAULTS: StorageShape = {
   jobs: {},
   scanState: IDLE_LIFECYCLE,
   health: OK_HEALTH,
+  pushHealth: OK_PUSH_HEALTH,
 };
 
 /**

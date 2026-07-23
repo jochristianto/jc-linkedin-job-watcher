@@ -10,6 +10,7 @@
 
 import type { Job, Watch, HealthState } from "./types.ts";
 import type { JobsMap } from "./storage.ts";
+import { PUSH_FAILING_MESSAGE } from "./health.ts";
 import {
   esc,
   renderList,
@@ -71,6 +72,12 @@ export type ViewContext = {
   /** The health banner text (PRD §16.8), or null/undefined when healthy. Shown as
    *  a one-line banner above the list, tinted by `severity`. */
   message?: HealthState["message"];
+  /** Telegram push has failed `pushFailWarnThreshold` times in a row (PRD §16.7):
+   *  show the soft "run Send test message" warning. Independent of scan health —
+   *  the read can be fine while a wrong chat id silently drops every push — so it
+   *  renders as its own amber banner, alongside any health banner. Never a desktop
+   *  notification. */
+  pushWarn?: boolean;
 };
 
 /** Choose the empty/degraded message when nothing is visible. A broken scan
@@ -100,8 +107,13 @@ export function renderPage(ctx: ViewContext): string {
     ? renderList(views, ctx.mode)
     : renderEmptyState(pickEmptyKind(ctx, views.length));
 
-  const banner = ctx.message
+  const healthBanner = ctx.message
     ? `<div class="banner banner-${ctx.severity ?? "warn"}">${esc(ctx.message)}</div>`
+    : "";
+  // The push warning is a soft, config-level warning independent of scan health
+  // (§16.7), so it stacks under any health banner rather than replacing it.
+  const pushBanner = ctx.pushWarn
+    ? `<div class="banner banner-warn">${esc(PUSH_FAILING_MESSAGE)}</div>`
     : "";
 
   return `
@@ -110,6 +122,7 @@ export function renderPage(ctx: ViewContext): string {
       ${badge > 0 ? `<span class="badge">${badge}</span>` : ""}
       <button class="hdr-btn" id="open-options" title="Options" aria-label="Options">⚙</button>
     </header>
-    ${banner}
+    ${healthBanner}
+    ${pushBanner}
     <div class="list">${body}</div>`.trim();
 }

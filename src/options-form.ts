@@ -95,6 +95,9 @@ export type OptionsFormValues = {
   openedJobDays: string;
   unopenedJobDays: string;
   seenHardCap: string;
+  pushEnabled: boolean;
+  pushBotToken: string; // Telegram bot token (§8) — never committed, stored per-user
+  pushChatId: string; // Telegram chat id (§8)
 };
 
 export type FormErrors = Partial<Record<keyof OptionsFormValues, string>>;
@@ -121,9 +124,11 @@ function intField(
 /**
  * Turn the raw form into a full `Settings`, or reject with per-field messages
  * and write nothing (the AC's "invalid values are rejected inline and never
- * written"). Fields the page doesn't edit yet — push (#22), pacing, backoff,
- * the lock/warn thresholds — are carried through from `base` untouched, so a
- * save never silently resets them.
+ * written"). Fields the page doesn't edit — pacing, backoff, the lock/warn
+ * thresholds — are carried through from `base` untouched, so a save never
+ * silently resets them. The Telegram push config (#22) IS edited here: the two
+ * secrets are trimmed but not otherwise validated (a bad token/chat id surfaces
+ * via Send test message and the §16.7 warning, not an inline form error).
  */
 export function parseSettingsForm(raw: OptionsFormValues, base: Settings): ParseResult {
   const errors: FormErrors = {};
@@ -166,6 +171,14 @@ export function parseSettingsForm(raw: OptionsFormValues, base: Settings): Parse
       unopenedJobDays: unopenedJobDays!,
       seenHardCap: seenHardCap!,
     },
+    // The Telegram section (#22): the two secrets are trimmed but not otherwise
+    // validated here — a bad token/chat id surfaces via Send test message and the
+    // §16.7 soft warning, not an inline form error.
+    push: {
+      enabled: raw.pushEnabled,
+      botToken: raw.pushBotToken.trim(),
+      chatId: raw.pushChatId.trim(),
+    },
   };
   return { ok: true, settings };
 }
@@ -188,5 +201,8 @@ export function settingsToForm(s: Settings): OptionsFormValues {
     openedJobDays: String(s.retention.openedJobDays),
     unopenedJobDays: String(s.retention.unopenedJobDays),
     seenHardCap: String(s.retention.seenHardCap),
+    pushEnabled: s.push.enabled,
+    pushBotToken: s.push.botToken,
+    pushChatId: s.push.chatId,
   };
 }

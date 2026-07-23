@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { toJobViews, unopenedCount, markJobOpened, renderPage } from "./view.ts";
+import { PUSH_FAILING_MESSAGE } from "./health.ts";
 import type { Job, Watch } from "./types.ts";
 import type { JobsMap } from "./storage.ts";
 
@@ -150,6 +151,37 @@ test("renderPage escapes the banner message", () => {
     message: "a < b & c",
   });
   assert.match(html, /a &lt; b &amp; c/);
+});
+
+test("renderPage shows the soft push-failing warning when pushWarn is set (§16.7)", () => {
+  const html = renderPage({
+    jobs: [job({ id: "1" })],
+    watches,
+    mode: "all",
+    title: "All",
+    pushWarn: true,
+  });
+  assert.match(html, /class="banner banner-warn"/);
+  assert.match(html, new RegExp(PUSH_FAILING_MESSAGE.replace(/[.*+?^${}()|[\]\\—]/g, "\\$&")));
+});
+
+test("renderPage shows no push warning when pushWarn is false", () => {
+  const html = renderPage({ jobs: [job({ id: "1" })], watches, mode: "all", title: "All" });
+  assert.doesNotMatch(html, new RegExp(PUSH_FAILING_MESSAGE.slice(0, 20)));
+});
+
+test("renderPage shows both the health banner and the push warning at once", () => {
+  const html = renderPage({
+    jobs: [job({ id: "1" })],
+    watches,
+    mode: "all",
+    title: "All",
+    severity: "error",
+    message: "Signed out of LinkedIn — scanning paused.",
+    pushWarn: true,
+  });
+  assert.match(html, /class="banner banner-error"/);
+  assert.match(html, /class="banner banner-warn"/);
 });
 
 test("renderPage picks the right empty state for each situation", () => {

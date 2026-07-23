@@ -247,6 +247,20 @@ export function fieldMissingAcrossAll(
   return jobs.length > 0 && jobs.every((j) => (j[field] ?? "").trim() === "");
 }
 
+/** The persisted push-failure record (`'pushHealth'` storage key, PRD §16.7). Kept
+ *  apart from the scan {@link HealthState} because push failures are independent of
+ *  scan health — a scan can read fine while a wrong chat id silently drops every
+ *  message — and reset on their own schedule (one good send). */
+export type PushHealthState = { consecutivePushFailures: number; warn: boolean };
+
+/** The healthy starting point for push (no failures, no warning). */
+export const OK_PUSH_HEALTH: PushHealthState = { consecutivePushFailures: 0, warn: false };
+
+/** The soft warning surfaced in the popup and options once push has failed
+ *  `pushFailWarnThreshold` times in a row (PRD §16.7). Never a desktop
+ *  notification — a wrong chat id is a config mistake, not an account-safety event. */
+export const PUSH_FAILING_MESSAGE = "Telegram push has been failing — run Send test message";
+
 /**
  * Push-failure tracking (PRD §16.7). §8 swallows every push failure so it can
  * never break the scan — that stays. But a wrong chat id fails silently for days
@@ -258,7 +272,7 @@ export function reducePushHealth(
   ok: boolean,
   priorFailures: number,
   warnThreshold: number,
-): { consecutivePushFailures: number; warn: boolean } {
+): PushHealthState {
   if (ok) return { consecutivePushFailures: 0, warn: false };
   const n = priorFailures + 1;
   return { consecutivePushFailures: n, warn: n >= warnThreshold };

@@ -28,10 +28,11 @@ export async function mountListView(
   root.addEventListener("auxclick", onClick);
 
   async function render(): Promise<void> {
-    const [jobs, settings, health] = await Promise.all([
+    const [jobs, settings, health, pushHealth] = await Promise.all([
       storage.get("jobs"),
       storage.get("settings"),
       storage.get("health"),
+      storage.get("pushHealth"),
     ]);
     root.innerHTML = renderPage({
       jobs: Object.values(jobs),
@@ -40,6 +41,7 @@ export async function mountListView(
       title,
       severity: health.severity,
       message: health.message,
+      pushWarn: pushHealth.warn,
     });
   }
 
