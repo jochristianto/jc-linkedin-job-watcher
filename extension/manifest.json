@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "LJW Probe (issue #5 / 04)",
+  "version": "0.0.1",
+  "description": "Smallest extension that answers: does an invisible background tab actually load the LinkedIn job list? Spike only — not the product.",
+  "permissions": ["alarms", "scripting", "tabs"],
+  "host_permissions": ["https://www.linkedin.com/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  }
+}
