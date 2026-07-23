@@ -1,7 +1,8 @@
 {
   "type": "module",
   "scripts": {
-    "sandcastle": "npx tsx .sandcastle/main.mts",
+    "sandcastle": "npm run sandcastle:preflight && npx tsx .sandcastle/main.mts",
+    "sandcastle:preflight": "npx tsx .sandcastle/preflight.mts",
     "typecheck": "tsc --noEmit",
     "test": "node --test --experimental-strip-types",
     "send-test-message": "node --experimental-strip-types scripts/send-test-message.ts"
