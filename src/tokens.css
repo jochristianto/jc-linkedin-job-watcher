@@ -404,3 +404,23 @@ input[type="password"] {
   text-align: center;
   padding: var(--s-4);
 }
+.field-error {
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 600;
+}
+.field-error:empty {
+  display: none;
+}
+input.invalid {
+  border-color: var(--danger);
+}
+.save-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  justify-content: flex-end;
+}
+.save-bar .test-result {
+  margin-right: auto;
+}

@@ -1,0 +1,166 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  minutesToTime,
+  timeToMinutes,
+  makeBlockedCompany,
+  parseWatchInput,
+  parseSettingsForm,
+  settingsToForm,
+  type OptionsFormValues,
+} from "./options-form.ts";
+import { DEFAULT_SETTINGS, type Settings } from "./types.ts";
+
+// The options page's pure half (PRD §3/§6/§7/§15). No chrome.*, no DOM — these
+// pin validation, the quiet-hours time mapping, and the §6 normalize-on-write
+// rule with plain values, exactly as filter.ts/view.ts do for their tickets.
+
+// A form that is entirely valid — each test mutates a copy to probe one field.
+function validForm(overrides: Partial<OptionsFormValues> = {}): OptionsFormValues {
+  return {
+    watches: [{ id: "w1", name: "Indonesia", url: "https://x", enabled: true }],
+    blockedCompanies: [{ display: "Acme", normalized: "acme" }],
+    blockedTitleKeywords: ["Intern"],
+    hideReposted: true,
+    intervalMinutes: "15",
+    jitterMinutes: "1",
+    pagesPerScan: "1",
+    catchUpPages: "4",
+    quietHoursEnabled: true,
+    quietStart: "23:00",
+    quietEnd: "07:00",
+    seenDays: "15",
+    openedJobDays: "7",
+    unopenedJobDays: "30",
+    seenHardCap: "50000",
+    ...overrides,
+  };
+}
+
+// ── time helpers ─────────────────────────────────────────────────────────────
+
+test("minutesToTime zero-pads and timeToMinutes round-trips", () => {
+  assert.equal(minutesToTime(1380), "23:00");
+  assert.equal(minutesToTime(420), "07:00");
+  assert.equal(minutesToTime(0), "00:00");
+  assert.equal(timeToMinutes("23:00"), 1380);
+  assert.equal(timeToMinutes("07:00"), 420);
+  assert.equal(timeToMinutes(minutesToTime(931)), 931);
+});
+
+test("timeToMinutes rejects nonsense and out-of-range times", () => {
+  assert.equal(timeToMinutes("24:00"), null);
+  assert.equal(timeToMinutes("12:60"), null);
+  assert.equal(timeToMinutes("noon"), null);
+  assert.equal(timeToMinutes(""), null);
+});
+
+// ── company blocklist: normalize on write (PRD §6) ───────────────────────────
+
+test("makeBlockedCompany stores display and normalized, folding case once on write", () => {
+  const b = makeBlockedCompany("  Recruiter Co  ");
+  assert.equal(b.display, "Recruiter Co");
+  assert.equal(b.normalized, "recruiter co");
+});
+
+// ── watch input (Searches — PRD §3) ──────────────────────────────────────────
+
+test("parseWatchInput accepts a nickname + URL and trims them", () => {
+  const r = parseWatchInput("  Japan  ", "  https://www.linkedin.com/jobs/search/?x=1  ");
+  assert.ok(r.ok);
+  assert.deepEqual(r.value, {
+    name: "Japan",
+    url: "https://www.linkedin.com/jobs/search/?x=1",
+  });
+});
+
+test("parseWatchInput rejects an empty nickname and a bad URL, per field", () => {
+  const r = parseWatchInput("", "not-a-url");
+  assert.ok(!r.ok);
+  assert.ok(r.errors.name);
+  assert.ok(r.errors.url);
+});
+
+// ── whole-form parse ─────────────────────────────────────────────────────────
+
+test("parseSettingsForm merges a valid form onto the base settings", () => {
+  const r = parseSettingsForm(validForm(), DEFAULT_SETTINGS);
+  assert.ok(r.ok);
+  assert.equal(r.settings.intervalMinutes, 15);
+  assert.equal(r.settings.jitterMinutes, 1);
+  assert.equal(r.settings.pagesPerScan, 1);
+  assert.equal(r.settings.catchUpPages, 4);
+  assert.deepEqual(r.settings.quietHours, {
+    enabled: true,
+    startMinute: 1380,
+    endMinute: 420,
+  });
+  assert.equal(r.settings.retention.seenHardCap, 50000);
+  assert.equal(r.settings.hideReposted, true);
+  assert.deepEqual(r.settings.blockedCompanies, [{ display: "Acme", normalized: "acme" }]);
+});
+
+test("parseSettingsForm carries through fields the page does not edit (push, pacing)", () => {
+  const base: Settings = {
+    ...DEFAULT_SETTINGS,
+    push: { enabled: true, botToken: "secret", chatId: "42" },
+  };
+  const r = parseSettingsForm(validForm(), base);
+  assert.ok(r.ok);
+  // The Telegram section is #22 — a save here must not wipe it.
+  assert.deepEqual(r.settings.push, { enabled: true, botToken: "secret", chatId: "42" });
+  assert.deepEqual(r.settings.pacing, base.pacing);
+  assert.deepEqual(r.settings.backoff, base.backoff);
+});
+
+test("parseSettingsForm rejects a zero interval and writes nothing", () => {
+  const r = parseSettingsForm(validForm({ intervalMinutes: "0" }), DEFAULT_SETTINGS);
+  assert.ok(!r.ok);
+  assert.ok(r.errors.intervalMinutes);
+});
+
+test("parseSettingsForm rejects non-numeric and fractional scanning values", () => {
+  const bad = parseSettingsForm(validForm({ pagesPerScan: "abc" }), DEFAULT_SETTINGS);
+  assert.ok(!bad.ok);
+  assert.ok(bad.errors.pagesPerScan);
+
+  const frac = parseSettingsForm(validForm({ catchUpPages: "2.5" }), DEFAULT_SETTINGS);
+  assert.ok(!frac.ok);
+  assert.ok(frac.errors.catchUpPages);
+});
+
+test("parseSettingsForm allows a zero jitter but not a zero retention", () => {
+  const zeroJitter = parseSettingsForm(validForm({ jitterMinutes: "0" }), DEFAULT_SETTINGS);
+  assert.ok(zeroJitter.ok);
+  assert.equal(zeroJitter.settings.jitterMinutes, 0);
+
+  const zeroSeen = parseSettingsForm(validForm({ seenDays: "0" }), DEFAULT_SETTINGS);
+  assert.ok(!zeroSeen.ok);
+  assert.ok(zeroSeen.errors.seenDays);
+});
+
+test("parseSettingsForm rejects a malformed quiet-hours time", () => {
+  const r = parseSettingsForm(validForm({ quietEnd: "7am" }), DEFAULT_SETTINGS);
+  assert.ok(!r.ok);
+  assert.ok(r.errors.quietEnd);
+});
+
+test("parseSettingsForm reports every bad field at once, not just the first", () => {
+  const r = parseSettingsForm(
+    validForm({ intervalMinutes: "0", seenHardCap: "-5", quietStart: "bad" }),
+    DEFAULT_SETTINGS,
+  );
+  assert.ok(!r.ok);
+  assert.ok(r.errors.intervalMinutes);
+  assert.ok(r.errors.seenHardCap);
+  assert.ok(r.errors.quietStart);
+});
+
+// ── round-trip ───────────────────────────────────────────────────────────────
+
+test("settingsToForm then parseSettingsForm reproduces the settings", () => {
+  const form = settingsToForm(DEFAULT_SETTINGS);
+  const r = parseSettingsForm(form, DEFAULT_SETTINGS);
+  assert.ok(r.ok);
+  assert.deepEqual(r.settings, DEFAULT_SETTINGS);
+});
