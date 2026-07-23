@@ -1,16 +1,42 @@
-// Content script — CLASSIC (non-module) script.
+// Content script — CLASSIC (non-module) script, built as a self-contained IIFE
+// (see vite.content.config.ts): the imports below are bundled inline, leaving no
+// import/export in the output.
 //
-// MV3 content scripts declared in the manifest cannot be ES modules, so this
-// entry is built as a self-contained IIFE (see vite.content.config.ts): the
-// import below is bundled inline, leaving no import/export in the output.
-//
-// The wrapper does only `parseJobCards(document)` and hands back the result — no
-// logic, nothing to unit-test (§14). All of the parsing lives in the pure,
-// tested parseJobCards (src/parse.ts). Later scan tickets wire the result back to
-// the worker; for now it is logged so the built script can be run from DevTools
-// on a logged-in LinkedIn search tab and print the parsed jobs (issue #13).
+// It does two things and holds no decisions of its own (PRD §14 — the parsing,
+// polling and job shapes all live in pure, tested modules): on a `LJW_SCAN`
+// message from the worker it scroll-settles the lazy results list
+// (`pollUntilSettled`), parses it (`parseJobCards`), and replies with the jobs.
+// That is the read half of the invisible-tab scan (issue #15 / #5). Everything
+// here is a thin wrapper over browser APIs, so it is not unit-tested.
 
 import { parseJobCards } from "./parse.ts";
+import { pollUntilSettled } from "./scan-probe.ts";
+import type { ScanRequest, ScanResponse } from "./scan.ts";
 
-const jobs = parseJobCards(document);
-console.log(`[LJW] parsed ${jobs.length} job(s)`, jobs);
+/** The results-list card the parser keys on (kept in sync with parse.ts). */
+const CARD_SELECTOR = "div.job-card-container";
+
+/** Poll cadence for settling the lazy list — issue #5's 60–90s cycle budget. */
+const POLL_OPTS = { intervalMs: 800, timeoutMs: 20_000, stableSamples: 3 };
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** One settle sample: scroll the results column so LinkedIn materialises the next
+ *  occludable batch (issue #2, finding 4 — the list is lazy), then count the
+ *  distinct cards currently in the DOM. */
+async function sample(): Promise<number> {
+  window.scrollTo(0, document.body.scrollHeight);
+  document.querySelector(CARD_SELECTOR)?.scrollIntoView({ block: "end" });
+  return document.querySelectorAll(CARD_SELECTOR).length;
+}
+
+async function readPage(): Promise<ScanResponse> {
+  const settle = await pollUntilSettled({ sample, sleep, now: () => Date.now() }, POLL_OPTS);
+  return { jobs: parseJobCards(document), settled: settle.settled };
+}
+
+chrome.runtime.onMessage.addListener((message: ScanRequest, _sender, sendResponse) => {
+  if (message?.type !== "LJW_SCAN") return undefined;
+  void readPage().then(sendResponse);
+  return true; // keep the message channel open for the async reply
+});
