@@ -146,7 +146,8 @@ export function nextScanDelayMs(params: NextScanParams, rand: Rand = Math.random
   const effective = backoffIntervalMinutes(baseIntervalMinutes, consecutiveEmptyScans, backoff);
   const delayMs = jitteredDelayMs(effective, jitterMinutes, rand);
   const fireAt = new Date(now.getTime() + delayMs);
-  if (quietHours.enabled && isWithinQuietHours(minutesOfDay(fireAt), quietHours)) {
+  // `isWithinQuietHours` already returns false when the window is disabled.
+  if (isWithinQuietHours(minutesOfDay(fireAt), quietHours)) {
     return { delayMs: msUntilQuietEnds(now, quietHours, jitterMinutes, rand), willResumeFromQuiet: true };
   }
   return { delayMs, willResumeFromQuiet: false };
