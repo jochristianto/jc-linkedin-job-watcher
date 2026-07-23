@@ -20,6 +20,7 @@ import {
   parseSettingsForm,
   parseWatchInput,
   makeBlockedCompany,
+  applyPushPrefill,
   type OptionsFormValues,
 } from "./options-form.ts";
 
@@ -42,7 +43,12 @@ async function mount(root: HTMLElement): Promise<void> {
   // `base` holds the fields the page doesn't edit (push/pacing/backoff/…) so a
   // save carries them through untouched; `form` is the live editable state.
   let base: Settings = await storage.get("settings");
-  let form: OptionsFormValues = settingsToForm(base);
+  const stored: OptionsFormValues = settingsToForm(base);
+  // A `npm run build:dev` bundle carries the .env credentials; a normal build
+  // injects null and this is a no-op. Only blank fields are filled, so a token
+  // already saved always wins, and nothing is persisted until the user saves.
+  let form: OptionsFormValues = applyPushPrefill(stored, __LJW_PREFILL_PUSH__);
+  let prefilled = form !== stored;
   let editingWatchId: string | null = null;
   // The §16.7 soft warning, read once at load: shown in the Telegram card when push
   // has failed the threshold times in a row. A good Send-test resets it in storage;
@@ -53,7 +59,7 @@ async function mount(root: HTMLElement): Promise<void> {
   paint();
 
   function paint(): void {
-    root.innerHTML = shell(form, pushWarn);
+    root.innerHTML = shell(form, pushWarn, prefilled);
     renderWatches();
     renderTags("company");
     renderTags("keyword");
@@ -284,11 +290,17 @@ async function mount(root: HTMLElement): Promise<void> {
 
     await storage.set("settings", result.settings);
     base = result.settings; // future saves carry through from what we just wrote
+    // Any .env prefill is now real stored state, so the "not saved yet" notice
+    // has served its purpose and should not reappear on the next paint.
+    prefilled = false;
     setStatus("Saved.", "ok");
   }
 
   function onReset(): void {
+    // Reset means "back to what is stored" — so it drops an unsaved .env prefill
+    // along with every other unsaved edit, and the notice goes with it.
     form = settingsToForm(base);
+    prefilled = false;
     editingWatchId = null;
     paint();
     setStatus("Reverted to the last saved settings.", "ok");
@@ -326,7 +338,7 @@ function numField(id: string, label: string, value: string, min: number): string
     </div>`;
 }
 
-function shell(f: OptionsFormValues, pushWarn: boolean): string {
+function shell(f: OptionsFormValues, pushWarn: boolean, prefilled: boolean): string {
   return `
     <div class="opt-wrap">
       <h1>LinkedIn Job Watcher — Settings</h1>
@@ -412,6 +424,7 @@ function shell(f: OptionsFormValues, pushWarn: boolean): string {
           to confirm the credentials before trusting it.
         </p>
         ${pushWarn ? `<div class="banner banner-warn">${esc(PUSH_FAILING_MESSAGE)}</div>` : ""}
+        ${prefilled ? `<div class="banner banner-warn">Filled in from your <code>.env</code> by <code>npm run build:dev</code> — press <b>Save settings</b> to keep it.</div>` : ""}
         <label class="switch" style="display: block; margin: 8px 0">
           <input id="push-enabled" type="checkbox" ${f.pushEnabled ? "checked" : ""} />
           Send new jobs to Telegram

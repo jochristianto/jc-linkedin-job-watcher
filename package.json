@@ -5,8 +5,9 @@
     "sandcastle:preflight": "npx tsx .sandcastle/preflight.mts",
     "typecheck": "tsc --noEmit",
     "build": "vite build && vite build --config vite.content.config.ts",
+    "build:dev": "vite build --mode prefill && vite build --config vite.content.config.ts",
     "test": "node --test --experimental-strip-types",
-    "send-test-message": "node --experimental-strip-types scripts/send-test-message.ts"
+    "send-test-message": "node --env-file-if-exists=.env --experimental-strip-types scripts/send-test-message.ts"
   },
   "devDependencies": {
     "@ai-hero/sandcastle": "^0.12.0",

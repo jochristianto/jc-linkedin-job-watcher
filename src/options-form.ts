@@ -204,3 +204,40 @@ export function settingsToForm(s: Settings): OptionsFormValues {
     pushChatId: s.push.chatId,
   };
 }
+
+// ── Build-time .env prefill (the `npm run build:dev` path) ───────────────────
+
+/**
+ * The Telegram credentials a *development* build may have baked in from `.env`,
+ * or `null` — which is what the ordinary `npm run build` always injects, so the
+ * shippable bundle never carries a secret (see README, "Testing the push from
+ * the terminal"). The extension cannot read a file at runtime; a build-time
+ * constant is the only route from `.env` into the Options page.
+ */
+export type PushPrefill = { botToken: string; chatId: string } | null;
+
+/**
+ * Seed the two Telegram fields from a `build:dev` prefill, filling ONLY what the
+ * user has left blank. A stored credential always wins, so rebuilding can never
+ * clobber a token typed by hand — the prefill is a *default*, exactly like
+ * DEFAULT_SETTINGS, not an override.
+ *
+ * Nothing is written to storage by this: it populates the form, and the user
+ * still presses Save. That keeps a build-time value from silently becoming
+ * saved state, and leaves Reset meaning "back to what is stored".
+ *
+ * Returns the same reference when there is nothing to fill, so the caller can
+ * cheaply tell whether a prefill actually applied.
+ */
+export function applyPushPrefill(
+  form: OptionsFormValues,
+  prefill: PushPrefill,
+): OptionsFormValues {
+  if (!prefill) return form;
+  const pushBotToken = form.pushBotToken || prefill.botToken;
+  const pushChatId = form.pushChatId || prefill.chatId;
+  if (pushBotToken === form.pushBotToken && pushChatId === form.pushChatId) {
+    return form;
+  }
+  return { ...form, pushBotToken, pushChatId };
+}

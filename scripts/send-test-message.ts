@@ -8,11 +8,18 @@
 // hand-assembling curl, and the message they check is byte-for-byte what the
 // extension will send.
 //
-// Credentials come from the environment — never hardcode, never commit them:
+// Credentials come from the environment — never hardcode, never commit them.
+// Either copy `.env.example` to `.env` and fill it in (the npm script loads it
+// via --env-file-if-exists, so it is optional and its absence is not an error),
+// or pass them inline:
 //
 //   TELEGRAM_BOT_TOKEN=123456:ABC... \
 //   TELEGRAM_CHAT_ID=987654321 \
 //   npm run send-test-message
+//
+// This is the ONLY place in the project that reads env vars. The extension has
+// no build-time config: a bundled secret would sit in dist/ in plain text, so
+// the token it uses at runtime is entered in Options and kept in chrome.storage.
 //
 // Then check the message on your PHONE (not just desktop Telegram): confirm the
 // link is tappable and the layout reads well.
