@@ -135,8 +135,7 @@ async function runCycle(settings: Settings, pages: number): Promise<void> {
   try {
     const watches = enabledWatches(settings.watches);
     const found: Job[] = [];
-    for (let w = 0; w < watches.length; w++) {
-      const watch = watches[w]!;
+    for (const [w, watch] of watches.entries()) {
       for (let page = 1; page <= pages; page++) {
         const parsed = await scanPage(scanPageUrl(watch.url, page));
         found.push(...stampJobs(parsed, watch.id, Date.now()));
