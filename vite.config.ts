@@ -1,5 +1,5 @@
 import { defineConfig } from "vite";
-import { copyFileSync } from "node:fs";
+import { copyFileSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 
 // Main build (ticket 01). Emits the background service worker as an ES module and
@@ -44,6 +44,15 @@ export default defineConfig({
           resolve(root, "manifest.json"),
           resolve(root, "dist/manifest.json"),
         );
+        // The manifest, action and desktop notification all reference these at a
+        // fixed `icons/` path, so ship them verbatim (PRD §3/§9 notification icon).
+        mkdirSync(resolve(root, "dist/icons"), { recursive: true });
+        for (const size of [16, 48, 128]) {
+          copyFileSync(
+            resolve(root, `icons/icon-${size}.png`),
+            resolve(root, `dist/icons/icon-${size}.png`),
+          );
+        }
       },
     },
   ],

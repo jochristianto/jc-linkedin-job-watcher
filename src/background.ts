@@ -36,6 +36,7 @@ import {
   type ScanRequest,
   type ScanResponse,
 } from "./scan.ts";
+import { buildScanNotification, jobsTabToFocus, SCAN_NOTIFICATION_ID } from "./notify.ts";
 import type { Job, Settings } from "./types.ts";
 
 /** The single re-armed one-shot alarm (PRD §15 decision 3). One name, re-created
@@ -57,6 +58,41 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 async function updateBadge(): Promise<void> {
   const jobs = await get("jobs");
   await chrome.action.setBadgeText({ text: badgeText(unopenedCount(jobs)) });
+}
+
+// ── Notification ───────────────────────────────────────────────────────────────
+
+/** Fire the ONE merged desktop notification for a cycle's new jobs (PRD §3/§9).
+ *  `buildScanNotification` returns null for an empty batch, so a cycle that found
+ *  nothing fires nothing; a non-empty batch is already deduped across every watch,
+ *  so this is one notification per cycle, never one per watch. The fixed
+ *  `SCAN_NOTIFICATION_ID` means a fresh cycle's notification replaces the prior
+ *  one rather than stacking, and lets the click handler recognise ours. */
+async function fireNewJobsNotification(newJobs: Job[]): Promise<void> {
+  const spec = buildScanNotification(newJobs);
+  if (!spec) return;
+  await chrome.notifications.create(SCAN_NOTIFICATION_ID, {
+    type: "basic",
+    iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
+    title: spec.title,
+    message: spec.message,
+  });
+}
+
+/** Land the user in our own list (PRD §3/§9): focus an already-open jobs.html tab
+ *  (raising its window) rather than duplicating it, else open a new one. Marks
+ *  NOTHING as opened — it only gets you to the list. */
+async function openJobsList(): Promise<void> {
+  const url = chrome.runtime.getURL("jobs.html");
+  const existing = jobsTabToFocus(await chrome.tabs.query({ url }));
+  if (existing && existing.id !== undefined) {
+    await chrome.tabs.update(existing.id, { active: true });
+    if (existing.windowId !== undefined) {
+      await chrome.windows.update(existing.windowId, { focused: true });
+    }
+  } else {
+    await chrome.tabs.create({ url });
+  }
 }
 
 // ── Talking to the invisible tab ───────────────────────────────────────────────
@@ -152,6 +188,9 @@ async function runCycle(settings: Settings, pages: number): Promise<void> {
       await set("jobs", mergeJobs(await get("jobs"), newJobs));
     }
     await updateBadge();
+    // One merged notification for the whole cycle's new jobs (PRD §3/§9). Fired
+    // after the badge so the two agree; a zero-new-jobs cycle fires nothing.
+    await fireNewJobsNotification(newJobs);
   } finally {
     clearInterval(keepalive);
   }
@@ -212,6 +251,18 @@ async function onAlarm(): Promise<void> {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM_NAME) void onAlarm();
+});
+
+/** Notification click (PRD §3/§9): open our own list, never LinkedIn, and clear
+ *  the notification. Marks nothing as opened. `openPopup()` can't be triggered
+ *  from a click, so this opens the full jobs.html tab (the list component is
+ *  shared with the popup, so it costs nothing). */
+chrome.notifications.onClicked.addListener((id) => {
+  if (id !== SCAN_NOTIFICATION_ID) return;
+  void (async () => {
+    await openJobsList();
+    await chrome.notifications.clear(id);
+  })();
 });
 
 /** Fresh install: arm the first alarm so the loop starts. */
