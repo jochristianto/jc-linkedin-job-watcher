@@ -74,7 +74,7 @@ async function mount(root: HTMLElement): Promise<void> {
   }
 
   function renderTags(kind: "company" | "keyword"): void {
-    const host = byId(kind === "company" ? "company-tags" : "keyword-tags");
+    const host = byId(`${kind}-tags`);
     const labels =
       kind === "company"
         ? form.blockedCompanies.map((c) => c.display)
