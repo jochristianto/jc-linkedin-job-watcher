@@ -134,7 +134,7 @@ export function renderPage(ctx: ViewContext): string {
   const badge = unopenedCount(ctx.jobs);
 
   // The chip filters the *list*: an active watch drops jobs from other watches.
-  const activeWatchId = ctx.activeWatchId ?? "";
+  const activeWatchId = ctx.activeWatchId || null;
   const listJobs = activeWatchId
     ? ctx.jobs.filter((j) => j.watchId === activeWatchId)
     : ctx.jobs;
@@ -143,7 +143,7 @@ export function renderPage(ctx: ViewContext): string {
 
   const toolbar = renderToolbar(
     ctx.watches.map((w) => ({ id: w.id, name: w.name })),
-    activeWatchId || null,
+    activeWatchId,
     ctx.mode,
   );
 
