@@ -137,6 +137,8 @@ type Settings = {
   backoff: BackoffConfig;
   retention: RetentionConfig;
   push: PushConfig;
+  staleLockMs: number; // default 300_000 (5 min) — lock older than this is stale (§16)
+  pushFailWarnThreshold: number; // default 3 — consecutive push failures before warning (§16)
 };
 
 type QuietHours = {
@@ -172,6 +174,16 @@ type ScanState = {
   isScanning: boolean;
   startedAt: number | null;
 };
+
+// Health / failure state — persisted so the popup, badge and notifications all
+// read one source of truth (§16). Produced by the pure reducer in src/health.ts.
+type HealthState = {
+  mode: "active" | "paused" | "halted"; // paused = logged out, halted = challenge
+  severity: "ok" | "warn" | "error"; // badge colour: default / amber / red
+  consecutiveEmptyScans: number; // shared with the §15 back-off counter
+  consecutivePushFailures: number; // §16.7 — silent-per-call, warns after a run
+  message: string | null; // popup banner text, null when healthy
+};
 ```
 
 **Dedupe on the job ID alone**, not on `watchId + id`. A remote role can appear in both the Indonesia and Japan searches — keying on the pair would notify you twice for the same posting.
@@ -197,6 +209,7 @@ Separate top-level keys, so a write to one doesn't rewrite everything else:
 'seen'        → Record<string, number>   // jobId → firstSeenAt (ms)
 'jobs'        → Record<string, Job>      // jobId → full record
 'scanState'   → ScanState
+'health'      → HealthState              // last failure/health snapshot (§16)
 ```
 
 `seen` is deliberately separate from `jobs`. During a scan the only question is "have I seen this ID before" — loading full job objects to answer that is wasteful, and it's the operation running every 5 minutes.
@@ -565,6 +578,7 @@ Every piece of **pure logic** — a function of its inputs, no `chrome.*`, no DO
 | Dedupe against the seen set (dedupe on job ID alone, §5) | 02 | Same shape as `filter.ts` |
 | Garbage collection — two lifetimes + hard cap (§7) | 08 | §7 is already pure; lift it verbatim into a `collectGarbage(state, now)` that takes `{seen, jobs, retention, now}` and returns `{seen, jobs}` |
 | Scheduling — jitter, quiet hours, in-cycle pauses, back-off (§15) | 03/10 | **Reference example** — `src/schedule.ts` + `src/schedule.test.ts` |
+| Failure diagnosis & surfacing — page classification, health reducer, stale-lock, push-fail, partial-parse (§16) | 08 | **Reference example** — `src/health.ts` + `src/health.test.ts` |
 | Card parser — DOM → `Job` | 01 | Fixture-driven, see below |
 
 That is the line. Anything that is *only* an orchestration of `chrome.*` calls (opening tabs, firing alarms, setting the badge) is **not** unit-tested — see "the untestable remainder".
@@ -646,3 +660,42 @@ Seven decisions, seven answers:
 | `backoff.maxIntervalMinutes` | 60 | Ceiling for the doubling interval (decision 6) |
 
 **Resulting volume.** One page every 5 minutes is 288 loads/day/watch clock-round; the default 8-hour quiet window drops that to ~192 — roughly a third of PRD §12's original 576, before the user touches a single setting. Two watches sit near 384/day rather than 1,100+.
+
+---
+
+## 16. What happens when it breaks, and how do you find out?
+
+Resolves issue #9 / ticket 08. The PRD describes the happy path in detail and §12 says "log loudly," but for a tool that runs unattended every few minutes, **silence is indistinguishable from "no new jobs."** The failure mode this section exists to prevent is the extension quietly stopping for weeks. Each failure below gets a decided *behaviour* and a decided *signal*. The pure logic lives in `src/health.ts` (a §14 reference example); `background.ts` and the content script are the thin wrappers that feed it signals and act on the returned `HealthState`.
+
+The unifying idea: the content script never reports a bare "0 cards." It reports a **classified page outcome** (`classifyPage`), and the cycle's outcomes collapse to the single worst one (`aggregateOutcome`) which a pure reducer (`reduceScanHealth`) folds into a persisted `HealthState`. One source of truth drives the badge, the popup banner, and notifications.
+
+### The eight failures
+
+1. **Logged out.** The content script checks where the tab actually landed. LinkedIn redirects a signed-out session to `/authwall` or `/login`, so a final URL matching those → outcome `logged-out` (not "0 cards"). **Behaviour:** scanning **pauses** — hitting a login wall every 5 minutes is pointless and a poor signal. It resumes automatically on the next scan that comes back `ok` (i.e. once the user signs in). **Signal:** red badge, popup banner "Signed out of LinkedIn — scanning paused," and **one** desktop notification on the transition in.
+
+2. **A challenge or captcha.** A final URL under `/checkpoint/` or containing `/challenge` → outcome `challenge`, which **outranks every other outcome** in the aggregate. This is the signal that matters most for account safety. **Behaviour:** scanning **halts entirely** — not backed-off, *stopped* — and stays halted until the user clears the challenge on LinkedIn and manually resumes. Continuing to load tabs through a verification wall is exactly what escalates to a restriction (§12). **Signal:** red badge, banner "LinkedIn asked for verification — scanning stopped," and one hard desktop notification (once, on transition).
+
+3. **Zero cards parsed — "no results" vs "LinkedIn changed the page."** Told apart by **whether the results-list container is present at all**, not by the card count. Container present, zero cards → `empty` (a genuine "no results for this search," benign). Container **absent** → `structure-changed` (the selectors are dead — LinkedIn moved the DOM). **Behaviour:** `structure-changed` warns **immediately** (a missing list is unambiguous); `empty` only warns after `emptyScansBeforeBackoff` (default 3) consecutive empties, since one quiet search is normal. Both feed the §15 back-off counter, so a broken parser also lengthens the interval instead of hammering. **Signal:** amber badge + banner "Reading may be broken." No desktop notification — soft failures use the passive channels to avoid notification fatigue.
+
+4. **Partial parse.** Each field fails independently (§12). A job with a valid `id`, `title` and `url` is **saved and shown** even if `company`/`location` came back blank — the list view already drops blank meta parts (`renderJobRow`, mockups/render.ts). Only the three load-bearing fields are required (`isSavableJob`): id for dedupe, url to open, title to show; a card missing any of them is dropped. A field blank on **every** card in a scan (`fieldMissingAcrossAll`) is a soft selector-drift signal worth recording — a per-job blank is not.
+
+5. **Tab fails to load** (timeout, network down, 5xx). Outcome `load-failed`. **Behaviour:** **retry that one page once** (blips are transient), then **skip** it and continue the cycle — a transient failure on one watch must not abort the others. Crucially, `load-failed` **does not** count toward the empty-scan back-off: it's an infra failure, not a parser signal, so a flaky network doesn't masquerade as "LinkedIn changed the page." **Signal:** none in v1 beyond a logged event (repeated total-network-outage warning is deferred — if LinkedIn is fully unreachable the user has bigger cues).
+
+6. **Stuck scan lock.** PRD §9 clears a stale lock on startup, but the MV3 worker can be torn down mid-cycle on *any* tick (§12), leaving `isScanning` stuck true and every future alarm skipping forever. **Decision: the stale-lock check runs on every alarm tick**, not just startup (`isLockStale`). **Threshold: 5 minutes** (`staleLockMs`, default 300 000) — comfortably above the 60–90s a real cycle takes (§9), and `isScanning` with a null `startedAt` is treated as stale (corrupt). A stale lock is cleared and the scan proceeds.
+
+7. **Push failure.** §8 swallows every push failure so it can never break the scan — that stays. But a wrong chat id fails silently for days (§8). **Decision: track *consecutive* push failures** (`reducePushHealth`); after `pushFailWarnThreshold` (default 3) in a row with push enabled, surface a **soft** warning in the popup/options ("Telegram push has been failing — run Send test message"). One good send resets it. Never a desktop notification, never a scan break. The §8 "Send test message" button stays the primary check; this is the passive backstop given #6's lesson that silent-forever is the real danger.
+
+8. **Where failures are recorded and surfaced.** One persisted `HealthState` (`'health'` key) is the single source of truth, so every surface agrees:
+
+| Mechanism | Drives | v1? |
+| --- | --- | --- |
+| **Badge colour** | `severity`: default (ok) / amber (warn) / red (error) | **v1** |
+| **Popup banner** | `message` — one line describing the problem and the fix | **v1** |
+| **Desktop notification** | **Hard** failures only (`challenge`, `logged-out`), once on transition | **v1** |
+| **Options error log** | A rolling list of the last N failure events with timestamps | **Deferred** — badge + banner + notification cover "find out"; a full log UI is post-v1 |
+
+The split: hard failures (challenge, logged out) get an active push — a desktop notification — because they stop scanning and need the user now. Soft failures (parser drift, repeated empties, push failing) use only the passive badge + banner, so the tool doesn't cry wolf every quiet afternoon. The options error log is the one deferred piece; the three v1 channels already answer "how do you find out it broke."
+
+### Structural consequence
+
+Per §14, the decision logic is pure and tested (`src/health.ts` + `src/health.test.ts`): `classifyPage`, `aggregateOutcome`, `reduceScanHealth`, `isSavableJob`, `fieldMissingAcrossAll`, `reducePushHealth`, `isLockStale`. The content script reads the live DOM/URL into a `PageSignals`; `background.ts` persists the `HealthState`, sets the badge, and fires notifications — none of that is unit-tested, all of the decisions are.
