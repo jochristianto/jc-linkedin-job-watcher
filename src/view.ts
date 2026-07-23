@@ -90,7 +90,7 @@ function pickEmptyKind(ctx: ViewContext, total: number): EmptyKind {
  */
 export function renderPage(ctx: ViewContext): string {
   const views = toJobViews(ctx.jobs, ctx.watches);
-  const badge = views.filter((v) => !v.opened).length;
+  const badge = unopenedCount(ctx.jobs);
   const visible = ctx.mode === "new" ? views.filter((v) => !v.opened) : views;
 
   const body = visible.length
