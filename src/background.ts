@@ -122,10 +122,11 @@ async function runCycle(settings: Settings, pages: number): Promise<void> {
     for (const watch of enabledWatches(settings.watches)) {
       for (let page = 1; page <= pages; page++) {
         const parsed = await scanPage(scanPageUrl(watch.url, page));
-        const stamped = stampJobs(parsed, watch.id, Date.now());
+        const scannedAt = Date.now();
+        const stamped = stampJobs(parsed, watch.id, scannedAt);
 
         const seenBefore = await get("seen");
-        const { newJobs, seen } = dedupe(stamped, seenBefore, rules, Date.now());
+        const { newJobs, seen } = dedupe(stamped, seenBefore, rules, scannedAt);
         await set("seen", seen);
         if (newJobs.length > 0) {
           await set("jobs", mergeJobs(await get("jobs"), newJobs));

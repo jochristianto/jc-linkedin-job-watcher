@@ -9,12 +9,9 @@
 // That is the read half of the invisible-tab scan (issue #15 / #5). Everything
 // here is a thin wrapper over browser APIs, so it is not unit-tested.
 
-import { parseJobCards } from "./parse.ts";
+import { CARD_SELECTOR, parseJobCards } from "./parse.ts";
 import { pollUntilSettled } from "./scan-probe.ts";
 import type { ScanRequest, ScanResponse } from "./scan.ts";
-
-/** The results-list card the parser keys on (kept in sync with parse.ts). */
-const CARD_SELECTOR = "div.job-card-container";
 
 /** Poll cadence for settling the lazy list — issue #5's 60–90s cycle budget. */
 const POLL_OPTS = { intervalMs: 800, timeoutMs: 20_000, stableSamples: 3 };

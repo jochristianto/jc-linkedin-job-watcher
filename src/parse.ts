@@ -15,8 +15,10 @@ import { jobIdOf, type CardLike } from "./scan-probe.ts";
 import { isSavableJob } from "./health.ts";
 import type { Job } from "./types.ts";
 
-/** The authenticated search page wraps each posting in a job-card container. */
-const CARD_SELECTOR = "div.job-card-container";
+/** The authenticated search page wraps each posting in a job-card container.
+ *  Exported so the content script counts and settles the same cards this parses,
+ *  single-sourcing the selector instead of keeping a hand-synced copy. */
+export const CARD_SELECTOR = "div.job-card-container";
 
 /** The nested anchor that carries the canonical `/jobs/view/<id>/` posting link —
  *  the source both the id fallback and the url read from, so it lives once here. */
