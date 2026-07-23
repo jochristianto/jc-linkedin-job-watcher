@@ -90,7 +90,7 @@ manifest.json (MV3)
     └── interval + page depth settings
 ```
 
-**Stack:** TypeScript + Vite (via `@crxjs/vite-plugin`), plus `chrome-types` for the Chrome API typings.
+**Stack:** TypeScript + **plain Vite, no extension plugin** (`@crxjs/vite-plugin` is maintained but its content-script handling — this project's most load-bearing surface — is its weakest; issue #4 / ticket 03). Chrome API typings come from **`@types/chrome`**, not `chrome-types` (the latter types `storage.get` as `any`; same ticket). Pure logic is unit-tested with `node --test --experimental-strip-types`, which needs no bundler (§14). Permissions (§10) stand unchanged.
 
 ---
 
