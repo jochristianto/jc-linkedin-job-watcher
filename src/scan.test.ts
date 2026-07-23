@@ -119,10 +119,9 @@ test("badgeText is empty for zero, the number below 100, and 99+ above", () => {
 });
 
 test("badgeColor maps severity to default / amber / red (§16.8)", () => {
-  assert.equal(badgeColor("ok"), badgeColor("ok")); // stable
-  assert.notEqual(badgeColor("warn"), badgeColor("ok"));
-  assert.notEqual(badgeColor("error"), badgeColor("warn"));
-  assert.notEqual(badgeColor("error"), badgeColor("ok"));
+  // The contract is that the three severities read as three distinct colours.
+  const colors = new Set([badgeColor("ok"), badgeColor("warn"), badgeColor("error")]);
+  assert.equal(colors.size, 3);
 });
 
 test("badgeFor: an error shows a red '!' even with zero unopened jobs (§16.8)", () => {
