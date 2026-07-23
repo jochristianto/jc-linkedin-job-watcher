@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Job Watcher — Jobs</title>
+    <link rel="stylesheet" href="tokens.css" />
+  </head>
+  <body>
+    <!-- The SAME list view, mounted as the full TAB (jobs.html, opened from a
+         notification click). Same markup as popup.html — it diverges only via
+         .view-tab: wider, roomier, titles wrap instead of truncating, and it
+         defaults to "All" rather than "New". -->
+    <div class="view-tab">
+      <header class="hdr">
+        <span class="hdr-title">LinkedIn Job Watcher</span>
+        <span class="badge">4</span>
+        <button class="hdr-btn" title="Mark all as read">Mark all read</button>
+        <button class="hdr-btn" title="Options">⚙ Options</button>
+      </header>
+
+      <div class="toolbar">
+        <div class="chips">
+          <button class="chip" aria-pressed="true">All watches</button>
+          <button class="chip" aria-pressed="false">Indonesia</button>
+          <button class="chip" aria-pressed="false">Japan</button>
+        </div>
+        <div class="toggle">
+          <button aria-pressed="false">New</button>
+          <button aria-pressed="true">All</button>
+        </div>
+      </div>
+
+      <!-- Non-blocking scan status: the list stays visible underneath. -->
+      <div class="banner">🔄 Scanning Japan… last run 3 min ago.</div>
+
+      <div class="list">
+        <a class="job" href="#" data-job-id="3901" data-read="false">
+          <span class="job-dot" aria-hidden="true"></span>
+          <span class="job-body">
+            <span class="job-title">Senior Software Engineer</span>
+            <span class="job-meta">Acme Corp · Jakarta, Indonesia</span>
+            <span class="job-foot">2 hours ago · Indonesia</span>
+          </span>
+        </a>
+
+        <a class="job" href="#" data-job-id="3902" data-read="false">
+          <span class="job-dot" aria-hidden="true"></span>
+          <span class="job-body">
+            <span class="job-title">Backend Engineer (Go)</span>
+            <span class="job-meta">PT Data Nusantara · Remote</span>
+            <span class="job-foot">40 minutes ago · Indonesia</span>
+          </span>
+        </a>
+
+        <!-- Read jobs stay on screen in "All" mode: dimmed, no dot, un-bold. -->
+        <a class="job" href="#" data-job-id="3810" data-read="true">
+          <span class="job-dot" aria-hidden="true"></span>
+          <span class="job-body">
+            <span class="job-title">Engineering Manager, Growth</span>
+            <span class="job-meta">Rakuten · Tokyo, Japan</span>
+            <span class="job-foot">Yesterday · Japan</span>
+          </span>
+        </a>
+
+        <a class="job" href="#" data-job-id="3788" data-read="true">
+          <span class="job-dot" aria-hidden="true"></span>
+          <span class="job-body">
+            <span class="job-title">Full-Stack Developer</span>
+            <span class="job-meta">Mercari · Remote (Japan)</span>
+            <span class="job-foot">2 days ago · Japan</span>
+          </span>
+        </a>
+      </div>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Job Watcher — Popup</title>
+    <link rel="stylesheet" href="tokens.css" />
+    <style>
+      /* Only in the mockup: give the disposable popup a frame so you can see
+         its ~380px width against the page. The real popup fills the toolbar
+         bubble and has no such border. */
+      body {
+        padding: 24px;
+        background: #d9d7d2;
+      }
+      @media (prefers-color-scheme: dark) {
+        body {
+          background: #0f1215;
+        }
+      }
+      .view-popup {
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- The list view, mounted as the POPUP: 380px, disposable, defaults to New.
+         Markup below is exactly what mockups/render.ts emits. -->
+    <div class="view-popup">
+      <header class="hdr">
+        <span class="hdr-title">New jobs</span>
+        <span class="badge">4</span>
+        <button class="hdr-btn" title="Mark all as read">Mark all read</button>
+        <button class="hdr-btn" title="Options">⚙</button>
+      </header>
+
+      <div class="toolbar">
+        <div class="chips">
+          <button class="chip" aria-pressed="true">All watches</button>
+          <button class="chip" aria-pressed="false">Indonesia</button>
+          <button class="chip" aria-pressed="false">Japan</button>
+        </div>
+        <div class="toggle">
+          <button aria-pressed="true">New</button>
+          <button aria-pressed="false">All</button>
+        </div>
+      </div>
+
+      <div class="list">
+        <!-- Unread: filled dot, bold title -->
+        <a
+          class="job"
+          href="#"
+          data-job-id="3901"
+          data-read="false"
+        >
+          <span class="job-dot" aria-hidden="true"></span>
+          <span class="job-body">
+            <span class="job-title">Senior Software Engineer</span>
+            <span class="job-meta">Acme Corp · Jakarta, Indonesia</span>
+            <span class="job-foot">2 hours ago · Indonesia</span>
+          </span>
+        </a>
+
+        <a class="job" href="#" data-job-id="3902" data-read="false">
+          <span class="job-dot" aria-hidden="true"></span>
+          <span class="job-body">
+            <span class="job-title">Backend Engineer (Go)</span>
+            <span class="job-meta">PT Data Nusantara · Remote</span>
+            <span class="job-foot">40 minutes ago · Indonesia</span>
+          </span>
+        </a>
+
+        <!-- Missing location: the meta line degrades to just the company,
+             no dangling separator (see #9 / render.ts metaLine). -->
+        <a class="job" href="#" data-job-id="3903" data-read="false">
+          <span class="job-dot" aria-hidden="true"></span>
+          <span class="job-body">
+            <span class="job-title">Platform Engineer, Payments</span>
+            <span class="job-meta">Momo Financial</span>
+            <span class="job-foot">1 hour ago · Japan</span>
+          </span>
+        </a>
+
+        <!-- Missing posted time: the foot line falls back to just the watch. -->
+        <a class="job" href="#" data-job-id="3904" data-read="false">
+          <span class="job-dot" aria-hidden="true"></span>
+          <span class="job-body">
+            <span class="job-title">Staff Frontend Engineer</span>
+            <span class="job-meta">Rakuten · Tokyo, Japan</span>
+            <span class="job-foot">Japan</span>
+          </span>
+        </a>
+      </div>
+    </div>
+  </body>
+</html>
