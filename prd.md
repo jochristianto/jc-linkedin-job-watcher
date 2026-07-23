@@ -526,3 +526,71 @@ That stops being an extension. Options, in ascending order of effort and risk:
 2. **Server-side scraping.** A VPS running headless Chrome with your session cookie. Works, but it's the setup most likely to get your account flagged — a datacenter IP on a fixed schedule looks exactly like what it is — and it means storing a live LinkedIn session on a server.
 
 Option 2 is not recommended for this use case. The combination of Telegram push and keeping Chrome running gets you nearly all of the benefit with none of the account risk.
+
+---
+
+## 14. How the agent knows it hasn't broken anything
+
+The extension is built mostly unattended by a coding agent. An agent with no way to check its own work will report success on code that never ran. This section fixes the checking mechanism and constrains how every build ticket below is written. (Resolves issue #7 / ticket 06.)
+
+### The line: what is tested automatically
+
+Every piece of **pure logic** — a function of its inputs, no `chrome.*`, no DOM, no network — is unit-tested and MUST pass before a ticket is called done. Concretely:
+
+| Pure logic | Ticket | Reference / status |
+| --- | --- | --- |
+| Telegram HTML escaping + message build + `sendPush` (injectable `fetch`) | 09 | **Done** — `src/push.ts` + `src/push.test.ts` |
+| Company + keyword blocklist matching, the reposted rule | 07 | **Reference example** — `src/filter.ts` + `src/filter.test.ts` |
+| Dedupe against the seen set (dedupe on job ID alone, §5) | 02 | Same shape as `filter.ts` |
+| Garbage collection — two lifetimes + hard cap (§7) | 08 | §7 is already pure; lift it verbatim into a `collectGarbage(state, now)` that takes `{seen, jobs, retention, now}` and returns `{seen, jobs}` |
+| Card parser — DOM → `Job` | 01 | Fixture-driven, see below |
+
+That is the line. Anything that is *only* an orchestration of `chrome.*` calls (opening tabs, firing alarms, setting the badge) is **not** unit-tested — see "the untestable remainder".
+
+### The parser is testable — with fixtures, no network, no login
+
+The card parser reads a `Document` and returns `Job[]`. Give it a `Document` parsed from **saved HTML** and it needs no browser and no LinkedIn session. Split it so the pure part takes a `Document` (or an `Element`), not the live page:
+
+```ts
+// pure — testable
+export function parseJobCards(doc: Document): Job[] { ... }
+// thin content-script wrapper — not unit-tested
+parseJobCards(document);
+```
+
+- **Fixtures live in** `.scratch/linkedin-job-watcher/fixtures/page-1/` and `.../page-2/` — **gitignored** (a saved logged-in page carries profile chrome; it must never be committed, per `.gitignore` and issue #2).
+- **A test loads a fixture with `node:fs` + a DOM parser** (`linkedom` or `jsdom`, dev-dependency only) and asserts the parsed IDs/fields. Because fixtures are gitignored, the parser test **skips cleanly (`test.skip`) when its fixture file is absent** so CI/other machines stay green; it runs wherever the human has captured the page.
+- **Refreshing when LinkedIn changes:** re-capture the two pages into the same folders (issue #2 checklist), re-run `npm test`, update selectors until green. The failing parser test is the signal that LinkedIn moved the DOM (PRD §12).
+
+### Test runner
+
+**`node --test` with type-stripping** (`node --test --experimental-strip-types`), already wired as `npm test`. Vitest was the Vite-toolchain default, but the pure logic has no bundler dependency, so the zero-config Node runner is fewer moving parts (issue #4's bias). If the parser fixtures later need a heavier DOM setup, revisit — until then, don't add a second runner.
+
+**`chrome.*` in tests:** the tested code contains **no `chrome.*`** — that is the whole point of the pure/side-effect split (below). So there is nothing to fake. `chrome.*` lives only in thin wrappers that the tests don't import. Do **not** stub `chrome` globally; if a function needs a stub, that function is on the wrong side of the line — refactor the pure part out.
+
+### The untestable remainder — a human checklist at checkpoints
+
+Background tabs opening, alarms firing on schedule, desktop notifications appearing, the badge count, notification-click focusing the tab, the startup catch-up scan: these need a human to look. They run **at checkpoints, not after every ticket** (most tickets touch only pure logic or one wrapper). The three checkpoints:
+
+1. **After ticket 03 (single-watch scan loop):** load unpacked; confirm the alarm fires, a hidden tab opens and closes, and one page's jobs land in `chrome.storage.local`.
+2. **After ticket 06 (notifications):** confirm a cycle with new jobs shows exactly one merged desktop notification, and clicking it opens `jobs.html` (reusing an existing tab, not spawning duplicates).
+3. **After ticket 10 (startup handling):** quit Chrome mid-scan, relaunch; confirm the stale lock clears, the alarm is recreated, and the catch-up scan runs.
+
+Plus a Telegram phone check (ticket 09, `npm run send-test-message`). Each checkpoint ticket carries its exact steps in its "Done criteria".
+
+### Done-criteria format — every build ticket carries both
+
+Every build ticket MUST state, explicitly:
+
+- **The command that must pass** — almost always `npm run typecheck && npm test`, plus any new test files the ticket adds.
+- **The observable outcome** — for pure-logic tickets this is "the new tests pass"; for the checkpoint tickets above it is the human-check steps (what to click, what to see).
+
+Both, not either. A ticket with only a passing command but no observable outcome can go green on code that never ran in Chrome; a ticket with only a human check can't be re-verified by the next agent that touches it.
+
+### Structural consequence — the pure/side-effect split is mandated, not optional
+
+Because the logic must be testable without Chrome, **the separation of pure functions from `chrome.*` calls is a PRD requirement, not left to the builder.** The rule:
+
+- Pure decision logic goes in its own module (`filter.ts`, `dedupe.ts`, `gc.ts`, `parse.ts`) with **no `chrome.*` import** and an accompanying `*.test.ts`.
+- `chrome.*` (and `fetch`, and the live `document`) lives in thin wrappers/entry points (`background.ts`, the content script) that call the pure modules. Dependencies that a test needs to control are **injected** (see `sendPush(jobs, cfg, fetchImpl = fetch)` in `src/push.ts`).
+- `src/filter.ts` is the worked reference for this shape.
