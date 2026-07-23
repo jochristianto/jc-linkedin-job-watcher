@@ -8,37 +8,52 @@
 // not unit-tested; every decision it makes lives tested in view.ts.
 
 import * as storage from "./storage.ts";
-import { renderPage, markJobOpened } from "./view.ts";
+import { renderPage, markJobOpened, markAllOpened } from "./view.ts";
 import type { ListMode } from "./render.ts";
 
 /**
- * Mount the list view into `root`, defaulting to `mode` ("new" for the popup,
- * "all" for the tab). The root already carries its `.view-popup` / `.view-tab`
- * class from the HTML, which is the only thing that differs between the two.
+ * Mount the list view into `root`, defaulting to `defaultMode` ("new" for the
+ * popup, "all" for the tab). The persisted `ui` key (mockups decision 4)
+ * overrides that default and the active chip, so reopening the popup restores
+ * the last chip + mode. The root already carries its `.view-popup` /
+ * `.view-tab` class from the HTML, which is the only thing that differs.
  */
 export async function mountListView(
   root: HTMLElement,
-  mode: ListMode,
+  defaultMode: ListMode,
   title: string,
 ): Promise<void> {
+  // Restore the last view (chip + mode); a never-set mode falls back to the
+  // view's own default so the popup opens on New and the tab on All.
+  const ui = await storage.get("ui");
+  let activeWatchId: string | null = ui.activeWatchId;
+  let mode: ListMode = ui.mode ?? defaultMode;
+
   await render();
 
   // One delegated handler for the whole list — clicks and middle-clicks alike.
   root.addEventListener("click", onClick);
   root.addEventListener("auxclick", onClick);
 
+  async function persistUi(): Promise<void> {
+    await storage.set("ui", { activeWatchId, mode });
+  }
+
   async function render(): Promise<void> {
-    const [jobs, settings, health, pushHealth] = await Promise.all([
+    const [jobs, settings, health, pushHealth, scanState] = await Promise.all([
       storage.get("jobs"),
       storage.get("settings"),
       storage.get("health"),
       storage.get("pushHealth"),
+      storage.get("scanState"),
     ]);
     root.innerHTML = renderPage({
       jobs: Object.values(jobs),
       watches: settings.watches,
       mode,
       title,
+      activeWatchId,
+      scanning: scanState.isScanning,
       severity: health.severity,
       message: health.message,
       pushWarn: pushHealth.warn,
@@ -52,6 +67,38 @@ export async function mountListView(
     if (options) {
       e.preventDefault();
       chrome.runtime.openOptionsPage();
+      return;
+    }
+
+    // Mark all as read: open every job, clear the toolbar badge, and empty New
+    // in one action (mockups decision 4).
+    if (target.closest("#mark-all-read")) {
+      e.preventDefault();
+      const jobs = await storage.get("jobs");
+      const next = markAllOpened(jobs, Date.now());
+      if (next !== jobs) await storage.set("jobs", next);
+      await chrome.action.setBadgeText({ text: "" });
+      await render();
+      return;
+    }
+
+    // A watch chip: filter the list in place and remember the choice.
+    const chip = target.closest<HTMLElement>("button.chip");
+    if (chip) {
+      e.preventDefault();
+      activeWatchId = chip.dataset.watchId || null;
+      await persistUi();
+      await render();
+      return;
+    }
+
+    // The New⇄All toggle.
+    const toggle = target.closest<HTMLElement>(".toggle button");
+    if (toggle) {
+      e.preventDefault();
+      mode = toggle.dataset.mode === "all" ? "all" : "new";
+      await persistUi();
+      await render();
       return;
     }
 

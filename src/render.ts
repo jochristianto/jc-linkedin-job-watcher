@@ -85,6 +85,58 @@ export function renderList(jobs: JobView[], mode: ListMode): string {
   return visible.map(renderJobRow).join("\n");
 }
 
+/** The minimal watch shape the filter chips need: an id to filter on and a name
+ * to label the chip. `view.ts` maps the stored `Watch[]` down to this. */
+export type ChipWatch = { id: string; name: string };
+
+/**
+ * The watch filter chips (mockups decision 4): a leading "All watches" chip
+ * (`data-watch-id=""`) then one chip per configured watch. Exactly one is
+ * pressed — the All chip when `activeWatchId` is null/empty, otherwise the
+ * matching watch. The click handler in mount.ts reads `data-watch-id` to filter
+ * the list in place; an empty id means "no filter". Ids and names are escaped.
+ */
+export function renderChips(watches: ChipWatch[], activeWatchId: string | null): string {
+  const active = activeWatchId ?? "";
+  const chip = (id: string, name: string): string =>
+    `<button class="chip" data-watch-id="${esc(id)}" aria-pressed="${id === active}">${esc(name)}</button>`;
+  return `
+    <div class="chips">
+      ${chip("", "All watches")}
+      ${watches.map((w) => chip(w.id, w.name)).join("\n      ")}
+    </div>`.trim();
+}
+
+/**
+ * The New⇄All segmented toggle (mockups decision 6). Two buttons carrying
+ * `data-mode`; the active one is pressed. mount.ts reads `data-mode` on click,
+ * persists it to the `ui` key, and re-renders — in New an opened row drops out,
+ * in All it stays on screen but dimmed.
+ */
+export function renderModeToggle(mode: ListMode): string {
+  const btn = (m: ListMode, label: string): string =>
+    `<button data-mode="${m}" aria-pressed="${m === mode}">${label}</button>`;
+  return `
+    <div class="toggle">
+      ${btn("new", "New")}
+      ${btn("all", "All")}
+    </div>`.trim();
+}
+
+/** The toolbar row under the header: watch chips on the left, the New⇄All toggle
+ * on the right (mockups decision 4). One string so the popup and tab share it. */
+export function renderToolbar(
+  watches: ChipWatch[],
+  activeWatchId: string | null,
+  mode: ListMode,
+): string {
+  return `
+    <div class="toolbar">
+      ${renderChips(watches, activeWatchId)}
+      ${renderModeToggle(mode)}
+    </div>`.trim();
+}
+
 const EMPTY_STATES: Record<EmptyKind, { icon: string; title: string; body: string }> = {
   "no-watches": {
     icon: "🔍",

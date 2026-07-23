@@ -12,12 +12,27 @@ import { DEFAULT_SETTINGS, type Settings, type Job, type ScanState, type HealthS
 import { IDLE_LIFECYCLE } from "./lifecycle.ts";
 import { OK_HEALTH, OK_PUSH_HEALTH, type PushHealthState } from "./health.ts";
 import type { SeenMap } from "./dedupe.ts";
+import type { ListMode } from "./render.ts";
 
 /** `jobId → full Job record` — the `jobs` key of §6 (feeds the list view). */
 export type JobsMap = Record<string, Job>;
 
+/**
+ * The persisted list-view UI state (mockups decision 4): which watch chip is
+ * active and which New/All mode is showing. Restored when the popup reopens so
+ * you land back where you left off. `activeWatchId` null = "All watches"; `mode`
+ * null = "use the view's default" (New for the popup, All for the tab) — it
+ * becomes concrete the first time the user toggles it.
+ */
+export type UiState = { activeWatchId: string | null; mode: ListMode | null };
+
+/** The unset UI state — no chip filter, no chosen mode (each view uses its own
+ *  default until the user picks one). */
+export const DEFAULT_UI: UiState = { activeWatchId: null, mode: null };
+
 /** The §6 top-level keys and the shape each holds. `pushHealth` (§16.7) tracks
- *  consecutive Telegram-push failures separately from scan `health`. */
+ *  consecutive Telegram-push failures separately from scan `health`; `ui` holds
+ *  the popup's last chip + mode (mockups decision 4). */
 export type StorageShape = {
   settings: Settings;
   seen: SeenMap;
@@ -25,6 +40,7 @@ export type StorageShape = {
   scanState: ScanState;
   health: HealthState;
   pushHealth: PushHealthState;
+  ui: UiState;
 };
 
 /** The documented default each key returns when it is missing (§5/§16/§17). */
@@ -35,6 +51,7 @@ const DEFAULTS: StorageShape = {
   scanState: IDLE_LIFECYCLE,
   health: OK_HEALTH,
   pushHealth: OK_PUSH_HEALTH,
+  ui: DEFAULT_UI,
 };
 
 /**

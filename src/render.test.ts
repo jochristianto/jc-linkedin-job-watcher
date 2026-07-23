@@ -6,7 +6,11 @@ import {
   renderJobRow,
   renderList,
   renderEmptyState,
+  renderChips,
+  renderModeToggle,
+  renderToolbar,
   type JobView,
+  type ChipWatch,
 } from "./render.ts";
 
 function job(overrides: Partial<JobView> = {}): JobView {
@@ -103,6 +107,57 @@ test("renderList in 'all' mode keeps opened jobs (they stay on screen, read)", (
   assert.match(html, /data-job-id="1"/);
   assert.match(html, /data-job-id="2"/);
   assert.match(html, /data-read="true"/);
+});
+
+const chipWatches: ChipWatch[] = [
+  { id: "w1", name: "Indonesia" },
+  { id: "w2", name: "Japan" },
+];
+
+test("renderChips renders an All-watches chip plus one per watch", () => {
+  const html = renderChips(chipWatches, null);
+  assert.match(html, /data-watch-id=""[^>]*>All watches/);
+  assert.match(html, /data-watch-id="w1"[^>]*>Indonesia/);
+  assert.match(html, /data-watch-id="w2"[^>]*>Japan/);
+});
+
+test("renderChips marks the All chip active when no watch is selected", () => {
+  const html = renderChips(chipWatches, null);
+  assert.match(html, /data-watch-id=""\s+aria-pressed="true"/);
+  assert.match(html, /data-watch-id="w1"\s+aria-pressed="false"/);
+});
+
+test("renderChips marks the selected watch chip active, All inactive", () => {
+  const html = renderChips(chipWatches, "w2");
+  assert.match(html, /data-watch-id=""\s+aria-pressed="false"/);
+  assert.match(html, /data-watch-id="w2"\s+aria-pressed="true"/);
+  assert.match(html, /data-watch-id="w1"\s+aria-pressed="false"/);
+});
+
+test("renderChips escapes watch names and ids", () => {
+  const html = renderChips([{ id: "a&b", name: "R&D <x>" }], null);
+  assert.match(html, /R&amp;D &lt;x&gt;/);
+  assert.match(html, /data-watch-id="a&amp;b"/);
+  assert.doesNotMatch(html, /<x>/);
+});
+
+test("renderModeToggle marks the active mode pressed", () => {
+  const html = renderModeToggle("new");
+  assert.match(html, /data-mode="new"\s+aria-pressed="true"/);
+  assert.match(html, /data-mode="all"\s+aria-pressed="false"/);
+
+  const all = renderModeToggle("all");
+  assert.match(all, /data-mode="all"\s+aria-pressed="true"/);
+  assert.match(all, /data-mode="new"\s+aria-pressed="false"/);
+});
+
+test("renderToolbar combines chips and the mode toggle in one toolbar row", () => {
+  const html = renderToolbar(chipWatches, "w1", "all");
+  assert.match(html, /class="toolbar"/);
+  assert.match(html, /class="chips"/);
+  assert.match(html, /data-watch-id="w1"\s+aria-pressed="true"/);
+  assert.match(html, /class="toggle"/);
+  assert.match(html, /data-mode="all"\s+aria-pressed="true"/);
 });
 
 test("renderEmptyState gives a distinct, actionable message per situation", () => {

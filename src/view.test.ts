@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { toJobViews, unopenedCount, markJobOpened, renderPage } from "./view.ts";
+import {
+  toJobViews,
+  unopenedCount,
+  markJobOpened,
+  markAllOpened,
+  renderPage,
+} from "./view.ts";
 import { PUSH_FAILING_MESSAGE } from "./health.ts";
 import type { Job, Watch } from "./types.ts";
 import type { JobsMap } from "./storage.ts";
@@ -76,6 +82,89 @@ test("markJobOpened leaves other jobs alone and no-ops on an unknown id", () => 
   const next = markJobOpened(jobs, "a", 5);
   assert.equal(next["b"]!.opened, false);
   assert.equal(markJobOpened(jobs, "missing", 5), jobs);
+});
+
+test("markAllOpened opens every unopened job without mutating the input", () => {
+  const jobs: JobsMap = {
+    a: job({ id: "a", opened: false }),
+    b: job({ id: "b", opened: true, openedAt: 5 }),
+  };
+  const next = markAllOpened(jobs, 999);
+  assert.equal(next["a"]!.opened, true);
+  assert.equal(next["a"]!.openedAt, 999);
+  // already-opened jobs keep their original openedAt
+  assert.equal(next["b"]!.openedAt, 5);
+  // input untouched
+  assert.equal(jobs["a"]!.opened, false);
+});
+
+test("markAllOpened no-ops (same reference) when nothing is unopened", () => {
+  const jobs: JobsMap = { a: job({ id: "a", opened: true }) };
+  assert.equal(markAllOpened(jobs, 1), jobs);
+});
+
+test("renderPage renders the watch filter chips and the New/All toggle", () => {
+  const html = renderPage({
+    jobs: [job()],
+    watches,
+    mode: "new",
+    title: "New jobs",
+  });
+  assert.match(html, /class="toolbar"/);
+  assert.match(html, /data-watch-id=""[^>]*>All watches/);
+  assert.match(html, /data-watch-id="w-id"[^>]*>Indonesia/);
+  assert.match(html, /data-mode="new"\s+aria-pressed="true"/);
+});
+
+test("renderPage renders a Mark all as read control", () => {
+  const html = renderPage({ jobs: [job()], watches, mode: "new", title: "New" });
+  assert.match(html, /id="mark-all-read"/);
+});
+
+test("renderPage filters the list to the active watch chip", () => {
+  const jobs = [
+    job({ id: "1", watchId: "w-id" }),
+    job({ id: "2", watchId: "other" }),
+  ];
+  const filtered = renderPage({
+    jobs,
+    watches,
+    mode: "all",
+    title: "All",
+    activeWatchId: "w-id",
+  });
+  assert.match(filtered, /data-job-id="1"/);
+  assert.doesNotMatch(filtered, /data-job-id="2"/);
+
+  const allWatches = renderPage({ jobs, watches, mode: "all", title: "All" });
+  assert.match(allWatches, /data-job-id="1"/);
+  assert.match(allWatches, /data-job-id="2"/);
+});
+
+test("renderPage badge counts unopened across all watches, ignoring the chip filter", () => {
+  const jobs = [
+    job({ id: "1", watchId: "w-id" }),
+    job({ id: "2", watchId: "other" }),
+  ];
+  const html = renderPage({
+    jobs,
+    watches,
+    mode: "all",
+    title: "All",
+    activeWatchId: "w-id",
+  });
+  assert.match(html, /<span class="badge">2<\/span>/);
+});
+
+test("renderPage shows the scanning empty state while a first scan is in flight", () => {
+  const html = renderPage({
+    jobs: [],
+    watches,
+    mode: "new",
+    title: "New",
+    scanning: true,
+  });
+  assert.match(html, /data-kind="scanning"/);
 });
 
 test("renderPage shows a badge with the unopened count and drops it at zero", () => {

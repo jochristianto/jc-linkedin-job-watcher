@@ -15,6 +15,7 @@ import {
   esc,
   renderList,
   renderEmptyState,
+  renderToolbar,
   type JobView,
   type ListMode,
   type EmptyKind,
@@ -61,13 +62,42 @@ export function markJobOpened(jobs: JobsMap, id: string, now: number): JobsMap {
   return { ...jobs, [id]: { ...job, opened: true, openedAt: now } };
 }
 
+/**
+ * Mark every unopened job opened at `now`, immutably (the "Mark all as read"
+ * action, mockups decision 4). Already-opened jobs keep their original
+ * `openedAt`; only the unopened ones flip. Returns the same reference when there
+ * was nothing to open, so mount.ts can skip a redundant storage write. mount.ts
+ * persists this and clears the toolbar badge in one action.
+ */
+export function markAllOpened(jobs: JobsMap, now: number): JobsMap {
+  let changed = false;
+  const next: JobsMap = {};
+  for (const [id, job] of Object.entries(jobs)) {
+    if (job.opened) {
+      next[id] = job;
+    } else {
+      next[id] = { ...job, opened: true, openedAt: now };
+      changed = true;
+    }
+  }
+  return changed ? next : jobs;
+}
+
 /** Everything the page needs to render itself — assembled by the caller from
- *  the `jobs`, `settings` and `health` storage keys. */
+ *  the `jobs`, `settings`, `health` and `ui` storage keys. */
 export type ViewContext = {
   jobs: Job[];
   watches: Watch[];
   mode: ListMode;
   title: string;
+  /** The watch chip currently filtering the list (mockups decision 4), or
+   *  null/undefined for "All watches". Filters the *list*; the badge still
+   *  counts unopened across every watch. */
+  activeWatchId?: string | null;
+  /** A scan cycle is holding the lock right now (`scanState.isScanning`). Only
+   *  changes the empty state: with nothing yet to show it reads "Scanning…"
+   *  instead of "Nothing scanned yet" (mockups decision 5). */
+  scanning?: boolean;
   severity?: HealthState["severity"];
   /** The health banner text (PRD §16.8), or null/undefined when healthy. Shown as
    *  a one-line banner above the list, tinted by `severity`. */
@@ -86,7 +116,7 @@ export type ViewContext = {
 function pickEmptyKind(ctx: ViewContext, total: number): EmptyKind {
   if (ctx.severity === "error") return "scan-error";
   if (ctx.watches.length === 0) return "no-watches";
-  if (total === 0) return "no-jobs-yet";
+  if (total === 0) return ctx.scanning ? "scanning" : "no-jobs-yet";
   if (ctx.mode === "new") return "no-new";
   return "no-jobs-yet";
 }
@@ -99,9 +129,23 @@ function pickEmptyKind(ctx: ViewContext, total: number): EmptyKind {
  * `.view-popup` / `.view-tab` class on the mount root, never by branch here.
  */
 export function renderPage(ctx: ViewContext): string {
-  const views = toJobViews(ctx.jobs, ctx.watches);
+  // The badge always counts unopened across every watch — it mirrors the toolbar
+  // action badge, which the chip filter must not change (mockups decision 4).
   const badge = unopenedCount(ctx.jobs);
+
+  // The chip filters the *list*: an active watch drops jobs from other watches.
+  const activeWatchId = ctx.activeWatchId ?? "";
+  const listJobs = activeWatchId
+    ? ctx.jobs.filter((j) => j.watchId === activeWatchId)
+    : ctx.jobs;
+  const views = toJobViews(listJobs, ctx.watches);
   const visible = ctx.mode === "new" ? views.filter((v) => !v.opened) : views;
+
+  const toolbar = renderToolbar(
+    ctx.watches.map((w) => ({ id: w.id, name: w.name })),
+    activeWatchId || null,
+    ctx.mode,
+  );
 
   const body = visible.length
     ? renderList(views, ctx.mode)
@@ -120,8 +164,10 @@ export function renderPage(ctx: ViewContext): string {
     <header class="hdr">
       <span class="hdr-title">${esc(ctx.title)}</span>
       ${badge > 0 ? `<span class="badge">${badge}</span>` : ""}
+      <button class="hdr-btn" id="mark-all-read" title="Mark all as read">Mark all read</button>
       <button class="hdr-btn" id="open-options" title="Options" aria-label="Options">⚙</button>
     </header>
+    ${toolbar}
     ${healthBanner}
     ${pushBanner}
     <div class="list">${body}</div>`.trim();
