@@ -58,10 +58,11 @@ export function metaLine(parts: (string | null | undefined)[]): string {
  * so the row is never blank (PRD §12 "each field fails independently").
  */
 export function renderJobRow(job: JobView): string {
+  // Only the title needs a fallback — it's the one field always rendered. The
+  // rest (company, location, posted time) are dropped by metaLine when blank.
   const title = job.title.trim() ? esc(job.title) : "Untitled role";
   const meta = metaLine([esc(job.company), esc(job.location)]);
-  const posted = job.postedText.trim() ? esc(job.postedText) : "";
-  const foot = metaLine([posted, esc(job.watchName)]);
+  const foot = metaLine([esc(job.postedText), esc(job.watchName)]);
 
   return `
     <a class="job" href="${esc(job.url)}" data-job-id="${esc(job.id)}" data-read="${job.opened}">
