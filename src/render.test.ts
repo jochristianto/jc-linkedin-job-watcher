@@ -8,6 +8,7 @@ import {
   renderEmptyState,
   renderChips,
   renderModeToggle,
+  renderScanButton,
   renderToolbar,
   type JobView,
   type ChipWatch,
@@ -174,4 +175,28 @@ test("renderEmptyState gives a distinct, actionable message per situation", () =
   assert.match(renderEmptyState("no-watches"), /Options|Add a search/i);
   assert.match(renderEmptyState("no-new"), /caught up|no new/i);
   assert.match(renderEmptyState("scan-error"), /failed|broke|selector/i);
+});
+
+// ── renderScanButton: the manual scan control ────────────────────────────────
+
+test("renderScanButton renders a clickable Scan now control when idle", () => {
+  const html = renderScanButton("idle");
+  assert.match(html, /id="scan-now"/);
+  assert.match(html, /data-scan-state="idle"/);
+  assert.match(html, />Scan now</);
+  assert.doesNotMatch(html, /disabled/);
+});
+
+test("renderScanButton is disabled while a cycle already holds the lock", () => {
+  const html = renderScanButton("scanning");
+  assert.match(html, /disabled/);
+  assert.match(html, /Scanning…/);
+});
+
+test("renderScanButton labels itself as the manual resume when scanning is halted", () => {
+  const html = renderScanButton("halted");
+  assert.match(html, /data-scan-state="halted"/);
+  assert.match(html, />Resume</);
+  // A halted extension can only recover through this button, so it must stay live.
+  assert.doesNotMatch(html, /disabled/);
 });

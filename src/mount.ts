@@ -10,6 +10,13 @@
 import * as storage from "./storage.ts";
 import { renderPage, markJobOpened, markAllOpened } from "./view.ts";
 import type { ListMode } from "./render.ts";
+import type { ScanNowRequest } from "./scan.ts";
+
+/** The storage keys `render` reads. A background cycle rewriting any of them —
+ *  the one a "Scan now" click just started, or a routine alarm tick — repaints
+ *  an open popup/tab, so "Scanning…" turns back into the list on its own. `ui`
+ *  is excluded on purpose: this view writes it, and would only re-render itself. */
+const RENDERED_KEYS = ["jobs", "settings", "health", "pushHealth", "scanState"] as const;
 
 /**
  * Mount the list view into `root`, defaulting to `defaultMode` ("new" for the
@@ -35,6 +42,11 @@ export async function mountListView(
   root.addEventListener("click", onClick);
   root.addEventListener("auxclick", onClick);
 
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+    if (RENDERED_KEYS.some((key) => key in changes)) void render();
+  });
+
   async function persistUi(): Promise<void> {
     await storage.set("ui", { activeWatchId, mode });
   }
@@ -54,6 +66,7 @@ export async function mountListView(
       title,
       activeWatchId,
       scanning: scanState.isScanning,
+      scanMode: health.mode,
       severity: health.severity,
       message: health.message,
       pushWarn: pushHealth.warn,
@@ -67,6 +80,19 @@ export async function mountListView(
     if (options) {
       e.preventDefault();
       chrome.runtime.openOptionsPage();
+      return;
+    }
+
+    // Scan now: ask the background for a cycle right away rather than waiting out
+    // the interval and quiet hours (PRD §9), and — when health is halted — resume
+    // scanning (§16.2). The background replies once the lock is in storage, so the
+    // re-render below already shows "Scanning…". A closing popup that loses the
+    // reply is harmless: the cycle it started runs in the worker regardless.
+    if (target.closest("#scan-now")) {
+      e.preventDefault();
+      const request: ScanNowRequest = { type: "LJW_SCAN_NOW" };
+      await chrome.runtime.sendMessage(request).catch(() => {});
+      await render();
       return;
     }
 

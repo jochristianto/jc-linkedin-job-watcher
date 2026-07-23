@@ -32,6 +32,14 @@ test("both popup and tab carry the watch chips and the New/All toggle", () => {
   }
 });
 
+test("both popup and tab carry the manual Scan now control in the header", () => {
+  for (const name of ["./popup.html", "./jobs.html"]) {
+    const html = read(name);
+    assert.match(html, /data-scan-state="idle"/, `${name} scan state`);
+    assert.match(html, />Scan now</, `${name} label`);
+  }
+});
+
 test("the tab shows read jobs staying on screen in All mode", () => {
   const html = read("./jobs.html");
   assert.match(html, /data-read="true"/);

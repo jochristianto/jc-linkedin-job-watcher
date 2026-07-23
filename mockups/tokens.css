@@ -95,6 +95,12 @@ body {
   font-weight: 700;
   font-size: 15px;
   flex: 1;
+  /* The header carries three controls now; let the title give way rather than
+   * wrap the row when a long one (e.g. the tab's) meets a narrow popup. */
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .badge {
   background: var(--danger);
@@ -118,6 +124,21 @@ body {
 .hdr-btn:hover {
   background: var(--surface-2);
   color: var(--text);
+}
+/* Only ever set on the scan control, while a cycle holds the lock. */
+.hdr-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.hdr-btn:disabled:hover {
+  background: transparent;
+  color: var(--muted);
+}
+/* A halted scan needs the user to act, so its label is the one header control
+ * that shouts. */
+.hdr-btn[data-scan-state="halted"] {
+  color: var(--danger);
+  font-weight: 600;
 }
 
 /* ---- Toolbar: watch chips + New/All toggle ---- */

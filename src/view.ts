@@ -15,10 +15,12 @@ import {
   esc,
   renderList,
   renderEmptyState,
+  renderScanButton,
   renderToolbar,
   type JobView,
   type ListMode,
   type EmptyKind,
+  type ScanButtonState,
 } from "./render.ts";
 
 /** Map a stored `Job` to the flat `JobView` the markup functions consume. The
@@ -98,6 +100,9 @@ export type ViewContext = {
    *  changes the empty state: with nothing yet to show it reads "Scanning…"
    *  instead of "Nothing scanned yet" (mockups decision 5). */
   scanning?: boolean;
+  /** The persisted scan mode (`health.mode`). Only the manual scan control reads
+   *  it: a `halted` cycle (§16.2) turns "Scan now" into "Resume scanning". */
+  scanMode?: HealthState["mode"];
   severity?: HealthState["severity"];
   /** The health banner text (PRD §16.8), or null/undefined when healthy. Shown as
    *  a one-line banner above the list, tinted by `severity`. */
@@ -122,8 +127,20 @@ function pickEmptyKind(ctx: ViewContext, total: number): EmptyKind {
 }
 
 /**
- * The whole view as one markup string: header (title + unopened badge + Options
- * button) over the list. `renderList` filters opened jobs out of "new" mode; if
+ * Which state the header's manual scan control renders in. An in-flight cycle
+ * wins over everything — while the lock is held there is nothing to start, even
+ * if health is halted — otherwise a halted cycle labels the control as the
+ * manual resume it is (§16.2). Everything else is the plain idle button.
+ */
+export function scanButtonState(ctx: ViewContext): ScanButtonState {
+  if (ctx.scanning) return "scanning";
+  if (ctx.scanMode === "halted") return "halted";
+  return "idle";
+}
+
+/**
+ * The whole view as one markup string: header (title + unopened badge + Scan
+ * now + Options button) over the list. `renderList` filters opened jobs out of "new" mode; if
  * that leaves nothing to show, a distinct empty state takes the list's place.
  * The popup and the tab call this identically — they differ only by the
  * `.view-popup` / `.view-tab` class on the mount root, never by branch here.
@@ -164,6 +181,7 @@ export function renderPage(ctx: ViewContext): string {
     <header class="hdr">
       <span class="hdr-title">${esc(ctx.title)}</span>
       ${badge > 0 ? `<span class="badge">${badge}</span>` : ""}
+      ${renderScanButton(scanButtonState(ctx))}
       <button class="hdr-btn" id="mark-all-read" title="Mark all as read">Mark all read</button>
       <button class="hdr-btn" id="open-options" title="Options" aria-label="Options">⚙</button>
     </header>

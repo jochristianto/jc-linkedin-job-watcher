@@ -64,7 +64,7 @@ Pin the extension to your toolbar so you can see the badge.
 5. Under **Searches**, give it a nickname (e.g. "Indonesia") and paste the URL → **Add**.
 6. Click **Save settings** at the bottom. *Nothing is stored until you save.*
 
-The first scan fires on the next alarm tick. Any URL that works in your browser works here — the query string (keywords, filters, `sortBy=DD`) is preserved verbatim; only `&start=` is rewritten for pagination.
+The first scan fires on the next alarm tick — or immediately, if you open the popup and click **Scan now**. Any URL that works in your browser works here — the query string (keywords, filters, `sortBy=DD`) is preserved verbatim; only `&start=` is rewritten for pagination.
 
 ---
 
@@ -84,6 +84,7 @@ The first scan fires on the next alarm tick. Any URL that works in your browser 
 In both views:
 
 - **Click a job** → marks it opened (badge drops by one) and opens the posting in a new tab. Cmd/Ctrl/middle-click opens it in the background.
+- **Scan now** runs a cycle immediately, ignoring the interval and quiet hours. It reads *Scanning…* (greyed out) while a cycle is in flight, and the list repaints on its own when that cycle finishes. After a manual scan the next automatic one is a full interval away, not stacked minutes behind. When a verification challenge has halted scanning, the same button turns red and reads **Resume** — that is how you clear the halt.
 - **Watch chips** filter the list to one search. The badge still counts across all of them.
 - **New ⇄ All** toggles between unopened-only and everything.
 - **Mark all as read** clears the badge and empties New in one action.
@@ -251,13 +252,15 @@ No data leaves your browser except the Telegram message you explicitly configure
 Open the popup — a one-line banner says which it is:
 
 - *"Signed out of LinkedIn — scanning paused."* Sign back in; scanning resumes automatically on the next tick.
-- *"LinkedIn asked for verification — scanning stopped."* Open LinkedIn and clear the challenge. **Then see the limitation below** — this state currently needs a manual reset.
+- *"LinkedIn asked for verification — scanning stopped."* Open LinkedIn and clear the challenge, then click **Resume** in the popup header — nothing else clears this state, because a halted extension never runs the successful scan that would clear it on its own. If the challenge is still there, the next cycle simply halts again.
 
 **Badge is amber**
 Either the parser found no results list (LinkedIn may have changed its layout — check `chrome://extensions` → *service worker* → Console for a `[ljw]` selector-drift warning), or scans have gone stale.
 
 **Nothing ever gets scanned**
-Check, in order: at least one search is **enabled**; you're signed in to LinkedIn in this profile; it isn't quiet hours (default 23:00–07:00); and the alarm exists — `chrome://extensions` → *service worker* → Console → `await chrome.alarms.getAll()`.
+Click **Scan now** in the popup first — it bypasses the interval and quiet hours, so it tells you straight away whether the problem is the schedule or the scan itself. If that finds nothing either, check, in order: at least one search is **enabled**; you're signed in to LinkedIn in this profile; and the alarm exists — `chrome://extensions` → *service worker* → Console → `await chrome.alarms.getAll()`.
+
+Note the default quiet hours are **23:00–07:00**, so an extension installed late at night genuinely won't scan until morning. That's the schedule working, not a fault.
 
 **Watching a scan happen**
 `chrome://extensions` → **service worker** under this extension opens the background DevTools. All scan logging lands there.
@@ -279,13 +282,7 @@ npm install @rollup/rollup-darwin-arm64 --no-save
 
 These are real gaps in the current build, not misconfiguration:
 
-1. **A verification challenge stops scanning permanently.** When LinkedIn shows a checkpoint, health goes to `halted` and no further scans run — but there is **no resume button in the UI yet**, and health only clears on a successful scan that can no longer happen. To recover, open the service-worker console (`chrome://extensions` → *service worker*) and run:
-   ```js
-   await chrome.storage.local.remove("health")
-   ```
-   Scanning resumes on the next alarm tick.
-
-2. **Retention is not enforced yet.** The garbage-collection logic exists and is tested ([src/gc.ts](src/gc.ts)), but nothing calls it in production — there's no daily GC alarm wired into the service worker. The Retention settings are saved but currently have no effect, so `seen` and `jobs` grow without bound. `unlimitedStorage` means this won't break anything soon.
+1. **Retention is not enforced yet.** The garbage-collection logic exists and is tested ([src/gc.ts](src/gc.ts)), but nothing calls it in production — there's no daily GC alarm wired into the service worker. The Retention settings are saved but currently have no effect, so `seen` and `jobs` grow without bound. `unlimitedStorage` means this won't break anything soon.
 
 ---
 

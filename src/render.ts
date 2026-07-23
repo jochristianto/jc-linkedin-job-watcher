@@ -137,6 +137,41 @@ export function renderToolbar(
     </div>`.trim();
 }
 
+/**
+ * What the manual scan control in the header is currently showing:
+ *
+ * - `idle`     — ready; a click starts a cycle immediately instead of waiting
+ *                for the next alarm (PRD §9/§15 — the cadence is 5 minutes and
+ *                skips quiet hours, so "right now" needs its own trigger).
+ * - `scanning` — a cycle already holds the scan lock, so the control is inert.
+ * - `halted`   — a verification challenge stopped scanning (§16.2). That state
+ *                waits for the user to "manually resume", and a halted extension
+ *                can never scan its own way back to healthy, so this control is
+ *                that resume and says so rather than pretending nothing is wrong.
+ */
+export type ScanButtonState = "idle" | "scanning" | "halted";
+
+const SCAN_BUTTON: Record<ScanButtonState, { label: string; title: string }> = {
+  idle: { label: "Scan now", title: "Scan every enabled search right now" },
+  scanning: { label: "Scanning…", title: "A scan is already running" },
+  // Short on purpose: the header is only 380px wide in the popup, and the health
+  // banner directly below already says "…clear it, then resume" (§16.8).
+  halted: { label: "Resume", title: "Clear the halt and scan right now" },
+};
+
+/**
+ * The manual scan control in the header. mount.ts sends `LJW_SCAN_NOW` to the
+ * background on click; `data-scan-state` is for styling only. Disabled *only*
+ * while a cycle is in flight — it stays live in every failure state, including
+ * `halted`, because otherwise the service-worker console is the user's only way
+ * to trigger a scan.
+ */
+export function renderScanButton(state: ScanButtonState): string {
+  const { label, title } = SCAN_BUTTON[state];
+  const disabled = state === "scanning" ? " disabled" : "";
+  return `<button class="hdr-btn" id="scan-now" data-scan-state="${state}" title="${esc(title)}"${disabled}>${label}</button>`;
+}
+
 const EMPTY_STATES: Record<EmptyKind, { icon: string; title: string; body: string }> = {
   "no-watches": {
     icon: "🔍",

@@ -6,6 +6,7 @@ import {
   markJobOpened,
   markAllOpened,
   renderPage,
+  scanButtonState,
 } from "./view.ts";
 import { PUSH_FAILING_MESSAGE } from "./health.ts";
 import type { Job, Watch } from "./types.ts";
@@ -294,4 +295,74 @@ test("renderPage picks the right empty state for each situation", () => {
     renderPage({ jobs: [], watches, mode: "new", title: "New", severity: "error" }),
     /data-kind="scan-error"/,
   );
+});
+
+// ── The manual scan control ─────────────────────────────────────────────────
+
+test("scanButtonState is idle on a healthy, not-currently-scanning view", () => {
+  assert.equal(
+    scanButtonState({ jobs: [], watches, mode: "new", title: "New" }),
+    "idle",
+  );
+});
+
+test("scanButtonState reports scanning while a cycle holds the lock", () => {
+  assert.equal(
+    scanButtonState({ jobs: [], watches, mode: "new", title: "New", scanning: true }),
+    "scanning",
+  );
+});
+
+test("scanButtonState turns the control into the manual resume when halted (§16.2)", () => {
+  assert.equal(
+    scanButtonState({ jobs: [], watches, mode: "new", title: "New", scanMode: "halted" }),
+    "halted",
+  );
+});
+
+test("scanButtonState: an in-flight cycle outranks a halted mode", () => {
+  // The halt was just cleared and the cycle started; there is nothing to resume.
+  assert.equal(
+    scanButtonState({
+      jobs: [],
+      watches,
+      mode: "new",
+      title: "New",
+      scanning: true,
+      scanMode: "halted",
+    }),
+    "scanning",
+  );
+});
+
+test("scanButtonState stays idle for paused — that one resumes on its own (§16.1)", () => {
+  assert.equal(
+    scanButtonState({ jobs: [], watches, mode: "new", title: "New", scanMode: "paused" }),
+    "idle",
+  );
+});
+
+test("renderPage puts the scan control in the header, in the right state", () => {
+  const idle = renderPage({ jobs: [job()], watches, mode: "new", title: "New" });
+  assert.match(idle, /id="scan-now"[^>]*data-scan-state="idle"/);
+
+  const scanning = renderPage({
+    jobs: [job()],
+    watches,
+    mode: "new",
+    title: "New",
+    scanning: true,
+  });
+  assert.match(scanning, /id="scan-now"[^>]*data-scan-state="scanning"[^>]*disabled/);
+
+  const halted = renderPage({
+    jobs: [job()],
+    watches,
+    mode: "new",
+    title: "New",
+    scanMode: "halted",
+    severity: "error",
+  });
+  assert.match(halted, /id="scan-now"[^>]*data-scan-state="halted"/);
+  assert.match(halted, />Resume</);
 });

@@ -25,6 +25,19 @@ const BADGE_CAP = 99;
  *  by hand — which has no token — is never scraped. */
 export type ScanRequest = { type: "LJW_SCAN"; token: string };
 
+/** The message the popup / jobs tab sends the background when the user clicks
+ *  the header's manual scan control (PRD §9). No payload: the button only asks
+ *  for a cycle to start, and the background reads the settings, the scan lock and
+ *  the health state itself. Distinct from {@link ScanRequest}, which travels the
+ *  other way (background → invisible tab) and carries the injection token. */
+export type ScanNowRequest = { type: "LJW_SCAN_NOW" };
+
+/** The background's reply, sent as soon as the lock is resolved rather than when
+ *  the cycle ends — a cycle takes 60–90s (§9) and the popup must repaint now.
+ *  `already-scanning` is not an error: a cycle is running, which is what the
+ *  click asked for. */
+export type ScanNowResponse = { started: boolean; reason?: "already-scanning" };
+
 /** Fragment key under which `background.ts` stamps a page's one-time scan token.
  *  A URL *fragment* (never sent to LinkedIn) so the server sees the plain search
  *  URL; only the content script, reading `location.hash`, sees the token. */
