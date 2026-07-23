@@ -7,6 +7,9 @@ import {
   mergeJobs,
   unopenedCount,
   badgeText,
+  withScanToken,
+  readScanToken,
+  scanTokenMatches,
 } from "./scan.ts";
 import type { JobsMap } from "./storage.ts";
 import type { Job, Watch } from "./types.ts";
@@ -111,4 +114,29 @@ test("badgeText is empty for zero, the number below 100, and 99+ above", () => {
   assert.equal(badgeText(7), "7");
   assert.equal(badgeText(99), "99");
   assert.equal(badgeText(100), "99+");
+});
+
+test("withScanToken stamps the one-time token onto the URL fragment, not the query", () => {
+  const url = withScanToken("https://www.linkedin.com/jobs/search/?keywords=remote&start=0", "abc123");
+  const u = new URL(url);
+  // The token rides the fragment (never sent to LinkedIn), leaving the query intact.
+  assert.equal(u.searchParams.get("keywords"), "remote");
+  assert.equal(u.searchParams.get("start"), "0");
+  assert.equal(u.searchParams.has("ljw_token"), false);
+  assert.equal(readScanToken(u.hash), "abc123");
+});
+
+test("readScanToken returns null when the URL carries no token (a hand-opened tab)", () => {
+  assert.equal(readScanToken(""), null);
+  assert.equal(readScanToken("#"), null);
+  assert.equal(readScanToken("#currentJobId=42"), null);
+});
+
+test("scanTokenMatches accepts only an exact non-empty match", () => {
+  assert.equal(scanTokenMatches("abc123", "abc123"), true);
+  assert.equal(scanTokenMatches("abc123", "nope"), false);
+  // A hand-opened tab has no page token: nothing a stray message carries can match.
+  assert.equal(scanTokenMatches(null, "abc123"), false);
+  assert.equal(scanTokenMatches("", ""), false);
+  assert.equal(scanTokenMatches("abc123", undefined), false);
 });

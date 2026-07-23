@@ -15,7 +15,7 @@
 import { get, set } from "./storage.ts";
 import { dedupe } from "./dedupe.ts";
 import type { FilterRules } from "./filter.ts";
-import { nextScanDelayMs } from "./schedule.ts";
+import { nextScanDelayMs, randomPauseMs } from "./schedule.ts";
 import {
   KEEPALIVE_PING_MS,
   beginScan,
@@ -32,6 +32,7 @@ import {
   scanPageUrl,
   stampJobs,
   unopenedCount,
+  withScanToken,
   type ScanRequest,
   type ScanResponse,
 } from "./scan.ts";
@@ -44,6 +45,10 @@ const ALARM_NAME = "ljw-scan";
 /** How long to wait for a scan tab to finish loading before messaging it. Loose
  *  because the content script settles the lazy list itself (pollUntilSettled). */
 const TAB_LOAD_TIMEOUT_MS = 30_000;
+
+/** Sleep for a drawn pause length — the in-cycle pacing (PRD §9/§15 decision 5).
+ *  A plain timer; the *length* is decided by the tested `randomPauseMs`. */
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 // ── Badge ────────────────────────────────────────────────────────────────────
 
@@ -75,11 +80,16 @@ function waitForTabComplete(tabId: number): Promise<void> {
 }
 
 /** Open one invisible tab on `url`, let the content script settle+parse it, and
- *  return the parsed jobs. The tab is created `active: false` (never steals
- *  focus, PRD §17 decision 2) and ALWAYS closed in the `finally` — even if the
- *  page or the messaging throws — so a parse failure can't orphan a tab. */
+ *  return the parsed jobs. A fresh one-time token is minted per injection and
+ *  stamped onto the tab's URL fragment; the same token rides the LJW_SCAN message,
+ *  and the content script reads nothing unless the two match (PRD §9) — so a
+ *  LinkedIn tab the user opened by hand, which carries no token, is never scraped.
+ *  The tab is created `active: false` (never steals focus, PRD §17 decision 2) and
+ *  ALWAYS closed in the `finally` — even if the page or the messaging throws — so a
+ *  parse failure can't orphan a tab. */
 async function scanPage(url: string): Promise<Job[]> {
-  const tab = await chrome.tabs.create({ url, active: false });
+  const token = crypto.randomUUID();
+  const tab = await chrome.tabs.create({ url: withScanToken(url, token), active: false });
   const tabId = tab.id;
   if (tabId === undefined) return [];
 
@@ -88,7 +98,7 @@ async function scanPage(url: string): Promise<Job[]> {
   await set("scanState", trackTab(await get("scanState"), tabId));
   try {
     await waitForTabComplete(tabId);
-    const req: ScanRequest = { type: "LJW_SCAN" };
+    const req: ScanRequest = { type: "LJW_SCAN", token };
     const res = (await chrome.tabs.sendMessage(tabId, req)) as ScanResponse | undefined;
     return res?.jobs ?? [];
   } catch {
@@ -109,29 +119,38 @@ function filterRulesOf(settings: Settings): FilterRules {
   };
 }
 
-/** Run one full scan cycle: every enabled watch, `pages` deep, into storage. The
- *  keepalive interval (PRD §17 decision 1) runs for the whole cycle and is
- *  cleared in the `finally`. */
+/** Run one full scan cycle: every enabled watch, in saved order, `pages` deep,
+ *  into storage. Watches run strictly one after another — never in parallel
+ *  (PRD §3) — with a randomised pause between pages and a longer one between
+ *  watches (PRD §9/§15 decision 5) so the traffic doesn't beat a fixed heartbeat.
+ *  Every watch's results are collected and merged into ONE batch before a single
+ *  dedupe (PRD §5), so a role surfacing under two searches notifies only once. The
+ *  keepalive interval (PRD §17 decision 1) runs for the whole cycle and is cleared
+ *  in the `finally`. */
 async function runCycle(settings: Settings, pages: number): Promise<void> {
   const keepalive = setInterval(() => {
     void chrome.runtime.getPlatformInfo();
   }, KEEPALIVE_PING_MS);
 
   try {
-    const rules = filterRulesOf(settings);
-    for (const watch of enabledWatches(settings.watches)) {
+    const watches = enabledWatches(settings.watches);
+    const found: Job[] = [];
+    for (let w = 0; w < watches.length; w++) {
+      const watch = watches[w]!;
       for (let page = 1; page <= pages; page++) {
         const parsed = await scanPage(scanPageUrl(watch.url, page));
-        const scannedAt = Date.now();
-        const stamped = stampJobs(parsed, watch.id, scannedAt);
-
-        const seenBefore = await get("seen");
-        const { newJobs, seen } = dedupe(stamped, seenBefore, rules, scannedAt);
-        await set("seen", seen);
-        if (newJobs.length > 0) {
-          await set("jobs", mergeJobs(await get("jobs"), newJobs));
-        }
+        found.push(...stampJobs(parsed, watch.id, Date.now()));
+        if (page < pages) await sleep(randomPauseMs(settings.pacing.pagePauseMs));
       }
+      if (w < watches.length - 1) await sleep(randomPauseMs(settings.pacing.watchPauseMs));
+    }
+
+    // Merge-before-dedupe (PRD §5): one dedupe over every watch's results so a
+    // cross-watch duplicate id collapses to a single new job.
+    const { newJobs, seen } = dedupe(found, await get("seen"), filterRulesOf(settings), Date.now());
+    await set("seen", seen);
+    if (newJobs.length > 0) {
+      await set("jobs", mergeJobs(await get("jobs"), newJobs));
     }
     await updateBadge();
   } finally {

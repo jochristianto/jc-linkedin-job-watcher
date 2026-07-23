@@ -11,7 +11,7 @@
 
 import { CARD_SELECTOR, parseJobCards } from "./parse.ts";
 import { pollUntilSettled } from "./scan-probe.ts";
-import type { ScanRequest, ScanResponse } from "./scan.ts";
+import { readScanToken, scanTokenMatches, type ScanRequest, type ScanResponse } from "./scan.ts";
 
 /** Poll cadence for settling the lazy list — issue #5's 60–90s cycle budget. */
 const POLL_OPTS = { intervalMs: 800, timeoutMs: 20_000, stableSamples: 3 };
@@ -34,6 +34,10 @@ async function readPage(): Promise<ScanResponse> {
 
 chrome.runtime.onMessage.addListener((message: ScanRequest, _sender, sendResponse) => {
   if (message?.type !== "LJW_SCAN") return undefined;
+  // Read nothing until the message's one-time token matches the token the
+  // background stamped onto THIS tab's URL (PRD §9). A LinkedIn tab the user
+  // opened by hand carries no token, so it is never scraped.
+  if (!scanTokenMatches(readScanToken(window.location.hash), message.token)) return undefined;
   void readPage().then(sendResponse);
   return true; // keep the message channel open for the async reply
 });

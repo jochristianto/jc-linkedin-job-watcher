@@ -18,8 +18,48 @@ const BADGE_CAP = 99;
 
 /** The message `background.ts` sends the invisible scan tab; the content script
  *  scroll-settles the lazy list, parses it, and replies with {@link ScanResponse}.
- *  A single shared shape so the two wrappers agree without redefining it. */
-export type ScanRequest = { type: "LJW_SCAN" };
+ *  A single shared shape so the two wrappers agree without redefining it. The
+ *  `token` is the one-time injection token (PRD §9): the content script only reads
+ *  a page whose own URL carries the same token, so a LinkedIn tab the user opened
+ *  by hand — which has no token — is never scraped. */
+export type ScanRequest = { type: "LJW_SCAN"; token: string };
+
+/** Fragment key under which `background.ts` stamps a page's one-time scan token.
+ *  A URL *fragment* (never sent to LinkedIn) so the server sees the plain search
+ *  URL; only the content script, reading `location.hash`, sees the token. */
+export const SCAN_TOKEN_KEY = "ljw_token";
+
+/**
+ * Stamp a one-time injection token onto a scan URL's fragment (PRD §9). The token
+ * proves the background opened this tab: only it ever writes the fragment, so a
+ * tab the user opened themselves never carries one. Returns a fresh URL string;
+ * the query (keywords, `sortBy=DD`, `start=`) is left untouched.
+ */
+export function withScanToken(url: string, token: string): string {
+  const u = new URL(url);
+  const params = new URLSearchParams(u.hash.replace(/^#/, ""));
+  params.set(SCAN_TOKEN_KEY, token);
+  u.hash = params.toString();
+  return u.toString();
+}
+
+/** The one-time token a page's fragment carries, or null if it carries none
+ *  (a hand-opened LinkedIn tab). `hash` is `window.location.hash` (with or
+ *  without the leading `#`). */
+export function readScanToken(hash: string): string | null {
+  const params = new URLSearchParams(hash.replace(/^#/, ""));
+  return params.get(SCAN_TOKEN_KEY) || null;
+}
+
+/**
+ * Does the LJW_SCAN message's token match the token embedded in the page (PRD §9)?
+ * An exact, non-empty match — an absent page token (`null`), an empty token, or a
+ * missing message token never matches, so the content script refuses to read any
+ * tab the background did not itself prepare.
+ */
+export function scanTokenMatches(pageToken: string | null, messageToken: string | undefined): boolean {
+  return pageToken != null && pageToken !== "" && pageToken === messageToken;
+}
 
 export type ScanResponse = {
   /** The jobs parsed from the settled page (scan-context fields still neutral —
