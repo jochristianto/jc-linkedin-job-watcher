@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Job Watcher — Empty states</title>
+    <link rel="stylesheet" href="tokens.css" />
+    <style>
+      body {
+        padding: 24px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 16px;
+        max-width: 920px;
+        margin: 0 auto;
+      }
+      .cell {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--r-md);
+        min-height: 220px;
+        display: flex;
+        flex-direction: column;
+      }
+      .cell .label {
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--faint);
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .cell .body {
+        flex: 1;
+        display: flex;
+      }
+      h1 {
+        max-width: 920px;
+        margin: 0 auto 16px;
+        font-size: 18px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- The five empty / degraded states, each with a distinct, actionable
+         message. These are what mockups/render.ts renderEmptyState() emits. -->
+    <h1>Empty & degraded states</h1>
+    <div class="grid">
+      <div class="cell">
+        <div class="label">no watches configured</div>
+        <div class="body">
+          <div class="empty" data-kind="no-watches">
+            <div class="empty-icon" aria-hidden="true">🔍</div>
+            <div class="empty-title">No searches yet</div>
+            <div class="empty-body">
+              Add a LinkedIn job search in Options to start watching.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cell">
+        <div class="label">no jobs scanned yet</div>
+        <div class="body">
+          <div class="empty" data-kind="no-jobs-yet">
+            <div class="empty-icon" aria-hidden="true">🌱</div>
+            <div class="empty-title">Nothing scanned yet</div>
+            <div class="empty-body">
+              The first scan hasn't finished. New jobs will show up here.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cell">
+        <div class="label">no new jobs (New mode)</div>
+        <div class="body">
+          <div class="empty" data-kind="no-new">
+            <div class="empty-icon" aria-hidden="true">✅</div>
+            <div class="empty-title">All caught up</div>
+            <div class="empty-body">
+              No new jobs. Switch to All to see everything found.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cell">
+        <div class="label">scan currently running</div>
+        <div class="body">
+          <div class="empty" data-kind="scanning">
+            <div class="empty-icon" aria-hidden="true">🔄</div>
+            <div class="empty-title">Scanning…</div>
+            <div class="empty-body">
+              Checking your searches. This list updates when it's done.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cell">
+        <div class="label">scanning broken</div>
+        <div class="body">
+          <div class="empty" data-kind="scan-error">
+            <div class="empty-icon" aria-hidden="true">⚠️</div>
+            <div class="empty-title">Last scan failed</div>
+            <div class="empty-body">
+              LinkedIn's page may have changed — selectors returned nothing. See
+              Options.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
