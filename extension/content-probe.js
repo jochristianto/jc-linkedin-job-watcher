@@ -48,7 +48,6 @@
     return (
       document.querySelector(".scaffold-layout__list-container") ||
       document.querySelector(".jobs-search-results-list") ||
-      document.querySelector("div.jobs-search-results-list") ||
       document.scrollingElement ||
       document.documentElement
     );
