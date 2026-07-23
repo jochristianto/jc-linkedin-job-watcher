@@ -21,7 +21,16 @@ export type JobView = {
   postedText: string;
   watchName: string;
   url: string;
+  /** You clicked this row and we opened the posting. Highlights the row; it
+   *  stays in the list either way. */
   opened: boolean;
+  /** You dismissed it with the row's tick. Greys the row and drops it out of
+   *  "New" — the only thing that does. */
+  read: boolean;
+  /** Its company is on the blocklist. Greys the row the same way a read job is
+   *  greyed; it stays on screen (the blocklist only stops *future* scans from
+   *  surfacing it) and the Block button flips to Unblock. */
+  blocked: boolean;
 };
 
 export type ListMode = "new" | "all";
@@ -53,9 +62,18 @@ export function metaLine(parts: (string | null | undefined)[]): string {
 }
 
 /**
- * One job row. Fields fail independently: a missing company, location or
- * posted time is simply omitted; a missing title falls back to a placeholder
- * so the row is never blank (PRD §12 "each field fails independently").
+ * One job row: the posting itself as a link, plus the two row actions.
+ *
+ * The row is a `<div>` wrapping an `<a class="job-main">`, not one big `<a>`,
+ * because buttons cannot legally live inside an anchor. The anchor still covers
+ * the whole title/meta block, so clicking the row opens the posting exactly as
+ * before — it just no longer dismisses it. `data-opened` / `data-read` /
+ * `data-blocked` carry the three states for CSS; mount.ts reads `data-job-id`
+ * off this element and `data-action` off the buttons.
+ *
+ * Fields fail independently: a missing company, location or posted time is
+ * simply omitted; a missing title falls back to a placeholder so the row is
+ * never blank (PRD §12 "each field fails independently").
  */
 export function renderJobRow(job: JobView): string {
   // Only the title needs a fallback — it's the one field always rendered. The
@@ -63,25 +81,49 @@ export function renderJobRow(job: JobView): string {
   const title = job.title.trim() ? esc(job.title) : "Untitled role";
   const meta = metaLine([esc(job.company), esc(job.location)]);
   const foot = metaLine([esc(job.postedText), esc(job.watchName)]);
+  // Say *why* the row is greyed — read and blocked look alike otherwise.
+  const tag = job.blocked ? `<span class="job-tag">Blocked</span>` : "";
+
+  // Both actions are toggles, so every one of them is undoable from the row it
+  // was pressed on. That matters most for Block: the only other way back is
+  // hunting the company down in Options.
+  const readLabel = job.read ? "Mark as unread" : "Mark as read";
+  const readBtn = `<button class="job-btn" data-action="read" aria-pressed="${job.read}" title="${readLabel}" aria-label="${readLabel}">${job.read ? "↺" : "✓"}</button>`;
+
+  // A card with no company parsed has nothing to block, so it gets no button
+  // rather than one that would blocklist the empty string (§12 again).
+  const company = job.company.trim();
+  const blockLabel = job.blocked ? `Unblock ${company}` : `Block ${company}`;
+  const blockBtn = company
+    ? `<button class="job-btn" data-action="block" aria-pressed="${job.blocked}" title="${esc(blockLabel)}" aria-label="${esc(blockLabel)}">⊘</button>`
+    : "";
 
   return `
-    <a class="job" href="${esc(job.url)}" data-job-id="${esc(job.id)}" data-read="${job.opened}">
-      <span class="job-dot" aria-hidden="true"></span>
-      <span class="job-body">
-        <span class="job-title">${title}</span>
-        ${meta ? `<span class="job-meta">${meta}</span>` : ""}
-        ${foot ? `<span class="job-foot">${foot}</span>` : ""}
-      </span>
-    </a>`.trim();
+    <div class="job" data-job-id="${esc(job.id)}" data-read="${job.read}" data-opened="${job.opened}" data-blocked="${job.blocked}">
+      <a class="job-main" href="${esc(job.url)}">
+        <span class="job-dot" aria-hidden="true"></span>
+        <span class="job-body">
+          <span class="job-title">${title}</span>
+          ${meta ? `<span class="job-meta">${meta}</span>` : ""}
+          ${foot || tag ? `<span class="job-foot">${foot}${tag}</span>` : ""}
+        </span>
+      </a>
+      <span class="job-actions">${readBtn}${blockBtn}</span>
+    </div>`.trim();
 }
 
 /**
- * The list. In "new" mode opened jobs are filtered out (the popup's default —
- * a quick glance at what's unread). In "all" mode every job stays on screen,
- * opened ones rendered read (PRD §3, and #9's read/unread question).
+ * The list. In "new" mode *read* jobs are filtered out — read, not opened: a job
+ * you clicked open stays here highlighted so you can go back to it, and only the
+ * row's tick removes it. In "all" mode every job stays on screen, read ones
+ * rendered grey (PRD §3, and #9's read/unread question).
+ *
+ * Blocked jobs stay in both modes, greyed. The blocklist governs what *future*
+ * scans surface; silently deleting rows you can already see would be a second,
+ * unasked-for action.
  */
 export function renderList(jobs: JobView[], mode: ListMode): string {
-  const visible = mode === "new" ? jobs.filter((j) => !j.opened) : jobs;
+  const visible = mode === "new" ? jobs.filter((j) => !j.read) : jobs;
   return visible.map(renderJobRow).join("\n");
 }
 

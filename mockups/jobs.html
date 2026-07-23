@@ -35,43 +35,73 @@
       <!-- Non-blocking scan status: the list stays visible underneath. -->
       <div class="banner">🔄 Scanning Japan… last run 3 min ago.</div>
 
+      <!-- All four row states, top to bottom: untouched, opened, read, blocked. -->
       <div class="list">
-        <a class="job" href="#" data-job-id="3901" data-read="false">
-          <span class="job-dot" aria-hidden="true"></span>
-          <span class="job-body">
-            <span class="job-title">Senior Software Engineer</span>
-            <span class="job-meta">Acme Corp · Jakarta, Indonesia</span>
-            <span class="job-foot">2 hours ago · Indonesia</span>
+        <div class="job" data-job-id="3901" data-read="false" data-opened="false" data-blocked="false">
+          <a class="job-main" href="#">
+            <span class="job-dot" aria-hidden="true"></span>
+            <span class="job-body">
+              <span class="job-title">Senior Software Engineer</span>
+              <span class="job-meta">Acme Corp · Jakarta, Indonesia</span>
+              <span class="job-foot">2 hours ago · Indonesia</span>
+            </span>
+          </a>
+          <span class="job-actions">
+            <button class="job-btn" data-action="read" aria-pressed="false" title="Mark as read" aria-label="Mark as read">✓</button>
+            <button class="job-btn" data-action="block" aria-pressed="false" title="Block Acme Corp" aria-label="Block Acme Corp">⊘</button>
           </span>
-        </a>
+        </div>
 
-        <a class="job" href="#" data-job-id="3902" data-read="false">
-          <span class="job-dot" aria-hidden="true"></span>
-          <span class="job-body">
-            <span class="job-title">Backend Engineer (Go)</span>
-            <span class="job-meta">PT Data Nusantara · Remote</span>
-            <span class="job-foot">40 minutes ago · Indonesia</span>
+        <!-- Opened: clicking the row opened the posting and highlighted it here
+             rather than making it disappear. -->
+        <div class="job" data-job-id="3902" data-read="false" data-opened="true" data-blocked="false">
+          <a class="job-main" href="#">
+            <span class="job-dot" aria-hidden="true"></span>
+            <span class="job-body">
+              <span class="job-title">Backend Engineer (Go)</span>
+              <span class="job-meta">PT Data Nusantara · Remote</span>
+              <span class="job-foot">40 minutes ago · Indonesia</span>
+            </span>
+          </a>
+          <span class="job-actions">
+            <button class="job-btn" data-action="read" aria-pressed="false" title="Mark as read" aria-label="Mark as read">✓</button>
+            <button class="job-btn" data-action="block" aria-pressed="false" title="Block PT Data Nusantara" aria-label="Block PT Data Nusantara">⊘</button>
           </span>
-        </a>
+        </div>
 
-        <!-- Read jobs stay on screen in "All" mode: dimmed, no dot, un-bold. -->
-        <a class="job" href="#" data-job-id="3810" data-read="true">
-          <span class="job-dot" aria-hidden="true"></span>
-          <span class="job-body">
-            <span class="job-title">Engineering Manager, Growth</span>
-            <span class="job-meta">Rakuten · Tokyo, Japan</span>
-            <span class="job-foot">Yesterday · Japan</span>
+        <!-- Read jobs stay on screen in "All" mode: dimmed, no dot, un-bold. The
+             ✓ is pressed and flips to ↺, so a mis-tick is one click back. -->
+        <div class="job" data-job-id="3810" data-read="true" data-opened="true" data-blocked="false">
+          <a class="job-main" href="#">
+            <span class="job-dot" aria-hidden="true"></span>
+            <span class="job-body">
+              <span class="job-title">Engineering Manager, Growth</span>
+              <span class="job-meta">Rakuten · Tokyo, Japan</span>
+              <span class="job-foot">Yesterday · Japan</span>
+            </span>
+          </a>
+          <span class="job-actions">
+            <button class="job-btn" data-action="read" aria-pressed="true" title="Mark as unread" aria-label="Mark as unread">↺</button>
+            <button class="job-btn" data-action="block" aria-pressed="false" title="Block Rakuten" aria-label="Block Rakuten">⊘</button>
           </span>
-        </a>
+        </div>
 
-        <a class="job" href="#" data-job-id="3788" data-read="true">
-          <span class="job-dot" aria-hidden="true"></span>
-          <span class="job-body">
-            <span class="job-title">Full-Stack Developer</span>
-            <span class="job-meta">Mercari · Remote (Japan)</span>
-            <span class="job-foot">2 days ago · Japan</span>
+        <!-- Blocked company: greyed the same way a read job is, plus the tag
+             that says which of the two it is. -->
+        <div class="job" data-job-id="3788" data-read="false" data-opened="false" data-blocked="true">
+          <a class="job-main" href="#">
+            <span class="job-dot" aria-hidden="true"></span>
+            <span class="job-body">
+              <span class="job-title">Full-Stack Developer</span>
+              <span class="job-meta">Mercari · Remote (Japan)</span>
+              <span class="job-foot">2 days ago · Japan<span class="job-tag">Blocked</span></span>
+            </span>
+          </a>
+          <span class="job-actions">
+            <button class="job-btn" data-action="read" aria-pressed="false" title="Mark as read" aria-label="Mark as read">✓</button>
+            <button class="job-btn" data-action="block" aria-pressed="true" title="Unblock Mercari" aria-label="Unblock Mercari">⊘</button>
           </span>
-        </a>
+        </div>
       </div>
     </div>
   </body>

@@ -11,7 +11,6 @@
 // logic in its own module, the chrome.*/DOM shell left thin and untested.
 
 import { z } from "zod";
-import { normalizeCompany } from "./filter.ts";
 import type { Settings, Watch, BlockedCompany } from "./types.ts";
 
 // ── Quiet-hours time <-> minute-of-day (PRD §15) ────────────────────────────
@@ -36,16 +35,12 @@ export function timeToMinutes(hhmm: string): number | null {
 
 // ── Company blocklist: normalize on WRITE, never on read (PRD §6) ────────────
 
-/**
- * Build a `BlockedCompany` from what the user typed. The `display` is the
- * trimmed original the UI shows back; `normalized` is folded once here, on
- * write, so a scan compares like-for-like without re-lowercasing the list
- * (PRD §6). Shares {@link normalizeCompany} with the filter so both sides agree.
- */
-export function makeBlockedCompany(display: string): BlockedCompany {
-  const trimmed = display.trim();
-  return { display: trimmed, normalized: normalizeCompany(trimmed) };
-}
+// `makeBlockedCompany` lives in filter.ts, next to the matching it feeds. It is
+// re-exported here because this module was its original home and the Options
+// page still reaches for it here — and because the list view's per-row block
+// button needs it too, and must not drag this module's zod import into the
+// popup bundle just to normalize one string.
+export { makeBlockedCompany } from "./filter.ts";
 
 // ── Watch input (Searches — PRD §3) ─────────────────────────────────────────
 

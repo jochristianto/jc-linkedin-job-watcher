@@ -2,7 +2,7 @@
 // §15 / §17). This ticket (04, issue #15) turns the prefactor entry into the
 // first real scan: an alarm fires, an invisible tab opens on one watch's URL, the
 // content script scroll-settles and parses the page, the tab closes, the new jobs
-// land in storage and the badge shows the unopened count.
+// land in storage and the badge shows the unread count.
 //
 // Per PRD §14 this file holds NO decision logic — every choice lives in a pure,
 // tested module and this only orchestrates `chrome.*`:
@@ -32,7 +32,7 @@ import {
   mergeJobs,
   scanPageUrl,
   stampJobs,
-  unopenedCount,
+  unreadCount,
   withScanToken,
   type ScanNowRequest,
   type ScanNowResponse,
@@ -73,12 +73,15 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 // ── Badge ────────────────────────────────────────────────────────────────────
 
-/** Reflect the unopened count AND health severity onto the toolbar badge (PRD §7/
+/** Reflect the unread count AND health severity onto the toolbar badge (PRD §7/
  *  §16.8): the number in slate when healthy, amber on a soft warning, a red `!` on
- *  a hard failure. `badgeFor` decides text+colour; this only calls the browser API. */
+ *  a hard failure. `badgeFor` decides text+colour; this only calls the browser API.
+ *  Settings come along for the blocklist — a blocked company's jobs stay on screen
+ *  greyed out, but they no longer count towards the badge. */
 async function updateBadge(severity: Severity): Promise<void> {
-  const jobs = await get("jobs");
-  const { text, color } = badgeFor(unopenedCount(jobs), severity);
+  const [jobs, settings] = await Promise.all([get("jobs"), get("settings")]);
+  const blocked = settings.blockedCompanies.map((b) => b.normalized);
+  const { text, color } = badgeFor(unreadCount(jobs, blocked), severity);
   await chrome.action.setBadgeText({ text });
   await chrome.action.setBadgeBackgroundColor({ color });
 }

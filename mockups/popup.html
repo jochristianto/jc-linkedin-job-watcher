@@ -49,51 +49,78 @@
         </div>
       </div>
 
+      <!-- Every row carries its two actions: ✓ dismisses just that job, ⊘ puts
+           its company on the blocklist. Clicking the row itself opens the
+           posting and leaves the row here, highlighted. -->
       <div class="list">
         <!-- Unread: filled dot, bold title -->
-        <a
-          class="job"
-          href="#"
-          data-job-id="3901"
-          data-read="false"
-        >
-          <span class="job-dot" aria-hidden="true"></span>
-          <span class="job-body">
-            <span class="job-title">Senior Software Engineer</span>
-            <span class="job-meta">Acme Corp · Jakarta, Indonesia</span>
-            <span class="job-foot">2 hours ago · Indonesia</span>
+        <div class="job" data-job-id="3901" data-read="false" data-opened="false" data-blocked="false">
+          <a class="job-main" href="#">
+            <span class="job-dot" aria-hidden="true"></span>
+            <span class="job-body">
+              <span class="job-title">Senior Software Engineer</span>
+              <span class="job-meta">Acme Corp · Jakarta, Indonesia</span>
+              <span class="job-foot">2 hours ago · Indonesia</span>
+            </span>
+          </a>
+          <span class="job-actions">
+            <button class="job-btn" data-action="read" aria-pressed="false" title="Mark as read" aria-label="Mark as read">✓</button>
+            <button class="job-btn" data-action="block" aria-pressed="false" title="Block Acme Corp" aria-label="Block Acme Corp">⊘</button>
           </span>
-        </a>
+        </div>
 
-        <a class="job" href="#" data-job-id="3902" data-read="false">
-          <span class="job-dot" aria-hidden="true"></span>
-          <span class="job-body">
-            <span class="job-title">Backend Engineer (Go)</span>
-            <span class="job-meta">PT Data Nusantara · Remote</span>
-            <span class="job-foot">40 minutes ago · Indonesia</span>
+        <!-- Opened: you clicked through to this one. Tinted with an accent bar,
+             still unread, still here — only ✓ removes it from New. -->
+        <div class="job" data-job-id="3902" data-read="false" data-opened="true" data-blocked="false">
+          <a class="job-main" href="#">
+            <span class="job-dot" aria-hidden="true"></span>
+            <span class="job-body">
+              <span class="job-title">Backend Engineer (Go)</span>
+              <span class="job-meta">PT Data Nusantara · Remote</span>
+              <span class="job-foot">40 minutes ago · Indonesia</span>
+            </span>
+          </a>
+          <span class="job-actions">
+            <button class="job-btn" data-action="read" aria-pressed="false" title="Mark as read" aria-label="Mark as read">✓</button>
+            <button class="job-btn" data-action="block" aria-pressed="false" title="Block PT Data Nusantara" aria-label="Block PT Data Nusantara">⊘</button>
           </span>
-        </a>
+        </div>
 
         <!-- Missing location: the meta line degrades to just the company,
              no dangling separator (see #9 / render.ts metaLine). -->
-        <a class="job" href="#" data-job-id="3903" data-read="false">
-          <span class="job-dot" aria-hidden="true"></span>
-          <span class="job-body">
-            <span class="job-title">Platform Engineer, Payments</span>
-            <span class="job-meta">Momo Financial</span>
-            <span class="job-foot">1 hour ago · Japan</span>
+        <div class="job" data-job-id="3903" data-read="false" data-opened="false" data-blocked="false">
+          <a class="job-main" href="#">
+            <span class="job-dot" aria-hidden="true"></span>
+            <span class="job-body">
+              <span class="job-title">Platform Engineer, Payments</span>
+              <span class="job-meta">Momo Financial</span>
+              <span class="job-foot">1 hour ago · Japan</span>
+            </span>
+          </a>
+          <span class="job-actions">
+            <button class="job-btn" data-action="read" aria-pressed="false" title="Mark as read" aria-label="Mark as read">✓</button>
+            <button class="job-btn" data-action="block" aria-pressed="false" title="Block Momo Financial" aria-label="Block Momo Financial">⊘</button>
           </span>
-        </a>
+        </div>
 
-        <!-- Missing posted time: the foot line falls back to just the watch. -->
-        <a class="job" href="#" data-job-id="3904" data-read="false">
-          <span class="job-dot" aria-hidden="true"></span>
-          <span class="job-body">
-            <span class="job-title">Staff Frontend Engineer</span>
-            <span class="job-meta">Rakuten · Tokyo, Japan</span>
-            <span class="job-foot">Japan</span>
+        <!-- Blocked company: greyed and tagged, but still on screen — blocking
+             stops FUTURE scans surfacing it, it doesn't delete what's here. The
+             ⊘ is pressed, so it now reads "Unblock". Also shows the missing
+             posted time degrading to just the watch name. -->
+        <div class="job" data-job-id="3904" data-read="false" data-opened="false" data-blocked="true">
+          <a class="job-main" href="#">
+            <span class="job-dot" aria-hidden="true"></span>
+            <span class="job-body">
+              <span class="job-title">Staff Frontend Engineer</span>
+              <span class="job-meta">Rakuten · Tokyo, Japan</span>
+              <span class="job-foot">Japan<span class="job-tag">Blocked</span></span>
+            </span>
+          </a>
+          <span class="job-actions">
+            <button class="job-btn" data-action="read" aria-pressed="false" title="Mark as read" aria-label="Mark as read">✓</button>
+            <button class="job-btn" data-action="block" aria-pressed="true" title="Unblock Rakuten" aria-label="Unblock Rakuten">⊘</button>
           </span>
-        </a>
+        </div>
       </div>
     </div>
   </body>

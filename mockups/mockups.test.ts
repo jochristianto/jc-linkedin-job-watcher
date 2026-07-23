@@ -46,6 +46,45 @@ test("the tab shows read jobs staying on screen in All mode", () => {
   assert.match(html, /data-read="false"/);
 });
 
+test("both views show an opened job staying on screen, highlighted rather than gone", () => {
+  for (const name of ["./popup.html", "./jobs.html"]) {
+    const html = read(name);
+    // data-opened + data-read="false" on the same row is the whole point: you
+    // clicked through to it and it is still in the list.
+    assert.match(html, /data-read="false" data-opened="true"/, name);
+  }
+});
+
+test("every row carries its own read and block buttons", () => {
+  for (const name of ["./popup.html", "./jobs.html"]) {
+    const html = read(name);
+    assert.match(html, /data-action="read"/, `${name} read`);
+    assert.match(html, /data-action="block"/, `${name} block`);
+
+    // The buttons sit outside the anchor — a <button> inside <a> is invalid
+    // HTML. Check each anchor's own body, not the file as a whole, or the match
+    // runs past </a> into the next row's buttons.
+    for (const [, body] of html.matchAll(/<a class="job-main"[^>]*>([\s\S]*?)<\/a>/g)) {
+      assert.doesNotMatch(body!, /<button/, `${name} button inside anchor`);
+    }
+  }
+});
+
+test("both views show a blocked company greyed and tagged, still on screen", () => {
+  for (const name of ["./popup.html", "./jobs.html"]) {
+    const html = read(name);
+    assert.match(html, /data-blocked="true"/, `${name} state`);
+    assert.match(html, /class="job-tag">Blocked</, `${name} tag`);
+    // Blocking is undoable from the row it was pressed on.
+    assert.match(html, /data-action="block" aria-pressed="true"/, `${name} unblock`);
+  }
+});
+
+test("the tab shows the read toggle flipped to its undo state", () => {
+  const html = read("./jobs.html");
+  assert.match(html, /data-action="read" aria-pressed="true"[^>]*title="Mark as unread"/);
+});
+
 test("a job row degrades when a field is missing (no dangling separator)", () => {
   const html = read("./popup.html");
   // The mockup includes a row whose meta is company-only (location missing).

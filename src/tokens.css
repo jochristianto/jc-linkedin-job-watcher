@@ -226,19 +226,29 @@ body {
   gap: var(--s-2);
 }
 
+/* A row is a container, not one big link: the posting is the <a class="job-main">
+ * filling the row, the two actions are buttons beside it (buttons cannot legally
+ * live inside an anchor). Clicking anywhere but a button still opens the job. */
 .job {
   display: flex;
+  align-items: flex-start;
   gap: var(--s-2);
   padding: var(--s-3);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  text-decoration: none;
-  color: inherit;
   position: relative;
 }
 .job:hover {
   border-color: var(--accent);
+}
+.job-main {
+  display: flex;
+  gap: var(--s-2);
+  flex: 1;
+  min-width: 0;
+  text-decoration: none;
+  color: inherit;
 }
 .job-dot {
   width: 8px;
@@ -248,15 +258,43 @@ body {
   margin-top: 6px;
   flex: 0 0 auto;
 }
-/* Read state: dim, drop the dot, un-bold the title. In "All" mode a read job
- * stays on screen looking exactly like this. */
-.job[data-read="true"] {
-  background: var(--surface-2);
+
+/* Opened: you clicked through to the posting. The row STAYS on screen — marked,
+ * not removed — tinted with an accent bar down its left edge, so you can find
+ * your way back to the one you were just looking at. */
+.job[data-opened="true"] {
+  background: var(--accent-weak);
+  border-color: var(--accent);
 }
-.job[data-read="true"] .job-dot {
+.job[data-opened="true"]::before {
+  content: "";
+  position: absolute;
+  inset: var(--s-2) auto var(--s-2) 0;
+  width: 3px;
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: var(--accent);
+}
+
+/* Dealt with — either you ticked it read, or you blocked its company. Both grey
+ * out the same way (dim, no dot, un-bold title), and both come after the opened
+ * highlight so they win at equal specificity: a job you opened and then
+ * dismissed reads as dismissed. Read rows show only in "All"; blocked rows stay
+ * in both, because blocking governs future scans, not what's already here. */
+.job[data-read="true"],
+.job[data-blocked="true"] {
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+.job[data-read="true"]::before,
+.job[data-blocked="true"]::before {
+  display: none;
+}
+.job[data-read="true"] .job-dot,
+.job[data-blocked="true"] .job-dot {
   visibility: hidden;
 }
-.job[data-read="true"] .job-title {
+.job[data-read="true"] .job-title,
+.job[data-blocked="true"] .job-title {
   font-weight: 500;
   color: var(--muted);
 }
@@ -265,6 +303,60 @@ body {
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+}
+
+/* ---- Row actions: ✓ dismiss, ⊘ block the company ---- */
+.job-actions {
+  display: flex;
+  gap: var(--s-1);
+  flex: 0 0 auto;
+}
+.job-btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.job-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+/* Pressed = the state is already on, and the button is now the undo: ↺ puts a
+ * read job back, ⊘ unblocks the company. */
+.job-btn[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-weak);
+}
+.job-btn[data-action="block"]:hover,
+.job-btn[data-action="block"][aria-pressed="true"] {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.job-btn[data-action="block"][aria-pressed="true"] {
+  background: var(--danger-weak);
+}
+
+/* Says *why* a row is greyed — read and blocked look identical otherwise. */
+.job-tag {
+  display: inline-block;
+  margin-left: var(--s-2);
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  background: var(--danger-weak);
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 600;
+}
+.job-tag:first-child {
+  margin-left: 0;
 }
 .job-title {
   font-weight: 700;

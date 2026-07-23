@@ -3,14 +3,26 @@
 // Reads the `jobs`/`settings`/`health` storage keys, renders the page with the
 // pure assembler in view.ts, and delegates clicks off the root: a job click
 // marks the job opened *before* the tab opens (PRD §9 — a closing popup can cut
-// off a write in flight) and re-renders so the badge decrements immediately.
-// It touches chrome.storage, chrome.tabs, chrome.runtime and the DOM, so it is
-// not unit-tested; every decision it makes lives tested in view.ts.
+// off a write in flight) and re-renders so the row shows as highlighted
+// immediately. It touches chrome.storage, chrome.tabs, chrome.runtime and the
+// DOM, so it is not unit-tested; every decision it makes lives tested in view.ts.
+//
+// Three separate row actions, because they mean three different things: opening
+// the posting (click the row), dismissing it (the ✓ button), and never wanting
+// that company again (the ⊘ button). Only the second one empties the list.
 
 import * as storage from "./storage.ts";
-import { renderPage, markJobOpened, markAllOpened } from "./view.ts";
+import {
+  renderPage,
+  markJobOpened,
+  markAllRead,
+  setJobRead,
+  toggleBlockedCompany,
+  unreadCount,
+} from "./view.ts";
 import type { ListMode } from "./render.ts";
-import type { ScanNowRequest } from "./scan.ts";
+import { badgeFor, type ScanNowRequest } from "./scan.ts";
+import { isCompanyBlocked } from "./filter.ts";
 
 /** The storage keys `render` reads. A background cycle rewriting any of them —
  *  the one a "Scan now" click just started, or a routine alarm tick — repaints
@@ -65,12 +77,31 @@ export async function mountListView(
       mode,
       title,
       activeWatchId,
+      blockedCompanies: settings.blockedCompanies.map((b) => b.normalized),
       scanning: scanState.isScanning,
       scanMode: health.mode,
       severity: health.severity,
       message: health.message,
       pushWarn: pushHealth.warn,
     });
+  }
+
+  /**
+   * Repaint the toolbar badge from storage. The background sets it after every
+   * scan, but marking a row read (or blocking its company) changes the count
+   * from in here, and nothing else would notice until the next cycle. Same
+   * `badgeFor` the background uses, so the two can't drift apart.
+   */
+  async function refreshBadge(): Promise<void> {
+    const [jobs, settings, health] = await Promise.all([
+      storage.get("jobs"),
+      storage.get("settings"),
+      storage.get("health"),
+    ]);
+    const blocked = settings.blockedCompanies.map((b) => b.normalized);
+    const { text, color } = badgeFor(unreadCount(Object.values(jobs), blocked), health.severity);
+    await chrome.action.setBadgeText({ text });
+    await chrome.action.setBadgeBackgroundColor({ color });
   }
 
   async function onClick(e: MouseEvent): Promise<void> {
@@ -96,14 +127,14 @@ export async function mountListView(
       return;
     }
 
-    // Mark all as read: open every job, clear the toolbar badge, and empty New
+    // Mark all as read: dismiss every job, clear the toolbar badge, and empty New
     // in one action (mockups decision 4).
     if (target.closest("#mark-all-read")) {
       e.preventDefault();
       const jobs = await storage.get("jobs");
-      const next = markAllOpened(jobs, Date.now());
+      const next = markAllRead(jobs, Date.now());
       if (next !== jobs) await storage.set("jobs", next);
-      await chrome.action.setBadgeText({ text: "" });
+      await refreshBadge();
       await render();
       return;
     }
@@ -128,7 +159,60 @@ export async function mountListView(
       return;
     }
 
-    const link = target.closest<HTMLAnchorElement>("a.job");
+    // Both row actions live inside the row, so resolve the row once and read
+    // which button (if any) was hit off `data-action`.
+    const row = target.closest<HTMLElement>(".job");
+    if (!row) return;
+    const id = row.dataset.jobId;
+    if (!id) return;
+
+    const action = target.closest<HTMLElement>(".job-btn")?.dataset.action;
+
+    // ✓ / ↺ — dismiss this one job, or bring it back. The only thing that drops
+    // a row out of New, which is the whole point of it being its own button.
+    if (action === "read") {
+      e.preventDefault();
+      const jobs = await storage.get("jobs");
+      const next = setJobRead(jobs, id, !jobs[id]?.read, Date.now());
+      if (next !== jobs) await storage.set("jobs", next);
+      await refreshBadge();
+      await render();
+      return;
+    }
+
+    // ⊘ — blocklist this job's company straight from the row, no trip to
+    // Options. Existing rows stay on screen greyed; it's future scans that stop
+    // surfacing the company (PRD §6). Pressing it again unblocks.
+    if (action === "block") {
+      e.preventDefault();
+      const [jobs, settings] = await Promise.all([
+        storage.get("jobs"),
+        storage.get("settings"),
+      ]);
+      const company = jobs[id]?.company;
+      if (!company) return;
+
+      // Read the current state from settings rather than the row's
+      // `data-blocked`: the markup could be a repaint behind an Options edit,
+      // and this way the button can never block something already blocked.
+      const wasBlocked = isCompanyBlocked(
+        company,
+        settings.blockedCompanies.map((b) => b.normalized),
+      );
+      const blockedCompanies = toggleBlockedCompany(
+        settings.blockedCompanies,
+        company,
+        !wasBlocked,
+      );
+      if (blockedCompanies !== settings.blockedCompanies) {
+        await storage.set("settings", { ...settings, blockedCompanies });
+      }
+      await refreshBadge();
+      await render();
+      return;
+    }
+
+    const link = target.closest<HTMLAnchorElement>("a.job-main");
     if (!link) return;
 
     // Modifier / middle clicks let the browser's own <a href> open a background
@@ -138,8 +222,6 @@ export async function mountListView(
       e.button === 1 || e.ctrlKey || e.metaKey || e.shiftKey;
     if (!background) e.preventDefault(); // must be synchronous, before any await
 
-    const id = link.dataset.jobId;
-    if (!id) return;
     await openJob(id, background);
   }
 
@@ -148,8 +230,11 @@ export async function mountListView(
     const job = jobs[id];
     if (!job) return;
 
-    // Write first (PRD §9), then re-render so the badge drops by one.
-    await storage.set("jobs", markJobOpened(jobs, id, Date.now()));
+    // Write first (PRD §9), then re-render so the row shows as opened. The badge
+    // does NOT move here — opening is not dismissing, and the job is still in the
+    // list waiting for you to come back to it.
+    const next = markJobOpened(jobs, id, Date.now());
+    if (next !== jobs) await storage.set("jobs", next);
     await render();
 
     // A background click already opened the tab natively; only the foreground

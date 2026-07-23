@@ -96,9 +96,9 @@ function isRepostedCard(card: Element): boolean {
  * intact. Cards whose `id`, `url` or `title` are missing are dropped via
  * `isSavableJob` (§16.4) — the three load-bearing fields.
  *
- * The scan-context fields (`foundAt`, `watchId`, `opened`, `openedAt`) are not on
- * the page; they are stamped in by the scan loop (a later ticket) and left at
- * neutral defaults here so this stays pure.
+ * The scan-context fields (`foundAt`, `watchId`, `opened`/`openedAt`,
+ * `read`/`readAt`) are not on the page; they are stamped in by the scan loop (a
+ * later ticket) and left at neutral defaults here so this stays pure.
  */
 export function parseJobCards(doc: Document): Job[] {
   const cards = Array.from(doc.querySelectorAll(CARD_SELECTOR));
@@ -117,6 +117,8 @@ export function parseJobCards(doc: Document): Job[] {
       watchId: "",
       opened: false,
       openedAt: null,
+      read: false,
+      readAt: null,
     };
     if (isSavableJob(job)) jobs.push(job);
   }

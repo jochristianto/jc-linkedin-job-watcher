@@ -70,11 +70,11 @@ The first scan fires on the next alarm tick — or immediately, if you open the 
 
 ## Daily use
 
-**Badge on the toolbar icon** — how many jobs you haven't opened yet.
+**Badge on the toolbar icon** — how many jobs you haven't dealt with yet. Opening a job doesn't change it; marking it read does.
 
 | Badge | Meaning |
 |---|---|
-| Slate number | Unopened count (`99+` past 99) |
+| Slate number | Unread count (`99+` past 99) |
 | Amber | Soft warning — layout may have changed, or scans have gone stale |
 | Red `!` | Hard failure — signed out of LinkedIn, or a verification challenge |
 
@@ -83,12 +83,16 @@ The first scan fires on the next alarm tick — or immediately, if you open the 
 
 In both views:
 
-- **Click a job** → marks it opened (badge drops by one) and opens the posting in a new tab. Cmd/Ctrl/middle-click opens it in the background.
+- **Click a job** → opens the posting in a new tab and **highlights the row**, which stays in the list. Nothing disappears because you looked at it. Cmd/Ctrl/middle-click opens it in the background.
+- **✓ on a row** → marks that one job read: the row greys out, drops out of **New**, and the badge falls by one. This is the only thing that clears a job. Press it again (**↺**) to bring the job back.
+- **⊘ on a row** → adds that job's company to your blocklist, without a trip to Options. Future scans stop surfacing it. Jobs from that company already in your list stay on screen, greyed and tagged **Blocked**, and stop counting towards the badge. Press it again to unblock.
 - **Scan now** runs a cycle immediately, ignoring the interval and quiet hours. It reads *Scanning…* (greyed out) while a cycle is in flight, and the list repaints on its own when that cycle finishes. After a manual scan the next automatic one is a full interval away, not stacked minutes behind. When a verification challenge has halted scanning, the same button turns red and reads **Resume** — that is how you clear the halt.
 - **Watch chips** filter the list to one search. The badge still counts across all of them.
-- **New ⇄ All** toggles between unopened-only and everything.
+- **New ⇄ All** toggles between unread-only and everything.
 - **Mark all as read** clears the badge and empties New in one action.
 - Your last chip + mode are remembered, so reopening the popup lands you where you left off.
+
+A row therefore has three looks: plain (untouched), highlighted with a blue bar (you opened it), and greyed (you read it, or blocked its company).
 
 ---
 
@@ -98,7 +102,7 @@ In both views:
 Add, edit, remove, and individually enable/disable saved searches. Enabled searches all run on the same cycle, strictly one after another — never in parallel.
 
 ### Filters
-- **Blocked companies** — matched case-insensitively; normalised once when saved
+- **Blocked companies** — matched case-insensitively; normalised once when saved. The **⊘** button on any job row adds and removes entries here too
 - **Blocked title keywords** — e.g. "Intern", "Senior"
 - **Hide reposted** — drop anything LinkedIn marks as "Reposted"
 
@@ -122,7 +126,7 @@ There's also automatic back-off: after **3** consecutive empty scans, the interv
 Optional, and *additive* to the desktop notification — never a replacement. See below.
 
 ### Retention
-How long records are kept: seen IDs `15` days, opened jobs `7` days, unopened jobs `30` days, seen hard cap `50,000`. **Not yet enforced** — see [Known limitations](#known-limitations).
+How long records are kept: seen IDs `15` days, jobs you've opened or read `7` days, untouched jobs `30` days, seen hard cap `50,000`. **Not yet enforced** — see [Known limitations](#known-limitations).
 
 > **Save settings** writes your changes. **Reset** reverts the form to the last-saved values — it is not a factory reset.
 

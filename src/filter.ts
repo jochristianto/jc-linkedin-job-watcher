@@ -7,6 +7,8 @@
 // browser. Every build ticket's decision logic follows this same shape — see
 // prd.md §14 ("How the agent knows it hasn't broken anything").
 
+import type { BlockedCompany } from "./types.ts";
+
 /** The subset of a Job (PRD §5) the filter decision needs. Structural: a full
  *  `Job` record satisfies it, so `passesFilters(job, rules)` type-checks. */
 export type FilterJob = {
@@ -31,6 +33,20 @@ export type FilterRules = {
  */
 export function normalizeCompany(name: string): string {
   return name.trim().toLowerCase();
+}
+
+/**
+ * Build a `BlockedCompany` from what the user typed. The `display` is the
+ * trimmed original the UI shows back; `normalized` is folded once here, on
+ * write, so a scan compares like-for-like without re-lowercasing the list
+ * (PRD §6). The write-side twin of {@link isCompanyBlocked}, and the single
+ * shape both writers produce: the Options blocklist field and the list view's
+ * per-row block button. The type import is erased at build time, so this module
+ * stays the dependency-free pure logic it was.
+ */
+export function makeBlockedCompany(display: string): BlockedCompany {
+  const trimmed = display.trim();
+  return { display: trimmed, normalized: normalizeCompany(trimmed) };
 }
 
 /**

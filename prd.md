@@ -48,9 +48,11 @@ New jobs surface in two places: a badge count on the extension icon, and a deskt
 
 ### List view
 
-- Shows unopened jobs, newest first: title, company, location, posted time, source watch
-- Badge on the extension icon shows unopened count
-- Click a job → opens it in a new tab and marks it opened in the same action
+- Shows unread jobs, newest first: title, company, location, posted time, source watch
+- Badge on the extension icon shows unread count
+- Click a job → opens it in a new tab and **highlights** the row. Opening is not dismissing: the row stays in the list, so a job you clicked into is still there when you come back to it
+- Each row has its own "mark as read" button — the only action that greys a row, drops it out of "New" and decrements the badge. It toggles, so a mis-click is one press back
+- Each row has its own "block this company" button, so a bad company can be blocklisted from where you see it rather than from Options. Already-listed jobs from that company stay on screen, greyed and tagged, and stop counting towards the badge; it's future scans that stop surfacing it. It toggles too
 - Filter chips to show only one watch's results
 - Toggle between "New" and "All"
 - "Mark all as read"
@@ -107,8 +109,10 @@ type Job = {
   url: string;
   foundAt: number;
   watchId: string; // which saved search surfaced it
-  opened: boolean;
+  opened: boolean; // you clicked through to the posting — highlights the row
   openedAt: number | null;
+  read: boolean; // you dismissed it — greys the row, drops it out of "New"
+  readAt: number | null;
 };
 
 type Watch = {
@@ -223,7 +227,7 @@ Separate top-level keys, so a write to one doesn't rewrite everything else:
 | `seen` | ID → timestamp | Prevents re-notifying | ~10 chars per entry; 10k entries ≈ 300KB |
 | `jobs` | Full records   | Feeds the list view   | Only for jobs still worth displaying     |
 
-Once a job has been opened and some time has passed, drop its full record but keep the `seen` entry. You don't need the title and company of something clicked three weeks ago — only the memory not to alert on it again. This split is what keeps storage from growing unbounded.
+Once a job has been opened or read and some time has passed, drop its full record but keep the `seen` entry. You don't need the title and company of something clicked three weeks ago — only the memory not to alert on it again. This split is what keeps storage from growing unbounded.
 
 ### Seen means evaluated, not shown
 
@@ -259,10 +263,11 @@ async function collectGarbage() {
   ]);
   const r = settings.retention;
 
-  // Full records: shorter life once opened
+  // Full records: shorter life once you've dealt with the job — opened or read
   const keptJobs: Record<string, Job> = {};
   for (const [id, job] of Object.entries(jobs)) {
-    const limit = (job.opened ? r.openedJobDays : r.unopenedJobDays) * DAY;
+    const handled = job.opened || job.read;
+    const limit = (handled ? r.openedJobDays : r.unopenedJobDays) * DAY;
     if (now - job.foundAt < limit) keptJobs[id] = job;
   }
 
@@ -289,7 +294,7 @@ async function collectGarbage() {
 | Setting           | Default | Reasoning                                                                                                                  |
 | ----------------- | ------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `seenDays`        | 15      | A posting down for two weeks won't resurface in search results. If it somehow did, it'd be a genuinely new posting anyway. |
-| `openedJobDays`   | 7       | You've already clicked it; the full record is dead weight.                                                                 |
+| `openedJobDays`   | 7       | You've already opened or read it; the full record is dead weight.                                                          |
 | `unopenedJobDays` | 30      | Long gone from LinkedIn by then regardless.                                                                                |
 | `seenHardCap`     | 50,000  | Trims to 40,000 when breached. Pure safety net.                                                                            |
 
@@ -510,7 +515,7 @@ When a scan opens its own tab, it passes a one-time token to the injected script
 1. **Scrape once, manually** — a content script that reads job cards from a LinkedIn search page you already have open. Prove the selectors work before anything else.
 2. **Storage + dedupe** — save seen IDs, detect what's new.
 3. **Single-watch scan loop** — alarm, background tab, one page, close.
-4. **List view** — popup with badge count and mark-as-opened on click. Build it as a shared component from the start.
+4. **List view** — popup with badge count, highlight-on-click, and per-row mark-as-read / block-company. Build it as a shared component from the start.
 5. **Multi-watch + pagination** — sequential cycle, scan lock, injection token.
 6. **Notifications** — merged per cycle, opening `jobs.html`.
 7. **Options UI** — watchlist, blocklists, interval, page depth, retention.

@@ -9,6 +9,7 @@
 import type { Job, Watch } from "./types.ts";
 import type { JobsMap } from "./storage.ts";
 import type { Severity } from "./health.ts";
+import { isCompanyBlocked } from "./filter.ts";
 
 /** Postings per results page on `/jobs/search/` — the `&start=` step (PRD §9:
  *  `url + &start=(page-1)*25`). */
@@ -127,8 +128,9 @@ export function stampJobs(jobs: Job[], watchId: string, foundAt: number): Job[] 
 /**
  * Merge freshly-found jobs into the persisted `jobs` map (PRD §6), keyed by id.
  * A job already in the store keeps its stored record — crucially its
- * `opened`/`openedAt` state — so a re-scan of a job the user already opened does
- * not silently reset it back to unopened and re-inflate the badge.
+ * `opened`/`openedAt` and `read`/`readAt` state — so a re-scan of a job the user
+ * already dismissed does not silently reset it back to unread and re-inflate the
+ * badge.
  */
 export function mergeJobs(existing: JobsMap, newJobs: Job[]): JobsMap {
   const merged: JobsMap = { ...existing };
@@ -138,9 +140,21 @@ export function mergeJobs(existing: JobsMap, newJobs: Job[]): JobsMap {
   return merged;
 }
 
-/** The unopened-job count the badge shows (PRD §7). */
-export function unopenedCount(jobs: JobsMap): number {
-  return Object.values(jobs).filter((j) => !j.opened).length;
+/**
+ * The unread-job count the badge shows (PRD §7). Unread, not unopened: opening a
+ * job only highlights its row, so the badge drops when you actually dismiss one
+ * with the row's tick (or "Mark all read").
+ *
+ * Jobs from a blocked company never count. Blocking from a row leaves the
+ * already-found rows on screen (greyed) rather than deleting them, so without
+ * this the badge would keep nagging about a company you just told it to stop
+ * showing you. `blockedNormalized` is the already-lowercased fragment list from
+ * `settings.blockedCompanies` — same form `passesFilters` takes.
+ */
+export function unreadCount(jobs: JobsMap, blockedNormalized: string[] = []): number {
+  return Object.values(jobs).filter(
+    (j) => !j.read && !isCompanyBlocked(j.company, blockedNormalized),
+  ).length;
 }
 
 /** The badge label for a count: empty (no badge) at zero, `99+` past the cap,
@@ -160,16 +174,16 @@ export function badgeColor(severity: Severity): string {
     case "warn":
       return "#b45309"; // amber — a soft warning (structure-changed / stalled)
     case "ok":
-      return "#5b7083"; // slate — the ordinary unopened-count badge
+      return "#5b7083"; // slate — the ordinary unread-count badge
   }
 }
 
 /**
- * The toolbar badge's `{ text, color }` for a given unopened count and health
+ * The toolbar badge's `{ text, color }` for a given unread count and health
  * severity (PRD §16.8). A healthy badge is just the count in slate. A hard
- * failure always shows a red `!` — even at zero unopened jobs — so the break is
+ * failure always shows a red `!` — even at zero unread jobs — so the break is
  * visible when there is no count to colour; a warning keeps the count but turns
- * amber (or shows the `!` marker when nothing is unopened).
+ * amber (or shows the `!` marker when nothing is unread).
  */
 export function badgeFor(count: number, severity: Severity): { text: string; color: string } {
   const color = badgeColor(severity);
