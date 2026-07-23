@@ -171,9 +171,7 @@ export function parseSettingsForm(raw: OptionsFormValues, base: Settings): Parse
       unopenedJobDays: unopenedJobDays!,
       seenHardCap: seenHardCap!,
     },
-    // The Telegram section (#22): the two secrets are trimmed but not otherwise
-    // validated here — a bad token/chat id surfaces via Send test message and the
-    // §16.7 soft warning, not an inline form error.
+    // The Telegram section (#22) — trim the secrets, no further validation (see above).
     push: {
       enabled: raw.pushEnabled,
       botToken: raw.pushBotToken.trim(),
