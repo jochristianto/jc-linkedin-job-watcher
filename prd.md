@@ -173,6 +173,8 @@ type RetentionConfig = {
 type ScanState = {
   isScanning: boolean;
   startedAt: number | null;
+  openTabIds: number[]; // tabs the live cycle has open, for orphan cleanup (§17.2)
+  pendingCatchUp: boolean; // next scan runs at catchUpPages depth (§17.5)
 };
 
 // Health / failure state — persisted so the popup, badge and notifications all
@@ -457,17 +459,20 @@ Write to storage **before** opening the tab. If the tab opens first and the popu
 
 ### Browser startup
 
-`chrome.alarms` survive a browser restart, but **a missed alarm does not fire retroactively**. If Chrome was closed for 9 hours, nothing ran, and the alarm resumes on its normal schedule — possibly not for another 5 minutes.
+`chrome.alarms` survive a browser restart. **A missed alarm fires immediately on relaunch** (confirmed against Chromium in #5 — the original PRD guess that it doesn't was wrong), which is exactly why the startup handler must *not* also run an inline catch-up scan: that would double-run. Instead it arms a catch-up flag and lets the alarm do the one scan (§17, decision 5).
 
 ```ts
 chrome.runtime.onStartup.addListener(async () => {
-  await clearStaleLock(); // isScanning may be stuck true from an interrupted cycle
-  await ensureAlarmExists(); // recreate if it didn't survive
-  await runScanCycle({ pages: settings.catchUpPages }); // don't wait for the next tick
+  const state = await loadScanState();
+  const { tabIdsToClose, state: swept } = recoverStaleLock(state, Date.now(), settings.staleLockMs);
+  await Promise.all(tabIdsToClose.map((id) => chrome.tabs.remove(id).catch(() => {})));
+  await saveScanState(requestCatchUp(swept)); // next scan runs at catchUpPages depth
+  await ensureAlarmExists(); // re-arm the one-shot if it didn't survive
+  // No inline scan — the alarm (replayed-missed or freshly armed) runs it once (§17.5).
 });
 ```
 
-`clearStaleLock()` is essential. If Chrome was killed mid-scan, `isScanning` stays `true` and every future alarm skips forever. Check `startedAt` — anything older than ~5 minutes is stale.
+`recoverStaleLock()` is essential and now runs on **every** alarm tick, not only startup (§16.6/§17): if Chrome was killed mid-scan, `isScanning` stays `true` and every future alarm skips forever. It clears any lock older than `staleLockMs` (~5 min) *and* closes the tabs the dead cycle orphaned (§17.2), and preserves the pending catch-up so the deep scan is never dropped.
 
 The gap itself costs less than it appears. Dedupe is by job ID, not by "what changed since last check," so a restart scan reports everything unfamiliar regardless of when it appeared. You find out later, not never. What you can lose is anything pushed past your page depth during the gap — hence `catchUpPages` (default 4), used once on startup before reverting to the normal depth. **Quiet-hours resume is the same case** and reuses the same catch-up scan (§15): waking after an 8-hour quiet window is indistinguishable from waking after an 8-hour close.
 
@@ -511,7 +516,7 @@ When a scan opens its own tab, it passes a one-time token to the injected script
 7. **Options UI** — watchlist, blocklists, interval, page depth, retention.
 8. **Garbage collection** — daily alarm, the two-lifetime prune, hard cap.
 9. **Telegram push** — send function, options fields, test button.
-10. **Startup handling** — stale lock clear, alarm recreate, catch-up scan.
+10. **Startup handling** — keepalive around the cycle, stale-lock recovery + orphan-tab sweep on every tick, alarm recreate, catch-up *flag* (not an inline scan) so the replayed missed alarm doesn't double-run (§17).
 11. **Polish** — filter chips, mark-all-read.
 
 ---
@@ -534,7 +539,7 @@ This is against LinkedIn's ToS. Personal single-user use in your own logged-in b
 
 ### Background tabs and MV3
 
-Manifest V3 service workers get killed after ~30 seconds idle. Use `chrome.alarms` to wake them rather than `setInterval`, which will not survive. A scan cycle spanning 60–90 seconds needs to be resilient to the worker being torn down mid-cycle — persist progress to storage as you go, and treat `isScanning` with a timestamp so a stale lock can expire rather than blocking forever.
+Manifest V3 service workers get killed after ~30 seconds idle (there is no longer a maximum *lifetime* — idleness, not age, is what kills them; issue #3). Use `chrome.alarms` to wake them rather than a bare `setInterval`, which will not survive a teardown. A scan cycle spanning 60–90 seconds keeps itself alive with a 25s keepalive ping — the Chrome-sanctioned pattern — and treats `isScanning` with a timestamp so a stale lock expires rather than blocking forever. §17 settles the full policy: **keepalive, not restartability** (a lost cycle costs one skipped scan; dedupe makes the re-scan lossless), orphaned tabs are swept on stale-lock recovery, and no per-page cursor is persisted.
 
 ---
 
@@ -579,6 +584,7 @@ Every piece of **pure logic** — a function of its inputs, no `chrome.*`, no DO
 | Garbage collection — two lifetimes + hard cap (§7) | 08 | §7 is already pure; lift it verbatim into a `collectGarbage(state, now)` that takes `{seen, jobs, retention, now}` and returns `{seen, jobs}` |
 | Scheduling — jitter, quiet hours, in-cycle pauses, back-off (§15) | 03/10 | **Reference example** — `src/schedule.ts` + `src/schedule.test.ts` |
 | Failure diagnosis & surfacing — page classification, health reducer, stale-lock, push-fail, partial-parse (§16) | 08 | **Reference example** — `src/health.ts` + `src/health.test.ts` |
+| Worker lifecycle — keepalive constant, catch-up flag, orphan-tab tracking, stale-lock recovery (§17) | 10 | **Reference example** — `src/lifecycle.ts` + `src/lifecycle.test.ts` |
 | Card parser — DOM → `Job` | 01 | Fixture-driven, see below |
 
 That is the line. Anything that is *only* an orchestration of `chrome.*` calls (opening tabs, firing alarms, setting the badge) is **not** unit-tested — see "the untestable remainder".
@@ -610,7 +616,7 @@ Background tabs opening, alarms firing on schedule, desktop notifications appear
 
 1. **After ticket 03 (single-watch scan loop):** load unpacked; confirm the alarm fires, a hidden tab opens and closes, and one page's jobs land in `chrome.storage.local`.
 2. **After ticket 06 (notifications):** confirm a cycle with new jobs shows exactly one merged desktop notification, and clicking it opens `jobs.html` (reusing an existing tab, not spawning duplicates).
-3. **After ticket 10 (startup handling):** quit Chrome mid-scan, relaunch; confirm the stale lock clears, the alarm is recreated, and the catch-up scan runs.
+3. **After ticket 10 (startup handling):** quit Chrome mid-scan, relaunch; confirm the stale lock clears, any tabs the dead cycle left open are closed, the alarm is recreated, and **exactly one** catch-up scan runs (not two — §17.5).
 
 Plus a Telegram phone check (ticket 09, `npm run send-test-message`). Each checkpoint ticket carries its exact steps in its "Done criteria".
 
@@ -699,3 +705,111 @@ The split: hard failures (challenge, logged out) get an active push — a deskto
 ### Structural consequence
 
 Per §14, the decision logic is pure and tested (`src/health.ts` + `src/health.test.ts`): `classifyPage`, `aggregateOutcome`, `reduceScanHealth`, `isSavableJob`, `fieldMissingAcrossAll`, `reducePushHealth`, `isLockStale`. The content script reads the live DOM/URL into a `PageSignals`; `background.ts` persists the `HealthState`, sets the badge, and fires notifications — none of that is unit-tested, all of the decisions are.
+
+---
+
+## 17. How a scan cycle stays alive, and picks up where it left off
+
+Resolves issue #11 / ticket 10. Issue #3 turned the fog into facts: the MV3
+worker dies after ~30s of not touching an extension API (no maximum lifetime any
+more), nothing in memory survives a teardown, Chrome sanctions a specific
+keepalive pattern, and the dead air in a cycle is the wait for LinkedIn to render
+(`tabs.create` resolves before the page loads). The facts are known; what to *do*
+about them is what this section decides. Real cycle timing from #5 anchors it: two
+watches × two pages ≈ 60–90s (§9), and page 1 settles in a few seconds after the
+tab opens. The pure logic lives in `src/lifecycle.ts` (a §14 reference example);
+`background.ts` is the thin wrapper that runs the keepalive, opens/closes tabs,
+and persists the state.
+
+Five decisions, five answers:
+
+1. **Keepalive alone — not restartability.** A cycle survives its own dead air
+   with the Chrome-sanctioned pattern: `const k = setInterval(() =>
+   chrome.runtime.getPlatformInfo(), KEEPALIVE_PING_MS)` around the whole cycle,
+   cleared in a `finally`. `KEEPALIVE_PING_MS` is **25 000** — comfortably under
+   the ~30s teardown, so the 60–90s cycle never goes idle long enough to be
+   killed. Restartability — persisting a cursor so an interrupted cycle resumes
+   mid-flight — is real work for almost no gain: the keepalive makes a *normal*
+   cycle survive intact, and the residual risk (a crash, an OOM, Chrome quitting)
+   costs exactly **one skipped scan**, with the next alarm only minutes away.
+   Dedupe is by job id (§5), so a re-scan reports everything unfamiliar regardless
+   of when it appeared — a lost cycle loses nothing permanently, only briefly.
+   The one thing worth catching up is depth, and decision 5 handles that far more
+   cheaply than a cursor.
+
+2. **Orphaned tabs — the cycle records them; a stale-lock sweep closes them.** The
+   visible failure is a user finding six stray LinkedIn tabs after the worker died
+   mid-cycle. In the happy path each tab is closed in a per-page `finally` the
+   instant its page is scraped (as the #5 probe does), and `untrackTab` drops it
+   from the record. What's left tracked when the worker dies is the orphan set:
+   `beginScan` starts each cycle with an empty `openTabIds`, `trackTab` appends the
+   id the moment `tabs.create` resolves (idempotent, so a persist-then-open race
+   can't duplicate it), and `recoverStaleLock` returns whatever is still tracked
+   for the wrapper to force-close before the next scan. **Who closes them:** the
+   next alarm tick (or startup) that recovers the stale lock. **When:** before the
+   replacement cycle opens its own tabs, so strays never accumulate past one cycle.
+
+3. **The scan lock — settled in §16.6, reused here.** #9 already decided it and
+   this ticket only cross-references: staleness is `isLockStale` (imported into
+   `lifecycle.ts`, not re-implemented), the threshold is `staleLockMs` (default
+   **300 000** / 5 min, well above a real 60–90s cycle), `isScanning` with a null
+   `startedAt` is treated as stale/corrupt, and the check runs on **every alarm
+   tick**, not just startup — because the worker can be torn down on any tick, not
+   only across a browser restart. `recoverStaleLock` is the one call that composes
+   that check with decision 2's tab sweep.
+
+4. **Progress worth persisting — none, beyond cleanup and depth.** Follows from
+   decision 1. There is no per-watch or per-page cursor: an abandoned cycle is
+   re-scanned from the top, not resumed. The only state that crosses a teardown is
+   the scan lock (decision 3) and the orphan-tab list (decision 2) — enough to
+   *clean up* after a dead cycle, deliberately not enough to *resume* one. This is
+   why `ScanState` grows two fields (`openTabIds`, `pendingCatchUp`, §5) and not a
+   cursor.
+
+5. **The startup catch-up — a consumable flag, replacing §9's unconditional
+   scan.** #5 confirmed Chromium fires a missed alarm immediately on relaunch, so
+   PRD §9's original unconditional `onStartup` scan *plus* that auto-fire would be
+   a double-run. The fix: `onStartup` no longer scans inline. It clears any stale
+   lock, sweeps orphan tabs, `ensureAlarmExists()`, and calls `requestCatchUp` to
+   set `pendingCatchUp = true`. The next scan to begin — whether the replayed
+   missed alarm or a freshly armed one — reads the flag via `beginScan`, runs at
+   `catchUpPages` depth, and clears it in the same step. It fires **exactly once**:
+   the scan lock serialises cycles, so a second concurrent fire sees `isScanning`
+   and skips before it can consume the flag. The same `requestCatchUp` is reused on
+   a quiet-hours resume (`willResumeFromQuiet`, §15) — a quiet gap and a
+   closed-Chrome gap are the same problem (§9). If a stale-lock sweep happens to
+   run on that first startup tick, the flag survives it (`recoverStaleLock`
+   preserves `pendingCatchUp`), so the catch-up is never dropped.
+
+### The revised startup handler
+
+```ts
+chrome.runtime.onStartup.addListener(async () => {
+  const state = await loadScanState();
+  const { tabIdsToClose, state: swept } = recoverStaleLock(state, Date.now(), settings.staleLockMs);
+  await Promise.all(tabIdsToClose.map((id) => chrome.tabs.remove(id).catch(() => {})));
+  await saveScanState(requestCatchUp(swept)); // next scan runs at catchUpPages depth
+  await ensureAlarmExists(); // re-arm the one-shot if it didn't survive the restart
+  // No inline scan: the alarm (replayed-missed or freshly armed) runs it once.
+});
+```
+
+### Shipped constants
+
+| Constant | Default | Why |
+| --- | --- | --- |
+| `KEEPALIVE_PING_MS` | 25 000 | Under the ~30s idle teardown; keeps a 60–90s cycle alive (decision 1) |
+| `staleLockMs` | 300 000 | §16.6 — a lock older than 5 min is a dead cycle (decisions 2, 3) |
+| `catchUpPages` | 4 | §15 — the one deep scan the catch-up flag triggers (decision 5) |
+
+### Structural consequence
+
+Per §14, the decision logic is pure and tested (`src/lifecycle.ts` +
+`src/lifecycle.test.ts`): `requestCatchUp`, `beginScan`, `endScan`, `trackTab`,
+`untrackTab`, `recoverStaleLock`, and the `KEEPALIVE_PING_MS` constant, reusing
+`isLockStale` from `health.ts` so staleness is decided in exactly one place.
+`background.ts` runs the `setInterval` keepalive, calls `chrome.tabs.create` /
+`.remove`, and persists the returned `ScanLifecycleState` — none of that is
+unit-tested, all of the decisions are. This is the last of the three
+worker-lifecycle checkpoints (§14): quit Chrome mid-scan, relaunch, and confirm
+the stale lock clears, the strays close, and exactly one catch-up scan runs.
