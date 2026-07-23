@@ -342,6 +342,16 @@ async function armNextAlarm(settings: Settings): Promise<void> {
   await chrome.alarms.create(ALARM_NAME, { when: Date.now() + delayMs });
 }
 
+/** Re-arm the one-shot alarm only if none survived (PRD §17 decision 5, §15
+ *  decision 3). Idempotent: a `chrome.alarms` entry that outlived the worker —
+ *  including a *missed* alarm Chrome will replay on relaunch — is left untouched,
+ *  so a Chrome restart runs the catch-up scan exactly once, never twice. Both the
+ *  fresh install and the startup handler go through here. */
+async function ensureAlarmExists(settings: Settings): Promise<void> {
+  const existing = await chrome.alarms.get(ALARM_NAME);
+  if (!existing) await armNextAlarm(settings);
+}
+
 /** The alarm handler — the whole cadence in one place (PRD §9). */
 async function onAlarm(): Promise<void> {
   const settings = await get("settings");
@@ -400,10 +410,11 @@ chrome.notifications.onClicked.addListener((id) => {
   })();
 });
 
-/** Fresh install: arm the first alarm so the loop starts. */
+/** Fresh install: arm the first alarm so the loop starts (idempotent — an
+ *  already-armed alarm from a prior version is left as-is). */
 chrome.runtime.onInstalled.addListener(() => {
   void (async () => {
-    await armNextAlarm(await get("settings"));
+    await ensureAlarmExists(await get("settings"));
   })();
 });
 
@@ -416,7 +427,6 @@ chrome.runtime.onStartup.addListener(() => {
     const recovered = recoverStaleLock(await get("scanState"), Date.now(), settings.staleLockMs);
     await Promise.all(recovered.tabIdsToClose.map((id) => chrome.tabs.remove(id).catch(() => {})));
     await set("scanState", requestCatchUp(recovered.state));
-    const existing = await chrome.alarms.get(ALARM_NAME);
-    if (!existing) await armNextAlarm(settings);
+    await ensureAlarmExists(settings);
   })();
 });
