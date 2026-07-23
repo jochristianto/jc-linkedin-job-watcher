@@ -18,6 +18,10 @@ import type { Job } from "./types.ts";
 /** The authenticated search page wraps each posting in a job-card container. */
 const CARD_SELECTOR = "div.job-card-container";
 
+/** The nested anchor that carries the canonical `/jobs/view/<id>/` posting link —
+ *  the source both the id fallback and the url read from, so it lives once here. */
+const VIEW_LINK_SELECTOR = 'a[href*="/jobs/view/"]';
+
 /** A card's identity attributes are spread across three elements: `data-job-id`
  *  on the container, `data-occludable-job-id` on the enclosing `<li>`, and the
  *  `/jobs/view/<id>/` href on a nested anchor. This view resolves each where it
@@ -32,7 +36,7 @@ function identityOf(card: Element): CardLike {
         return card.closest("[data-occludable-job-id]")?.getAttribute(name) ?? null;
       }
       if (name === "href") {
-        return card.querySelector('a[href*="/jobs/view/"]')?.getAttribute("href") ?? null;
+        return card.querySelector(VIEW_LINK_SELECTOR)?.getAttribute("href") ?? null;
       }
       return null;
     },
@@ -58,7 +62,7 @@ function norm(text: string | null): string {
  *  `/jobs/view/<id>/` anchor so it fails independently of the id (§12): a card
  *  with an id but no link comes back with a blank url and is dropped downstream. */
 function jobUrlOf(card: Element): string {
-  const href = card.querySelector('a[href*="/jobs/view/"]')?.getAttribute("href")?.trim();
+  const href = card.querySelector(VIEW_LINK_SELECTOR)?.getAttribute("href")?.trim();
   if (!href) return "";
   try {
     const u = new URL(href, "https://www.linkedin.com");
