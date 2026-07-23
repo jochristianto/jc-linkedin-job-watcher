@@ -26,10 +26,11 @@ New jobs surface in two places: a badge count on the extension icon, and a deskt
 
 ### Scanning
 
-- Configurable interval, default **5 minutes**
-- Configurable page depth, default **2 pages** per search
+- Configurable interval, default **5 minutes**, with **±1 minute jitter** (§15)
+- Configurable page depth, default **1 page** per search — page 2 is mostly stale when sorted by date; the startup / quiet-hours catch-up scan (default 4 pages) recovers anything that drifted deeper during a gap (§15)
 - Pagination uses LinkedIn's `&start=` parameter (page 2 = `start=25`, page 3 = `start=50`)
-- Pages scraped sequentially with a short pause between, never in parallel
+- Pages scraped sequentially with a short randomised pause between, never in parallel
+- **Quiet hours**: scanning pauses overnight (default 23:00–07:00 local), configurable; resuming runs a catch-up scan (§15)
 
 ### Filtering
 
@@ -128,10 +129,30 @@ type Settings = {
   blockedTitleKeywords: string[];
   hideReposted: boolean;
   intervalMinutes: number; // default 5
-  pagesPerScan: number; // default 2
-  catchUpPages: number; // default 4, used once on browser startup
+  jitterMinutes: number; // default 1 — ±this, randomised onto each interval (§15)
+  pagesPerScan: number; // default 1 — routine depth (§15); page 2 is mostly stale
+  catchUpPages: number; // default 4, used on startup and quiet-hours resume (§9/§15)
+  quietHours: QuietHours;
+  pacing: PacingConfig;
+  backoff: BackoffConfig;
   retention: RetentionConfig;
   push: PushConfig;
+};
+
+type QuietHours = {
+  enabled: boolean; // default true
+  startMinute: number; // local minutes-of-day, default 1380 (23:00)
+  endMinute: number; // local minutes-of-day, default 420 (07:00)
+};
+
+type PacingConfig = {
+  pagePauseMs: [number, number]; // default [3000, 5000] — pause between pages (§9)
+  watchPauseMs: [number, number]; // default [8000, 12000] — pause between watches
+};
+
+type BackoffConfig = {
+  emptyScansBeforeBackoff: number; // default 3 — consecutive all-empty scans (§15)
+  maxIntervalMinutes: number; // default 60 — ceiling the doubling interval hits
 };
 
 type PushConfig = {
@@ -435,7 +456,9 @@ chrome.runtime.onStartup.addListener(async () => {
 
 `clearStaleLock()` is essential. If Chrome was killed mid-scan, `isScanning` stays `true` and every future alarm skips forever. Check `startedAt` — anything older than ~5 minutes is stale.
 
-The gap itself costs less than it appears. Dedupe is by job ID, not by "what changed since last check," so a restart scan reports everything unfamiliar regardless of when it appeared. You find out later, not never. What you can lose is anything pushed past your page depth during the gap — hence `catchUpPages` (default 4), used once on startup before reverting to the normal depth.
+The gap itself costs less than it appears. Dedupe is by job ID, not by "what changed since last check," so a restart scan reports everything unfamiliar regardless of when it appeared. You find out later, not never. What you can lose is anything pushed past your page depth during the gap — hence `catchUpPages` (default 4), used once on startup before reverting to the normal depth. **Quiet-hours resume is the same case** and reuses the same catch-up scan (§15): waking after an 8-hour quiet window is indistinguishable from waking after an 8-hour close.
+
+> **Note on the alarm shape (§15, decision 3):** the interval is a **re-armed one-shot** alarm, not a periodic one — the cycle computes the next delay (interval ± jitter, or a jump to the end of quiet hours) and calls `chrome.alarms.create(name, { when })` at the end of each run. `chrome.alarms` can't express per-fire jitter on a periodic alarm and clamps periods below one minute (issue #3), so one-shot re-arming is what makes jitter and quiet hours possible. `ensureAlarmExists()` re-arms it if it didn't survive a restart.
 
 ### Injection guard
 
@@ -488,11 +511,9 @@ LinkedIn changes their DOM regularly, sometimes monthly. Write the scraper so ea
 
 ### Request volume
 
-Two pages every 5 minutes is **576 page loads a day per watchlist entry**. Two saved searches puts you over 1,100. This is the number most likely to draw attention.
+Two pages every 5 minutes would be **576 page loads a day per watchlist entry** — over 1,100 for two searches. That was the number most likely to draw attention, so the shipped defaults cut it: **one page** per scan, **quiet hours** overnight, **±1 minute jitter**. See §15 for the full working; the short version is 288 loads/day/watch clock-round, ~192 with the default 8-hour quiet window — roughly a third of the original.
 
-Also worth knowing: page 2 is mostly stale. When sorted by date, new postings land on page 1. Page 2 only helps if a burst pushed something down between checks, which at a 5-minute interval is uncommon.
-
-Build it configurable as specified, but consider defaulting `pagesPerScan` to 1 and raising it only if you find you're actually missing things. Randomized jitter of ±1 minute on the interval, and pausing overnight, both help.
+Page 2 is mostly stale. When sorted by date, new postings land on page 1; page 2 only helps if a burst pushed something down between checks, which at a 5-minute interval is uncommon — and the catch-up scan (§9, §15) covers the gap case where it isn't. Raise `pagesPerScan` only if you find you're actually missing things.
 
 ### Terms of Service
 
@@ -543,6 +564,7 @@ Every piece of **pure logic** — a function of its inputs, no `chrome.*`, no DO
 | Company + keyword blocklist matching, the reposted rule | 07 | **Reference example** — `src/filter.ts` + `src/filter.test.ts` |
 | Dedupe against the seen set (dedupe on job ID alone, §5) | 02 | Same shape as `filter.ts` |
 | Garbage collection — two lifetimes + hard cap (§7) | 08 | §7 is already pure; lift it verbatim into a `collectGarbage(state, now)` that takes `{seen, jobs, retention, now}` and returns `{seen, jobs}` |
+| Scheduling — jitter, quiet hours, in-cycle pauses, back-off (§15) | 03/10 | **Reference example** — `src/schedule.ts` + `src/schedule.test.ts` |
 | Card parser — DOM → `Job` | 01 | Fixture-driven, see below |
 
 That is the line. Anything that is *only* an orchestration of `chrome.*` calls (opening tabs, firing alarms, setting the badge) is **not** unit-tested — see "the untestable remainder".
@@ -594,3 +616,33 @@ Because the logic must be testable without Chrome, **the separation of pure func
 - Pure decision logic goes in its own module (`filter.ts`, `dedupe.ts`, `gc.ts`, `parse.ts`) with **no `chrome.*` import** and an accompanying `*.test.ts`.
 - `chrome.*` (and `fetch`, and the live `document`) lives in thin wrappers/entry points (`background.ts`, the content script) that call the pure modules. Dependencies that a test needs to control are **injected** (see `sendPush(jobs, cfg, fetchImpl = fetch)` in `src/push.ts`).
 - `src/filter.ts` is the worked reference for this shape.
+
+---
+
+## 15. Cadence, depth, and going quiet
+
+Resolves issue #8 / ticket 07. PRD §12 set the defaults at 576 page loads a day per watch and then hedged. This section turns that hedge into shipped numbers, informed by #5's cycle timing (two watches × two pages ≈ 60–90s, §9). The pure logic lives in `src/schedule.ts` (a §14 reference example); `chrome.alarms` and the scan loop are the thin wrappers that call it.
+
+Seven decisions, seven answers:
+
+1. **Interval — keep 5 minutes.** A recruiter posting is still on page 1 hours later (§13), so 10 or 15 minutes loses little in freshness; 5 stays as a comfortable default that a burst won't outrun, and it's configurable for anyone who wants to relax it. The volume worry is answered by page depth and quiet hours, not by slowing the beat.
+2. **Page depth — default 1, not 2.** Page 2 is mostly stale when sorted by date (§12); the gap it guards against — a burst pushing a posting past page 1 between checks — is exactly what the catch-up scan (`catchUpPages`, default 4) recovers on startup and quiet-hours resume. So routine scans go shallow and the rare deep scan happens only when a real gap preceded it. One page halves the request volume for free.
+3. **Jitter — ±1 minute, real but modest.** A fixed 5-minute heartbeat is a weak signal, not nothing; ±1 minute of jitter costs one line and removes a clean periodicity for no downside. It forces the **alarm shape**: a re-armed one-shot (`chrome.alarms.create(name, { when })` at the end of each cycle), because `chrome.alarms` can't jitter a periodic alarm and clamps periods under a minute (issue #3). `jitteredDelayMs()` is clamped to a 1-minute floor so a large jitter can never produce a sub-minute or negative delay.
+4. **Quiet hours — yes, clock-based, default on.** Scanning pauses in a user-set local window, default 23:00–07:00. It's stored as minutes-of-day and may wrap midnight (`isWithinQuietHours` handles the wrap). At the boundary: when the next fire would land inside the window, the alarm is pushed to the window's end instead, and that first wake runs a **catch-up scan** at `catchUpPages` depth — a quiet gap is the same problem as a closed-Chrome gap (§9). Recruiters post in business hours, so the overnight gap costs almost nothing and cuts ~8h of loads.
+5. **In-cycle pauses — keep, but randomise.** 3–5s between pages and ~8–12s between watches (PRD §9), drawn uniformly per pause via `randomPauseMs()` rather than a fixed value, same reasoning as the interval jitter.
+6. **The stopping rule — back off *and* tell the user.** The back-off signal is `emptyScansBeforeBackoff` (default 3) consecutive scans returning **zero cards across every watch** — the signature of a broken parser or a soft block (§12). On trip, the extension doubles its own interval each further empty scan up to `maxIntervalMinutes` (default 60) *and* surfaces a "reading may be broken" warning (`shouldWarnStalled`). It recovers instantly: one non-empty scan resets the counter and the interval snaps back to base. It does both — self-throttle so it stops hammering, and tell the human so a genuine DOM break gets fixed rather than silently backed-off forever.
+7. **Shipped defaults** (all configurable per §5):
+
+| Setting | Default | Why |
+| --- | --- | --- |
+| `intervalMinutes` | 5 | Fresh enough; a burst won't outrun it (decision 1) |
+| `jitterMinutes` | 1 | Breaks a clean 5-minute periodicity for one line (decision 3) |
+| `pagesPerScan` | 1 | Page 2 mostly stale; catch-up covers the gap (decision 2) |
+| `catchUpPages` | 4 | One deep scan on startup / quiet-hours resume (decisions 2, 4) |
+| `quietHours` | on, 23:00–07:00 | Cuts ~8h of loads at near-zero freshness cost (decision 4) |
+| `pacing.pagePauseMs` | [3000, 5000] | Randomised page pause (decision 5) |
+| `pacing.watchPauseMs` | [8000, 12000] | Randomised watch pause (decision 5) |
+| `backoff.emptyScansBeforeBackoff` | 3 | Trip the stopping rule after 3 empty scans (decision 6) |
+| `backoff.maxIntervalMinutes` | 60 | Ceiling for the doubling interval (decision 6) |
+
+**Resulting volume.** One page every 5 minutes is 288 loads/day/watch clock-round; the default 8-hour quiet window drops that to ~192 — roughly a third of PRD §12's original 576, before the user touches a single setting. Two watches sit near 384/day rather than 1,100+.
