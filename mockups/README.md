@@ -16,11 +16,12 @@ files directly in a browser (`file://…`):
 | [`states.html`](./states.html) | All five **empty / degraded** states side by side |
 | [`options.html`](./options.html) | The **options** page — one long scroll, sectioned |
 | [`tokens.css`](./tokens.css) | Design tokens + component styles, light **and** dark |
-| [`render.ts`](./render.ts) | The shared component as tested plain-TS functions (what production mirrors) |
+| [`render.ts`](../src/render.ts) | The shared component as tested plain-TS functions — **now the production source** |
 
-`render.ts` / `render.test.ts` are the reference implementation of the shared
-component; the HTML files embed exactly the markup those functions emit. Run the
-tests with `npm test`.
+`render.ts` / `render.test.ts` were the reference implementation of the shared
+component; issue #16 moved them unchanged into `src/` (production), where the
+pages mount them via `src/view.ts` + `src/mount.ts`. The HTML files here still
+embed exactly the markup those functions emit. Run the tests with `npm test`.
 
 ## Decisions (the 8 questions)
 
