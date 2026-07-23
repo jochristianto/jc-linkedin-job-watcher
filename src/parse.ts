@@ -20,6 +20,15 @@ import type { Job } from "./types.ts";
  *  single-sourcing the selector instead of keeping a hand-synced copy. */
 export const CARD_SELECTOR = "div.job-card-container";
 
+/** The results-list *container* that holds the cards (PRD §16.3). Its presence —
+ *  independent of whether it has any cards inside — is what tells an empty-but-
+ *  valid search apart from a dead layout: absent means LinkedIn moved the DOM
+ *  (`structure-changed`), present-but-empty means a genuine no-results (`empty`).
+ *  A union of the containers issue #2 saw on the authenticated `/jobs/search/`
+ *  DOM, so a single moved class name doesn't read as the whole list vanishing. */
+export const RESULTS_LIST_SELECTOR =
+  ".scaffold-layout__list, ul.jobs-search__results-list, .jobs-search-results-list, .jobs-search-results__list";
+
 /** The nested anchor that carries the canonical `/jobs/view/<id>/` posting link —
  *  the source both the id fallback and the url read from, so it lives once here. */
 const VIEW_LINK_SELECTOR = 'a[href*="/jobs/view/"]';

@@ -68,6 +68,9 @@ export type ViewContext = {
   mode: ListMode;
   title: string;
   severity?: HealthState["severity"];
+  /** The health banner text (PRD §16.8), or null/undefined when healthy. Shown as
+   *  a one-line banner above the list, tinted by `severity`. */
+  message?: HealthState["message"];
 };
 
 /** Choose the empty/degraded message when nothing is visible. A broken scan
@@ -97,11 +100,16 @@ export function renderPage(ctx: ViewContext): string {
     ? renderList(views, ctx.mode)
     : renderEmptyState(pickEmptyKind(ctx, views.length));
 
+  const banner = ctx.message
+    ? `<div class="banner banner-${ctx.severity ?? "warn"}">${esc(ctx.message)}</div>`
+    : "";
+
   return `
     <header class="hdr">
       <span class="hdr-title">${esc(ctx.title)}</span>
       ${badge > 0 ? `<span class="badge">${badge}</span>` : ""}
       <button class="hdr-btn" id="open-options" title="Options" aria-label="Options">⚙</button>
     </header>
+    ${banner}
     <div class="list">${body}</div>`.trim();
 }

@@ -9,7 +9,7 @@
 // That is the read half of the invisible-tab scan (issue #15 / #5). Everything
 // here is a thin wrapper over browser APIs, so it is not unit-tested.
 
-import { CARD_SELECTOR, parseJobCards } from "./parse.ts";
+import { CARD_SELECTOR, RESULTS_LIST_SELECTOR, parseJobCards } from "./parse.ts";
 import { pollUntilSettled } from "./scan-probe.ts";
 import { readScanToken, scanTokenMatches, type ScanRequest, type ScanResponse } from "./scan.ts";
 
@@ -29,7 +29,17 @@ async function sample(): Promise<number> {
 
 async function readPage(): Promise<ScanResponse> {
   const settle = await pollUntilSettled({ sample, sleep, now: () => Date.now() }, POLL_OPTS);
-  return { jobs: parseJobCards(document), settled: settle.settled };
+  // The classified-outcome signals (§16): where we landed, whether the list
+  // container is even present, and the raw card count — never a bare "0 cards".
+  // The *decision* (empty vs structure-changed vs logged-out …) is classifyPage's,
+  // run in the background against these; the content script only reads them off.
+  return {
+    jobs: parseJobCards(document),
+    settled: settle.settled,
+    finalUrl: window.location.href,
+    hasResultsList: document.querySelector(RESULTS_LIST_SELECTOR) !== null,
+    cardCount: document.querySelectorAll(CARD_SELECTOR).length,
+  };
 }
 
 chrome.runtime.onMessage.addListener((message: ScanRequest, _sender, sendResponse) => {

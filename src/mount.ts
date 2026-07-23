@@ -39,6 +39,7 @@ export async function mountListView(
       mode,
       title,
       severity: health.severity,
+      message: health.message,
     });
   }
 

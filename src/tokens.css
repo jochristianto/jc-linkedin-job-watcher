@@ -19,6 +19,8 @@
   --unread: #0a66c2; /* unread dot + accent bar */
   --danger: #b3261e;
   --danger-weak: #fce8e6;
+  --warn: #8a5a00; /* amber — soft warnings (structure-changed / stalled) */
+  --warn-weak: #fdf1dc;
   --ok: #146c2e;
 
   --r-sm: 6px;
@@ -46,6 +48,8 @@
     --unread: #4a9eff;
     --danger: #ff6b61;
     --danger-weak: #3a1f1d;
+    --warn: #f0b429;
+    --warn-weak: #3a2f16;
     --ok: #4ac06a;
   }
 }
@@ -182,9 +186,13 @@ body {
   color: var(--muted);
   border-bottom: 1px solid var(--border);
 }
-.banner.err {
+.banner-error {
   background: var(--danger-weak);
   color: var(--danger);
+}
+.banner-warn {
+  background: var(--warn-weak);
+  color: var(--warn);
 }
 
 /* ---- List ---- */

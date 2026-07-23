@@ -10,6 +10,8 @@ import {
   withScanToken,
   readScanToken,
   scanTokenMatches,
+  badgeColor,
+  badgeFor,
 } from "./scan.ts";
 import type { JobsMap } from "./storage.ts";
 import type { Job, Watch } from "./types.ts";
@@ -114,6 +116,30 @@ test("badgeText is empty for zero, the number below 100, and 99+ above", () => {
   assert.equal(badgeText(7), "7");
   assert.equal(badgeText(99), "99");
   assert.equal(badgeText(100), "99+");
+});
+
+test("badgeColor maps severity to default / amber / red (§16.8)", () => {
+  assert.equal(badgeColor("ok"), badgeColor("ok")); // stable
+  assert.notEqual(badgeColor("warn"), badgeColor("ok"));
+  assert.notEqual(badgeColor("error"), badgeColor("warn"));
+  assert.notEqual(badgeColor("error"), badgeColor("ok"));
+});
+
+test("badgeFor: an error shows a red '!' even with zero unopened jobs (§16.8)", () => {
+  const b = badgeFor(0, "error");
+  assert.equal(b.text, "!");
+  assert.equal(b.color, badgeColor("error"));
+});
+
+test("badgeFor: a healthy badge is just the unopened count in the default colour", () => {
+  assert.deepEqual(badgeFor(3, "ok"), { text: "3", color: badgeColor("ok") });
+  assert.deepEqual(badgeFor(0, "ok"), { text: "", color: badgeColor("ok") });
+});
+
+test("badgeFor: a soft warning keeps the count but colours it amber", () => {
+  assert.deepEqual(badgeFor(2, "warn"), { text: "2", color: badgeColor("warn") });
+  // With nothing unopened, a warning still shows a marker so the amber is visible.
+  assert.deepEqual(badgeFor(0, "warn"), { text: "!", color: badgeColor("warn") });
 });
 
 test("withScanToken stamps the one-time token onto the URL fragment, not the query", () => {

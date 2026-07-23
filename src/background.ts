@@ -26,7 +26,7 @@ import {
   untrackTab,
 } from "./lifecycle.ts";
 import {
-  badgeText,
+  badgeFor,
   enabledWatches,
   mergeJobs,
   scanPageUrl,
@@ -36,12 +36,26 @@ import {
   type ScanRequest,
   type ScanResponse,
 } from "./scan.ts";
+import {
+  aggregateOutcome,
+  classifyPage,
+  fieldMissingAcrossAll,
+  reduceScanHealth,
+  shouldRunScan,
+  type PageOutcome,
+  type PageSignals,
+  type Severity,
+} from "./health.ts";
 import { buildScanNotification, jobsTabToFocus, SCAN_NOTIFICATION_ID } from "./notify.ts";
-import type { Job, Settings } from "./types.ts";
+import type { HealthState, Job, Settings } from "./types.ts";
 
 /** The single re-armed one-shot alarm (PRD §15 decision 3). One name, re-created
  *  with a fresh `{ when }` at the end of every cycle. */
 const ALARM_NAME = "ljw-scan";
+
+/** The fixed id for the hard-failure health notification (PRD §16.8). Fixed so a
+ *  new transition replaces the prior alert rather than stacking one per cycle. */
+const HEALTH_NOTIFICATION_ID = "ljw-health";
 
 /** How long to wait for a scan tab to finish loading before messaging it. Loose
  *  because the content script settles the lazy list itself (pollUntilSettled). */
@@ -53,11 +67,14 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 // ── Badge ────────────────────────────────────────────────────────────────────
 
-/** Reflect the unopened count onto the toolbar badge (PRD §7). Pure count from
- *  scan.ts; this only calls the browser API. */
-async function updateBadge(): Promise<void> {
+/** Reflect the unopened count AND health severity onto the toolbar badge (PRD §7/
+ *  §16.8): the number in slate when healthy, amber on a soft warning, a red `!` on
+ *  a hard failure. `badgeFor` decides text+colour; this only calls the browser API. */
+async function updateBadge(severity: Severity): Promise<void> {
   const jobs = await get("jobs");
-  await chrome.action.setBadgeText({ text: badgeText(unopenedCount(jobs)) });
+  const { text, color } = badgeFor(unopenedCount(jobs), severity);
+  await chrome.action.setBadgeText({ text });
+  await chrome.action.setBadgeBackgroundColor({ color });
 }
 
 // ── Notification ───────────────────────────────────────────────────────────────
@@ -79,6 +96,21 @@ async function fireNewJobsNotification(newJobs: Job[]): Promise<void> {
   });
 }
 
+/** Fire ONE desktop notification on the transition INTO a hard failure (PRD
+ *  §16.8): logged-out or challenge. `reduceScanHealth` sets `notify` true only on
+ *  the tick that enters the state, so this never repeats every cycle, and never
+ *  fires for a soft warning (structure-changed / stalled) — those stay badge +
+ *  banner only. A fixed id means a fresh transition replaces the prior alert. */
+async function fireHealthNotification(health: HealthState): Promise<void> {
+  if (!health.notify || !health.message) return;
+  await chrome.notifications.create(HEALTH_NOTIFICATION_ID, {
+    type: "basic",
+    iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
+    title: "LinkedIn Job Watcher",
+    message: health.message,
+  });
+}
+
 /** Land the user in our own list (PRD §3/§9): focus an already-open jobs.html tab
  *  (raising its window) rather than duplicating it, else open a new one. Marks
  *  NOTHING as opened — it only gets you to the list. */
@@ -97,48 +129,84 @@ async function openJobsList(): Promise<void> {
 
 // ── Talking to the invisible tab ───────────────────────────────────────────────
 
-/** Resolve once the tab reports `status: "complete"` (or the timeout elapses so a
- *  wedged load can't hang the cycle). The content script runs at document_idle,
- *  so "complete" means it is ready to receive the scan message. */
-function waitForTabComplete(tabId: number): Promise<void> {
+/** Resolve `true` once the tab reports `status: "complete"`, or `false` if the
+ *  timeout elapses first so a wedged load can't hang the cycle. The content script
+ *  runs at document_idle, so "complete" means it is ready to receive the scan
+ *  message; a timeout is a genuine load failure (PRD §16.5 — `navError`). */
+function waitForTabComplete(tabId: number): Promise<boolean> {
   return new Promise((resolve) => {
-    const done = () => {
+    const finish = (completed: boolean) => {
       chrome.tabs.onUpdated.removeListener(onUpdated);
       clearTimeout(timer);
-      resolve();
+      resolve(completed);
     };
     const onUpdated = (id: number, info: chrome.tabs.OnUpdatedInfo) => {
-      if (id === tabId && info.status === "complete") done();
+      if (id === tabId && info.status === "complete") finish(true);
     };
-    const timer = setTimeout(done, TAB_LOAD_TIMEOUT_MS);
+    const timer = setTimeout(() => finish(false), TAB_LOAD_TIMEOUT_MS);
     chrome.tabs.onUpdated.addListener(onUpdated);
   });
 }
 
+/** The result of loading one page: the parsed jobs plus its classified outcome
+ *  (PRD §16). The classification is `classifyPage`'s — this wrapper only gathers
+ *  the raw signals it needs. */
+type PageResult = { jobs: Job[]; outcome: PageOutcome };
+
 /** Open one invisible tab on `url`, let the content script settle+parse it, and
- *  return the parsed jobs. A fresh one-time token is minted per injection and
- *  stamped onto the tab's URL fragment; the same token rides the LJW_SCAN message,
- *  and the content script reads nothing unless the two match (PRD §9) — so a
- *  LinkedIn tab the user opened by hand, which carries no token, is never scraped.
+ *  return the parsed jobs together with the page's classified {@link PageOutcome}
+ *  (PRD §16). A fresh one-time token is minted per injection and stamped onto the
+ *  tab's URL fragment; the same token rides the LJW_SCAN message, and the content
+ *  script reads nothing unless the two match (PRD §9) — so a LinkedIn tab the user
+ *  opened by hand, which carries no token, is never scraped.
+ *
+ *  The classification is `classifyPage`'s (§16 structural consequence — no
+ *  decision logic here): a tab that never finishes loading is a `navError`
+ *  (`load-failed`); one that lands on `/authwall` or `/checkpoint` is read from its
+ *  final URL even when the content script's token gate refuses the redirected page.
  *  The tab is created `active: false` (never steals focus, PRD §17 decision 2) and
- *  ALWAYS closed in the `finally` — even if the page or the messaging throws — so a
- *  parse failure can't orphan a tab. */
-async function scanPage(url: string): Promise<Job[]> {
+ *  ALWAYS closed in the `finally` so a parse failure can't orphan a tab. */
+async function scanPage(url: string): Promise<PageResult> {
   const token = crypto.randomUUID();
   const tab = await chrome.tabs.create({ url: withScanToken(url, token), active: false });
   const tabId = tab.id;
-  if (tabId === undefined) return [];
+  if (tabId === undefined) return { jobs: [], outcome: "load-failed" };
 
   // Record the tab before the async work so a mid-cycle teardown can sweep it
   // (lifecycle.recoverStaleLock); untrack once it is cleanly closed below.
   await set("scanState", trackTab(await get("scanState"), tabId));
   try {
-    await waitForTabComplete(tabId);
-    const req: ScanRequest = { type: "LJW_SCAN", token };
-    const res = (await chrome.tabs.sendMessage(tabId, req)) as ScanResponse | undefined;
-    return res?.jobs ?? [];
-  } catch {
-    return []; // a dead tab / no content script is an empty page, not a crash
+    const completed = await waitForTabComplete(tabId);
+    const landed = await chrome.tabs.get(tabId).catch(() => undefined);
+    const finalUrl = landed?.url ?? url;
+
+    // Try to read the page's own signals; a token-gated redirect (e.g. to
+    // /authwall) may refuse to answer, in which case we classify from the URL.
+    let jobs: Job[] = [];
+    let hasResultsList = false;
+    let cardCount = 0;
+    try {
+      const req: ScanRequest = { type: "LJW_SCAN", token };
+      const res = (await chrome.tabs.sendMessage(tabId, req)) as ScanResponse | undefined;
+      if (res) {
+        jobs = res.jobs;
+        hasResultsList = res.hasResultsList;
+        cardCount = res.cardCount;
+      }
+    } catch {
+      // content script unreachable — the URL-based signals below still classify it
+    }
+
+    const signals: PageSignals = {
+      // Only a tab that never finished loading is a true infra failure. A completed
+      // tab we couldn't message (a token-gated authwall/checkpoint redirect) is
+      // classified from its landing URL, not counted as `load-failed`.
+      navError: !completed,
+      finalUrl,
+      hasResultsList,
+      cardCount,
+    };
+    return { jobs, outcome: classifyPage(signals) };
   } finally {
     await chrome.tabs.remove(tabId).catch(() => {});
     await set("scanState", untrackTab(await get("scanState"), tabId));
@@ -171,10 +239,20 @@ async function runCycle(settings: Settings, pages: number): Promise<void> {
   try {
     const watches = enabledWatches(settings.watches);
     const found: Job[] = [];
+    const outcomes: PageOutcome[] = [];
     for (const [w, watch] of watches.entries()) {
       for (let page = 1; page <= pages; page++) {
-        const parsed = await scanPage(scanPageUrl(watch.url, page));
-        found.push(...stampJobs(parsed, watch.id, Date.now()));
+        let { jobs, outcome } = await scanPage(scanPageUrl(watch.url, page));
+        // A load failure retries the page once, then skips it and continues the
+        // cycle (PRD §16.5). The retry is infra, not a parser signal, so a
+        // persistent `load-failed` is recorded as such — `reduceScanHealth` leaves
+        // the empty-scan back-off counter untouched for it.
+        if (outcome === "load-failed") {
+          await sleep(randomPauseMs(settings.pacing.pagePauseMs));
+          ({ jobs, outcome } = await scanPage(scanPageUrl(watch.url, page)));
+        }
+        found.push(...stampJobs(jobs, watch.id, Date.now()));
+        outcomes.push(outcome);
         if (page < pages) await sleep(randomPauseMs(settings.pacing.pagePauseMs));
       }
       if (w < watches.length - 1) await sleep(randomPauseMs(settings.pacing.watchPauseMs));
@@ -187,10 +265,33 @@ async function runCycle(settings: Settings, pages: number): Promise<void> {
     if (newJobs.length > 0) {
       await set("jobs", mergeJobs(await get("jobs"), newJobs));
     }
-    await updateBadge();
-    // One merged notification for the whole cycle's new jobs (PRD §3/§9). Fired
-    // after the badge so the two agree; a zero-new-jobs cycle fires nothing.
+
+    // Fold the cycle's per-page outcomes into the one HealthState (PRD §16). The
+    // worst page decides the cycle (aggregateOutcome); the reducer owns pause/halt,
+    // the empty-scan counter, the banner text, and whether this transition fires a
+    // desktop notification. No classification logic lives here (§16 structural AC).
+    const health = reduceScanHealth(
+      await get("health"),
+      aggregateOutcome(outcomes),
+      settings.backoff,
+    );
+    await set("health", health);
+
+    // Selector-drift telemetry (PRD §16.4): a field blank on EVERY parsed card is
+    // recorded as likely drift; a single blank company on one card is not.
+    const cards = found.map((j) => ({ company: j.company, location: j.location }));
+    for (const field of ["company", "location"] as const) {
+      if (fieldMissingAcrossAll(cards, field)) {
+        console.warn(`[ljw] "${field}" was blank on every card this scan — its selector may have drifted.`);
+      }
+    }
+
+    await updateBadge(health.severity);
+    // One merged notification for the whole cycle's new jobs (PRD §3/§9), then the
+    // hard-failure health alert if this cycle transitioned into one (§16.8). Both
+    // fired after the badge so the surfaces agree.
     await fireNewJobsNotification(newJobs);
+    await fireHealthNotification(health);
   } finally {
     clearInterval(keepalive);
   }
@@ -228,6 +329,15 @@ async function onAlarm(): Promise<void> {
   // A cycle already holds the lock — skip this tick and return (PRD §9). Still
   // re-arm so the cadence survives even if that cycle later dies.
   if (recovered.state.isScanning) {
+    await armNextAlarm(settings);
+    return;
+  }
+
+  // A challenge halted scanning (PRD §16.2): don't scan until the user manually
+  // resumes. A logged-out `pause` keeps scanning (shouldRunScan true) precisely so
+  // a later `ok` scan auto-resumes it (§16.1). Keep the alarm armed either way so
+  // the cadence structure survives a resume.
+  if (!shouldRunScan((await get("health")).mode)) {
     await armNextAlarm(settings);
     return;
   }

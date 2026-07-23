@@ -109,6 +109,16 @@ export function aggregateOutcome(pages: PageOutcome[]): PageOutcome {
  *    Halting on a challenge is the single most important account-safety move. */
 export type ScanMode = "active" | "paused" | "halted";
 
+/**
+ * Whether the routine scan should run this tick, given the current mode (§16.1/
+ * §16.2). `active` and `paused` both scan — a paused (logged-out) cycle keeps
+ * probing precisely so a later `ok` scan can auto-resume it. Only `halted` (a
+ * challenge) stops entirely, and stays stopped until the user manually resumes.
+ */
+export function shouldRunScan(mode: ScanMode): boolean {
+  return mode !== "halted";
+}
+
 /** Badge/severity level surfaced to the user (PRD §16.8). Maps to a badge colour:
  *  `ok`→default, `warn`→amber, `error`→red. */
 export type Severity = "ok" | "warn" | "error";

@@ -8,6 +8,7 @@
 
 import type { Job, Watch } from "./types.ts";
 import type { JobsMap } from "./storage.ts";
+import type { Severity } from "./health.ts";
 
 /** Postings per results page on `/jobs/search/` — the `&start=` step (PRD §9:
  *  `url + &start=(page-1)*25`). */
@@ -69,6 +70,17 @@ export type ScanResponse = {
    *  A settled=false, zero-card page is the invisible-tab assumption failing
    *  (issue #5, Q1/Q4) — the ticket-#15 stop condition. */
   settled: boolean;
+  /** Where the tab actually ended up — `window.location.href`. LinkedIn redirects
+   *  a logged-out / challenged session, so this is what `classifyPage` keys on to
+   *  tell those apart from a real search page (PRD §16.1/§16.2). */
+  finalUrl: string;
+  /** Whether the results-list *container* is in the DOM at all (§16.3): absent is
+   *  `structure-changed`, present-but-empty is a genuine `empty`. NEVER a bare
+   *  "0 cards" — the container flag is what makes the two distinguishable. */
+  hasResultsList: boolean;
+  /** Distinct job cards on the settled page — the classification signal, not the
+   *  count of *savable* jobs (a card missing a load-bearing field still rendered). */
+  cardCount: number;
 };
 
 /** The enabled watches to scan, in their saved order (PRD §9: "for each enabled
@@ -124,4 +136,32 @@ export function badgeText(count: number): string {
   if (count <= 0) return "";
   if (count > BADGE_CAP) return `${BADGE_CAP}+`;
   return String(count);
+}
+
+/** The badge background colour for a health severity (PRD §16.8): the default
+ *  slate for a healthy count, amber for a soft warning, red for a hard failure. */
+export function badgeColor(severity: Severity): string {
+  switch (severity) {
+    case "error":
+      return "#d11124"; // red — a hard failure (logged-out / challenge)
+    case "warn":
+      return "#b45309"; // amber — a soft warning (structure-changed / stalled)
+    case "ok":
+      return "#5b7083"; // slate — the ordinary unopened-count badge
+  }
+}
+
+/**
+ * The toolbar badge's `{ text, color }` for a given unopened count and health
+ * severity (PRD §16.8). A healthy badge is just the count in slate. A hard
+ * failure always shows a red `!` — even at zero unopened jobs — so the break is
+ * visible when there is no count to colour; a warning keeps the count but turns
+ * amber (or shows the `!` marker when nothing is unopened).
+ */
+export function badgeFor(count: number, severity: Severity): { text: string; color: string } {
+  const color = badgeColor(severity);
+  if (severity === "error") return { text: "!", color };
+  const text = badgeText(count);
+  if (severity === "warn" && text === "") return { text: "!", color };
+  return { text, color };
 }

@@ -4,6 +4,7 @@ import {
   classifyPage,
   aggregateOutcome,
   reduceScanHealth,
+  shouldRunScan,
   isSavableJob,
   fieldMissingAcrossAll,
   reducePushHealth,
@@ -140,6 +141,16 @@ test("reduceScanHealth: load-failed is transient — no warning, counter untouch
   assert.equal(r.severity, "ok");
   assert.equal(r.consecutiveEmptyScans, 2); // not incremented — infra, not a parser signal
   assert.equal(r.notify, false);
+});
+
+// ── shouldRunScan: pause auto-recovers, halt needs a manual resume (§16.1/§16.2) ─
+
+test("shouldRunScan: active and paused keep scanning; halted does not", () => {
+  // paused keeps scanning so a later `ok` scan is what auto-resumes it (§16.1).
+  assert.equal(shouldRunScan("active"), true);
+  assert.equal(shouldRunScan("paused"), true);
+  // halted stops entirely until the user clears the challenge and resumes (§16.2).
+  assert.equal(shouldRunScan("halted"), false);
 });
 
 // ── isSavableJob / fieldMissingAcrossAll: partial parse (§16.4) ────────────────

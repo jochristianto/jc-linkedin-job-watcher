@@ -122,6 +122,36 @@ test("renderPage new mode hides opened jobs; all mode keeps them on screen", () 
   assert.match(allHtml, /data-job-id="2"/);
 });
 
+test("renderPage shows the health message as a one-line banner (§16.8)", () => {
+  const html = renderPage({
+    jobs: [job({ id: "1" })],
+    watches,
+    mode: "all",
+    title: "All",
+    severity: "error",
+    message: "Signed out of LinkedIn — scanning paused.",
+  });
+  assert.match(html, /class="banner banner-error"/);
+  assert.match(html, /Signed out of LinkedIn — scanning paused\./);
+});
+
+test("renderPage shows no banner when health is clear", () => {
+  const html = renderPage({ jobs: [job({ id: "1" })], watches, mode: "all", title: "All" });
+  assert.doesNotMatch(html, /class="banner/);
+});
+
+test("renderPage escapes the banner message", () => {
+  const html = renderPage({
+    jobs: [],
+    watches,
+    mode: "new",
+    title: "New",
+    severity: "warn",
+    message: "a < b & c",
+  });
+  assert.match(html, /a &lt; b &amp; c/);
+});
+
 test("renderPage picks the right empty state for each situation", () => {
   // no watches configured
   assert.match(
