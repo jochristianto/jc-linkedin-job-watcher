@@ -1,0 +1,406 @@
+/* Design tokens + list-view styles for the LinkedIn Job Watcher mockups.
+ *
+ * Plain CSS, one token file, no framework (issue #4: fewest moving parts).
+ * Light and dark are both defined — dark via prefers-color-scheme, so it
+ * follows the OS with zero JS. The same file styles the popup, the full tab,
+ * and the options page; the popup/tab diverge only through .view-popup /
+ * .view-tab on the root element, never through different markup. */
+
+:root {
+  --bg: #f3f2ef; /* LinkedIn-ish warm grey page */
+  --surface: #ffffff;
+  --surface-2: #f6f8fa;
+  --border: #e2e1de;
+  --text: #1a1a1a;
+  --muted: #5f6368;
+  --faint: #8a8f98;
+  --accent: #0a66c2; /* LinkedIn blue */
+  --accent-weak: #e8f0fe;
+  --unread: #0a66c2; /* unread dot + accent bar */
+  --danger: #b3261e;
+  --danger-weak: #fce8e6;
+  --ok: #146c2e;
+
+  --r-sm: 6px;
+  --r-md: 10px;
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1b1f23;
+    --surface: #24292e;
+    --surface-2: #2d333b;
+    --border: #3a4048;
+    --text: #e6e8eb;
+    --muted: #9aa2ad;
+    --faint: #6b7480;
+    --accent: #4a9eff;
+    --accent-weak: #16334d;
+    --unread: #4a9eff;
+    --danger: #ff6b61;
+    --danger-weak: #3a1f1d;
+    --ok: #4ac06a;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  color: var(--text);
+  background: var(--bg);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+/* ---- Root sizing: the one place popup and tab diverge ---- */
+.view-popup {
+  width: 380px;
+  min-height: 480px;
+  max-height: 600px;
+  display: flex;
+  flex-direction: column;
+}
+.view-tab {
+  max-width: 720px;
+  margin: 0 auto;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- Header ---- */
+.hdr {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-4);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.hdr-title {
+  font-weight: 700;
+  font-size: 15px;
+  flex: 1;
+}
+.badge {
+  background: var(--danger);
+  color: #fff;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 7px;
+  min-width: 18px;
+  text-align: center;
+}
+.hdr-btn {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: var(--s-1) var(--s-2);
+  border-radius: var(--r-sm);
+  font-size: 13px;
+}
+.hdr-btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* ---- Toolbar: watch chips + New/All toggle ---- */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-4);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.chips {
+  display: flex;
+  gap: var(--s-1);
+  flex: 1;
+  flex-wrap: wrap;
+}
+.chip {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.chip[aria-pressed="true"] {
+  background: var(--accent-weak);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.toggle button {
+  border: none;
+  background: var(--surface);
+  color: var(--muted);
+  padding: 3px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.toggle button[aria-pressed="true"] {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* ---- Scan status banner (non-blocking) ---- */
+.banner {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-4);
+  font-size: 12px;
+  background: var(--surface-2);
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+.banner.err {
+  background: var(--danger-weak);
+  color: var(--danger);
+}
+
+/* ---- List ---- */
+.list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--s-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.job {
+  display: flex;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  text-decoration: none;
+  color: inherit;
+  position: relative;
+}
+.job:hover {
+  border-color: var(--accent);
+}
+.job-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--unread);
+  margin-top: 6px;
+  flex: 0 0 auto;
+}
+/* Read state: dim, drop the dot, un-bold the title. In "All" mode a read job
+ * stays on screen looking exactly like this. */
+.job[data-read="true"] {
+  background: var(--surface-2);
+}
+.job[data-read="true"] .job-dot {
+  visibility: hidden;
+}
+.job[data-read="true"] .job-title {
+  font-weight: 500;
+  color: var(--muted);
+}
+.job-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.job-title {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text);
+}
+.job-meta {
+  font-size: 13px;
+  color: var(--muted);
+}
+.job-foot {
+  font-size: 12px;
+  color: var(--faint);
+}
+/* The tab has room; let titles breathe. The popup clamps to one line. */
+.view-popup .job-title,
+.view-popup .job-meta {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Empty states ---- */
+.empty {
+  margin: auto;
+  text-align: center;
+  padding: var(--s-5);
+  color: var(--muted);
+  max-width: 300px;
+}
+.empty-icon {
+  font-size: 32px;
+  margin-bottom: var(--s-2);
+}
+.empty-title {
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: var(--s-1);
+}
+.empty-body {
+  font-size: 13px;
+}
+
+/* ---- Options page ---- */
+.opt-wrap {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: var(--s-5) var(--s-4);
+}
+.opt-wrap h1 {
+  font-size: 20px;
+  margin: 0 0 var(--s-4);
+}
+.section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--s-4);
+  margin-bottom: var(--s-4);
+}
+.section > h2 {
+  font-size: 14px;
+  margin: 0 0 var(--s-1);
+}
+.section > .hint {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0 0 var(--s-3);
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  margin-bottom: var(--s-3);
+}
+.field-row {
+  display: flex;
+  gap: var(--s-3);
+}
+.field-row .field {
+  flex: 1;
+}
+label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+input[type="text"],
+input[type="number"],
+input[type="password"] {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+}
+.watch-row,
+.block-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) 0;
+  border-top: 1px solid var(--border);
+}
+.watch-row .grow {
+  flex: 1;
+  min-width: 0;
+}
+.watch-row .name {
+  font-weight: 600;
+}
+.watch-row .url {
+  font-size: 12px;
+  color: var(--faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  margin: 0 4px 4px 0;
+}
+.btn {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  border-radius: var(--r-sm);
+  padding: 7px 14px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn.ghost {
+  background: transparent;
+  color: var(--accent);
+}
+.btn.sm {
+  padding: 3px 10px;
+  font-size: 12px;
+}
+.switch {
+  font-size: 12px;
+  color: var(--muted);
+}
+.test-result {
+  font-size: 12px;
+  font-weight: 600;
+}
+.test-result.ok {
+  color: var(--ok);
+}
+.test-result.err {
+  color: var(--danger);
+}
+.foot-note {
+  color: var(--faint);
+  font-size: 12px;
+  text-align: center;
+  padding: var(--s-4);
+}

@@ -1,7 +1,11 @@
-// Popup page entry — the list view mounted as the toolbar popup (PRD §4).
+// Popup page entry — the shared list view mounted as the toolbar popup (PRD §4).
 //
-// PREFACTOR (ticket 01): no behaviour yet. The shared list-view component this
-// page mounts is the tested reference in mockups/render.ts; wiring it to
-// chrome.storage lands in the list-view ticket (PRD §11 step 4).
+// Thin wrapper (§14): it imports the token stylesheet, then hands the pre-classed
+// `.view-popup` root to the shared mount. The popup defaults to "New" — a quick
+// glance at what's unread. Everything it renders lives tested in view.ts.
 
-console.log("[LJW] popup loaded");
+import "./tokens.css";
+import { mountListView } from "./mount.ts";
+
+const root = document.getElementById("app");
+if (root) mountListView(root, "new", "New jobs");
