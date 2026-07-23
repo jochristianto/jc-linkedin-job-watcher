@@ -85,7 +85,7 @@ async function fireNewJobsNotification(newJobs: Job[]): Promise<void> {
 async function openJobsList(): Promise<void> {
   const url = chrome.runtime.getURL("jobs.html");
   const existing = jobsTabToFocus(await chrome.tabs.query({ url }));
-  if (existing && existing.id !== undefined) {
+  if (existing) {
     await chrome.tabs.update(existing.id, { active: true });
     if (existing.windowId !== undefined) {
       await chrome.windows.update(existing.windowId, { focused: true });

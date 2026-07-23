@@ -53,12 +53,16 @@ export function buildScanNotification(jobs: NotificationJob[]): ScanNotification
  *  handler acts on (both optional in the chrome types). */
 export type JobsTabRef = { id?: number; windowId?: number };
 
+/** A `JobsTabRef` known to have an id, so it can actually be focused. */
+export type FocusableTab = JobsTabRef & { id: number };
+
 /**
  * Pick the existing jobs.html tab to focus, or null if none is open and a new one
  * must be created (PRD §9). Reusing a tab is the whole point: a busy morning of
  * notification clicks must not leave six identical jobs.html tabs. The first tab
  * with a usable id wins — a tab with no id can't be focused, so it is skipped.
+ * The narrowed return type means the caller focuses `id` without re-checking it.
  */
-export function jobsTabToFocus(tabs: JobsTabRef[]): JobsTabRef | null {
-  return tabs.find((t) => t.id !== undefined) ?? null;
+export function jobsTabToFocus(tabs: JobsTabRef[]): FocusableTab | null {
+  return tabs.find((t): t is FocusableTab => t.id !== undefined) ?? null;
 }
