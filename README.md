@@ -221,13 +221,15 @@ Rules it follows:
 ```text
 alarm fires
   └─ recover any stale lock, sweep orphaned tabs
+  └─ open ONE scan window (unfocused, tucked in the corner)
   └─ for each enabled watch, in order:
        └─ for each page (1..depth):
-            open scan window (unfocused, on screen)
+            navigate the scan window to the page
             → content script walks the lazy list, parses cards as they render
-            → close window                 [+ randomised 3–5s pause]
+            → [+ randomised 3–5s pause]
             → a partial read retries once, with focus
        [+ randomised 8–12s pause between watches]
+  └─ close the scan window
   └─ merge every watch's results → ONE dedupe pass
   └─ save → update badge → one notification → Telegram push
   └─ re-arm the next one-shot alarm
@@ -238,7 +240,7 @@ A few things worth knowing:
 - **One notification per cycle**, not per watch. A role surfacing under two searches notifies once.
 - **Opened state survives re-scans** — reopening a search never re-inflates the badge.
 - **Your own LinkedIn tabs are never scraped.** Each scan window is stamped with a one-time token; the content script refuses to read any page that doesn't carry a matching one.
-- **The scan window is briefly visible, and that is deliberate.** It used to be a hidden tab, which was never verified and turns out not to work: Chrome gives a tab you can't see no animation frames and throttled timers, so LinkedIn's results column never finishes drawing. Measured on the same page, a visible tab rendered 25 of 25 postings and a hidden one 7 of 25 — the missing postings were never on screen to be read. The window opens unfocused, lives a few seconds, and is always closed, even if parsing throws.
+- **The scan window is visible, and that is deliberate.** It used to be a hidden tab, which was never verified and turns out not to work: Chrome gives a tab you can't see no animation frames and throttled timers, so LinkedIn's results column never finishes drawing. Measured on the same page, a visible tab rendered 25 of 25 postings and a hidden one 7 of 25 — the missing postings were never on screen to be read. Since it has to be seen, it's made as small a thing to see as possible: one unfocused window per *scan* rather than per page, tucked into the corner of whichever screen your browser is on, and always closed afterwards even if parsing throws.
 - **It only takes focus as a last resort.** Chrome also throttles a window it considers fully covered, so if a scan comes back short it retries that page once with the window focused, then hands focus straight back to where you were.
 - **A short read tells you.** If a page yields far fewer postings than it advertised, the badge turns amber and the popup says so, rather than a partial scan passing as a quiet day.
 - **Nothing runs while Chrome is closed.** This is a hard platform limit — extensions have no background process independent of the browser. On relaunch, a catch-up-depth scan runs exactly once.
