@@ -1,6 +1,6 @@
 // Scan cycle — the pure decisions the background scan loop makes (PRD §9 "Scan
 // cycle" / §5 / §7). `background.ts` is the side-effect wrapper: it opens the
-// invisible tabs, fires the alarm and sets the badge, and calls these functions
+// scan windows, fires the alarm and sets the badge, and calls these functions
 // for every choice that isn't a raw `chrome.*` call (PRD §14 — "anything that is
 // only an orchestration of chrome.* calls is not unit-tested"). Everything here
 // is a pure function of its arguments, so `node --test` proves it without a
@@ -30,7 +30,7 @@ export type ScanRequest = { type: "LJW_SCAN"; token: string };
  *  the header's manual scan control (PRD §9). No payload: the button only asks
  *  for a cycle to start, and the background reads the settings, the scan lock and
  *  the health state itself. Distinct from {@link ScanRequest}, which travels the
- *  other way (background → invisible tab) and carries the injection token. */
+ *  other way (background → scan window) and carries the injection token. */
 export type ScanNowRequest = { type: "LJW_SCAN_NOW" };
 
 /** The message the header's master on/off toggle sends the background. The UI
@@ -64,6 +64,27 @@ export function withScanToken(url: string, token: string): string {
   return u.toString();
 }
 
+/**
+ * Are these two URLs the same search page, ignoring the fragment?
+ *
+ * Used to decide whether a scan was *redirected* — the signal that matters for
+ * §16.1/§16.2 (authwall, checkpoint). A plain `!==` cannot answer it, because the
+ * page always ends up carrying the `#ljw_token=…` fragment {@link withScanToken}
+ * stamped on and the requested URL never does: every single scan would look
+ * redirected, and a genuine redirect would be invisible in the noise.
+ *
+ * Compares origin, path and query — a changed `start=` or a different host is a
+ * different page, a changed fragment is not.
+ */
+export function sameSearchPage(a: string, b: string): boolean {
+  try {
+    const [x, y] = [new URL(a), new URL(b)];
+    return x.origin === y.origin && x.pathname === y.pathname && x.search === y.search;
+  } catch {
+    return a === b; // an unparseable URL: fall back to an exact match
+  }
+}
+
 /** The one-time token a page's fragment carries, or null if it carries none
  *  (a hand-opened LinkedIn tab). `hash` is `window.location.hash` (with or
  *  without the leading `#`). */
@@ -86,9 +107,11 @@ export type ScanResponse = {
   /** The jobs parsed from the settled page (scan-context fields still neutral —
    *  `background.ts` stamps them with {@link stampJobs}). */
   jobs: Job[];
-  /** Whether the list stabilised before the poll timeout (`pollUntilSettled`).
-   *  A settled=false, zero-card page is the invisible-tab assumption failing
-   *  (issue #5, Q1/Q4) — the ticket-#15 stop condition. */
+  /** Whether the walk reached the bottom of the list and stopped finding new
+   *  postings before the poll timeout (`pollUntilSettled`). A settled=false,
+   *  zero-card page is the invisible-tab assumption failing (issue #5, Q1/Q4) —
+   *  the ticket-#15 stop condition. A settled=false page that *did* yield cards
+   *  is a partial read: real postings were left unread. */
   settled: boolean;
   /** Where the tab actually ended up — `window.location.href`. LinkedIn redirects
    *  a logged-out / challenged session, so this is what `classifyPage` keys on to
@@ -98,9 +121,18 @@ export type ScanResponse = {
    *  `structure-changed`, present-but-empty is a genuine `empty`. NEVER a bare
    *  "0 cards" — the container flag is what makes the two distinguishable. */
   hasResultsList: boolean;
-  /** Distinct job cards on the settled page — the classification signal, not the
-   *  count of *savable* jobs (a card missing a load-bearing field still rendered). */
+  /** Distinct postings seen in the DOM at any point during the walk — the
+   *  classification signal, not the count of *savable* jobs (a card missing a
+   *  load-bearing field still rendered). */
   cardCount: number;
+  /** Postings actually parsed into jobs — `jobs.length`. Below `cardCount` means
+   *  cards rendered but their fields didn't parse (selector drift, §16.4), which
+   *  is a different failure from cards that never rendered at all. */
+  savedCount: number;
+  /** Posting slots the page itself declared (`SLOT_SELECTOR`), or 0 when it
+   *  declares none. The page's own claim about how many results it holds, and so
+   *  the yardstick for whether the walk read all of them. */
+  slotCount: number;
 };
 
 /** The enabled watches to scan, in their saved order (PRD §9: "for each enabled

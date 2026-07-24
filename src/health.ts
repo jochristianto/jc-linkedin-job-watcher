@@ -21,9 +21,14 @@ import type { BackoffConfig } from "./schedule.ts";
  * The classified result of loading one page (PRD §16, failures 1–5). The order
  * matters: `challenge` is the account-safety signal and outranks everything.
  *
- * - `ok`                — results list present, ≥1 card parsed.
+ * - `ok`                — results list present, ≥1 card parsed, whole list read.
  * - `empty`             — results list present, 0 cards. A genuine "no results
  *                         for this search" (failure 3): the page rendered fine.
+ * - `partial`           — the page rendered and parsed, but only part of it was
+ *                         read: the walk didn't finish, or well under the slots
+ *                         the page declared came back. Postings were silently
+ *                         missed, which is the failure this whole extension is
+ *                         supposed to prevent, so it is never reported as `ok`.
  * - `structure-changed` — the results list itself was absent. Selectors are dead
  *                         — LinkedIn moved the DOM (PRD §12), not an empty search.
  * - `logged-out`        — the tab landed on a login wall / authwall (failure 1).
@@ -35,10 +40,23 @@ import type { BackoffConfig } from "./schedule.ts";
 export type PageOutcome =
   | "ok"
   | "empty"
+  | "partial"
   | "structure-changed"
   | "logged-out"
   | "challenge"
   | "load-failed";
+
+/** Read at least this share of the postings a page declared before calling the
+ *  read complete. Not 1.0 on purpose: a promoted or ghost slot can occupy a row
+ *  without ever yielding a job id, so demanding every slot would warn forever.
+ *
+ *  Tightened from 0.8 after a measured 21-of-25 read (0.84) passed as healthy
+ *  while dropping 4 real postings — including the two the user reported missing.
+ *  A page that declares 25 rows and yields 22 is now worth a look. The false-
+ *  positive risk is low: every one of the 25 slots on the measured page was a
+ *  genuine posting, no ghosts. An amber badge you can dismiss is far cheaper than
+ *  a job you never hear about, which is the whole point of the extension. */
+export const COMPLETE_READ_RATIO = 0.9;
 
 /** The structured signals the content script reads off one page load. Pure: the
  *  live-DOM reading happens in the wrapper, the *decision* happens here. */
@@ -51,9 +69,43 @@ export type PageSignals = {
   /** Whether the job-results list *container* is present in the DOM at all. Its
    *  absence (not merely zero cards inside it) is the structure-changed signal. */
   hasResultsList: boolean;
-  /** Distinct job cards parsed (see `extractJobIds`, scan-probe.ts). */
+  /** Distinct postings that actually **rendered** (see `postingIdsOn`, parse.ts) —
+   *  not the slots reserved for them. */
   cardCount: number;
+  /** Postings that rendered *and* parsed into a usable job. */
+  savedCount: number;
+  /** Posting slots the page declared, or 0 when it declares none (no yardstick). */
+  slotCount: number;
+  /** Whether the walk down the list ran to completion. */
+  settled: boolean;
 };
+
+/**
+ * Did the scan read the whole list, or only part of it? True when the walk gave
+ * up early, or when the page declared slots and well under
+ * {@link COMPLETE_READ_RATIO} of them came back.
+ *
+ * Split out and exported because "we read 11 of the 25 postings on this page"
+ * was, for the entire life of this extension, indistinguishable from a perfect
+ * scan: the only card signal was `cardCount >= 1`. A silent partial read is
+ * strictly worse than a loud failure — the user reads an empty list as "no new
+ * jobs" and stops checking — so it gets its own signal.
+ */
+export function isPartialRead(
+  s: Pick<PageSignals, "cardCount" | "savedCount" | "slotCount" | "settled">,
+): boolean {
+  if (s.cardCount === 0) return false; // an empty page is `empty`, not partial
+  if (!s.settled) return true;
+  // Rendered but unparseable — the fields drifted out from under the selectors.
+  if (s.savedCount < s.cardCount * COMPLETE_READ_RATIO) return true;
+  if (s.slotCount === 0) return false; // no yardstick — nothing to be short of
+  // Promised but never rendered. Checked against `savedCount`, not `cardCount`:
+  // the first version of this compared the slots the page declared against a
+  // count that was itself derived from those same slots, so it was comparing a
+  // number with itself and could never fire. A page that reserves 25 rows and
+  // yields 4 jobs is the exact failure being watched for.
+  return s.savedCount < s.slotCount * COMPLETE_READ_RATIO;
+}
 
 /**
  * Classify one page load into a {@link PageOutcome} (PRD §16, failures 1–5).
@@ -78,6 +130,7 @@ export function classifyPage(s: PageSignals): PageOutcome {
   }
   if (!s.hasResultsList) return "structure-changed";
   if (s.cardCount === 0) return "empty";
+  if (isPartialRead(s)) return "partial";
   return "ok";
 }
 
@@ -88,9 +141,12 @@ const RANK: Record<PageOutcome, number> = {
   ok: 0,
   empty: 1,
   "load-failed": 2,
-  "structure-changed": 3,
-  "logged-out": 4,
-  challenge: 5,
+  // Above load-failed: a page that didn't load is transient and retried, a page
+  // that loaded and was only half-read drops postings on every single cycle.
+  partial: 3,
+  "structure-changed": 4,
+  "logged-out": 5,
+  challenge: 6,
 };
 
 /**
@@ -202,6 +258,18 @@ export function reduceScanHealth(
         notify: false,
       };
     }
+    case "partial":
+      // Warn at once, like structure-changed: reading half a page is unambiguous,
+      // there is nothing to wait and see about. The empty-scan counter is left
+      // alone deliberately — this scan found jobs, and backing the cadence off
+      // would mean reading even less of the list, not more.
+      return {
+        mode: "active",
+        severity: "warn",
+        consecutiveEmptyScans: prior.consecutiveEmptyScans,
+        message: "Only part of the results list could be read — some new postings were probably missed.",
+        notify: false,
+      };
     case "empty": {
       const n = prior.consecutiveEmptyScans + 1;
       const tripped = n >= cfg.emptyScansBeforeBackoff;

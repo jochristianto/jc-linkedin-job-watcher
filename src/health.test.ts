@@ -28,6 +28,11 @@ const signals = (o: Partial<PageSignals> = {}): PageSignals => ({
   finalUrl: "https://www.linkedin.com/jobs/search/?keywords=x",
   hasResultsList: true,
   cardCount: 5,
+  // A complete read by default — every pre-existing case here is about *which*
+  // failure a page is, not about how much of it was read.
+  savedCount: 5,
+  slotCount: 5,
+  settled: true,
   ...o,
 });
 
@@ -43,6 +48,92 @@ test("classifyPage: results list present but zero cards is a genuine empty (§16
 
 test("classifyPage: a missing results list is structure-changed, not empty (§16.3)", () => {
   assert.equal(classifyPage(signals({ hasResultsList: false, cardCount: 0 })), "structure-changed");
+});
+
+// ── partial reads: the failure that used to be indistinguishable from `ok` ────
+
+test("classifyPage: reading 11 of 25 declared slots is partial, not ok", () => {
+  // The live-page measurement that started this: LinkedIn declared 25 postings,
+  // only 11 were ever materialised, and the old classifier called it `ok`.
+  assert.equal(classifyPage(signals({ cardCount: 11, savedCount: 11, slotCount: 25 })), "partial");
+});
+
+test("classifyPage: 4 jobs off a page promising 25 rows is partial (live regression)", () => {
+  // Straight from the worker log: `4 saved / 25 seen / 25 slots` came back `ok`,
+  // because the first version of isPartialRead compared the declared slots
+  // against a count derived from those same slots — a number against itself.
+  assert.equal(classifyPage(signals({ cardCount: 4, savedCount: 4, slotCount: 25 })), "partial");
+});
+
+test("classifyPage: cards that render but don't parse are partial (field drift)", () => {
+  // Everything the page promised rendered, but the fields no longer match the
+  // selectors, so almost nothing was savable. A different fault from the above,
+  // and one the slot count alone can never see.
+  assert.equal(classifyPage(signals({ cardCount: 25, savedCount: 4, slotCount: 25 })), "partial");
+});
+
+test("classifyPage: a walk that never finished is partial even at full count", () => {
+  assert.equal(
+    classifyPage(signals({ cardCount: 25, savedCount: 25, slotCount: 25, settled: false })),
+    "partial",
+  );
+});
+
+test("classifyPage: 21 of 25 is partial — the read that used to slip through", () => {
+  // Measured after the window fix: everything rendered, but 4 cards used a second
+  // layout and were dropped for having no title. At the old 0.8 ratio this scored
+  // 0.84 and reported `ok`, which is how the two originally-missing postings
+  // stayed missing even once the page was rendering fully.
+  assert.equal(classifyPage(signals({ cardCount: 25, savedCount: 21, slotCount: 25 })), "partial");
+});
+
+test("classifyPage: a couple of ghost slots do not warn (COMPLETE_READ_RATIO)", () => {
+  // Promoted/ghost rows occupy a slot without yielding a job id. Demanding every
+  // slot would warn on every healthy scan, which trains the user to ignore it.
+  assert.equal(classifyPage(signals({ cardCount: 23, savedCount: 23, slotCount: 25 })), "ok");
+});
+
+test("classifyPage: a page that declares no slots has no yardstick, so it is ok", () => {
+  assert.equal(classifyPage(signals({ cardCount: 5, savedCount: 5, slotCount: 0 })), "ok");
+});
+
+test("classifyPage: an empty page is empty, never partial", () => {
+  assert.equal(classifyPage(signals({ cardCount: 0, savedCount: 0, slotCount: 25 })), "empty");
+});
+
+test("classifyPage: account-safety signals still outrank a partial read", () => {
+  const short = { cardCount: 1, savedCount: 1, slotCount: 25 };
+  assert.equal(
+    classifyPage(signals({ ...short, finalUrl: "https://www.linkedin.com/checkpoint/x" })),
+    "challenge",
+  );
+  assert.equal(
+    classifyPage(signals({ ...short, finalUrl: "https://www.linkedin.com/authwall" })),
+    "logged-out",
+  );
+});
+
+test("aggregateOutcome: one partial page marks the whole cycle partial", () => {
+  assert.equal(aggregateOutcome(["ok", "partial", "ok"]), "partial");
+  // ...but a real breakage still outranks it.
+  assert.equal(aggregateOutcome(["partial", "logged-out"]), "logged-out");
+});
+
+test("reduceScanHealth: partial warns at once and leaves the back-off counter alone", () => {
+  // Backing the cadence off on a partial read would mean scanning *less* often
+  // while already reading less of each page — exactly the wrong direction.
+  const prior = { ...OK_HEALTH, consecutiveEmptyScans: 2 };
+  const h = reduceScanHealth(prior, "partial", backoff());
+  assert.equal(h.severity, "warn");
+  assert.equal(h.mode, "active");
+  assert.equal(h.consecutiveEmptyScans, 2);
+  assert.equal(h.notify, false);
+  assert.match(h.message ?? "", /part of the results list/i);
+});
+
+test("reduceScanHealth: a clean scan clears a partial warning", () => {
+  const warned = reduceScanHealth(OK_HEALTH, "partial", backoff());
+  assert.deepEqual(reduceScanHealth(warned, "ok", backoff()), OK_HEALTH);
 });
 
 test("classifyPage: a login wall is logged-out (§16.1)", () => {

@@ -12,6 +12,7 @@ import {
   scanTokenMatches,
   badgeColor,
   badgeFor,
+  sameSearchPage,
 } from "./scan.ts";
 import type { JobsMap } from "./storage.ts";
 import type { Job, Watch } from "./types.ts";
@@ -183,4 +184,36 @@ test("scanTokenMatches accepts only an exact non-empty match", () => {
   assert.equal(scanTokenMatches(null, "abc123"), false);
   assert.equal(scanTokenMatches("", ""), false);
   assert.equal(scanTokenMatches("abc123", undefined), false);
+});
+
+// ── sameSearchPage: telling a redirect from our own token fragment ────────────
+
+test("sameSearchPage ignores the scan token fragment the page ends up carrying", () => {
+  // Every scan lands on the requested URL *plus* the token withScanToken stamped
+  // on, so a plain !== reports every single page as redirected and buries the
+  // real ones.
+  const requested = "https://www.linkedin.com/jobs/search/?keywords=x&start=0";
+  const landed = withScanToken(requested, "46ec7841-bf71-4c23-88c0-97cfc7dc97ff");
+  assert.equal(sameSearchPage(landed, requested), true);
+});
+
+test("sameSearchPage still reports a genuine redirect", () => {
+  const requested = "https://www.linkedin.com/jobs/search/?keywords=x&start=0";
+  assert.equal(sameSearchPage("https://www.linkedin.com/authwall", requested), false);
+  assert.equal(sameSearchPage("https://www.linkedin.com/checkpoint/challenge", requested), false);
+});
+
+test("sameSearchPage treats a different page of the same search as different", () => {
+  assert.equal(
+    sameSearchPage(
+      "https://www.linkedin.com/jobs/search/?keywords=x&start=25",
+      "https://www.linkedin.com/jobs/search/?keywords=x&start=0",
+    ),
+    false,
+  );
+});
+
+test("sameSearchPage falls back to an exact match on an unparseable URL", () => {
+  assert.equal(sameSearchPage("not a url", "not a url"), true);
+  assert.equal(sameSearchPage("not a url", "also not a url"), false);
 });

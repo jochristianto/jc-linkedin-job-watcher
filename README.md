@@ -2,7 +2,7 @@
 
 A personal Chrome extension (MV3) that watches your saved LinkedIn job searches on a background alarm and tells you about **genuinely new** postings — a badge count, one merged desktop notification per scan, and optionally a Telegram message on your phone.
 
-It reads the page while you're logged in, in your own browser, in an invisible tab. Notifications lead into the extension's **own** list view, never straight to LinkedIn — you pick what to open from there.
+It reads the page while you're logged in, in your own browser, in a small window that opens for a few seconds and closes itself. Notifications lead into the extension's **own** list view, never straight to LinkedIn — you pick what to open from there.
 
 > **Heads up:** scraping is against LinkedIn's ToS. Personal single-user use in your own logged-in browser is low-risk in practice, but the risk isn't zero — account restriction is the realistic worst case. Keep the scan depth low (the shipped defaults already do).
 
@@ -223,9 +223,10 @@ alarm fires
   └─ recover any stale lock, sweep orphaned tabs
   └─ for each enabled watch, in order:
        └─ for each page (1..depth):
-            open invisible tab (active: false)
-            → content script scroll-settles the lazy list, parses cards
-            → close tab                    [+ randomised 3–5s pause]
+            open scan window (unfocused, on screen)
+            → content script walks the lazy list, parses cards as they render
+            → close window                 [+ randomised 3–5s pause]
+            → a partial read retries once, with focus
        [+ randomised 8–12s pause between watches]
   └─ merge every watch's results → ONE dedupe pass
   └─ save → update badge → one notification → Telegram push
@@ -236,8 +237,10 @@ A few things worth knowing:
 
 - **One notification per cycle**, not per watch. A role surfacing under two searches notifies once.
 - **Opened state survives re-scans** — reopening a search never re-inflates the badge.
-- **Your own LinkedIn tabs are never scraped.** Each scan tab is stamped with a one-time token; the content script refuses to read any page that doesn't carry a matching one.
-- **Scan tabs never steal focus** (`active: false`) and are always closed, even if parsing throws.
+- **Your own LinkedIn tabs are never scraped.** Each scan window is stamped with a one-time token; the content script refuses to read any page that doesn't carry a matching one.
+- **The scan window is briefly visible, and that is deliberate.** It used to be a hidden tab, which was never verified and turns out not to work: Chrome gives a tab you can't see no animation frames and throttled timers, so LinkedIn's results column never finishes drawing. Measured on the same page, a visible tab rendered 25 of 25 postings and a hidden one 7 of 25 — the missing postings were never on screen to be read. The window opens unfocused, lives a few seconds, and is always closed, even if parsing throws.
+- **It only takes focus as a last resort.** Chrome also throttles a window it considers fully covered, so if a scan comes back short it retries that page once with the window focused, then hands focus straight back to where you were.
+- **A short read tells you.** If a page yields far fewer postings than it advertised, the badge turns amber and the popup says so, rather than a partial scan passing as a quiet day.
 - **Nothing runs while Chrome is closed.** This is a hard platform limit — extensions have no background process independent of the browser. On relaunch, a catch-up-depth scan runs exactly once.
 
 ### Permissions, and why
@@ -247,7 +250,7 @@ A few things worth knowing:
 | `storage`, `unlimitedStorage` | Settings, seen IDs, job records |
 | `alarms` | The scan cadence — survives service-worker teardown |
 | `notifications` | New-job and health alerts |
-| `tabs`, `scripting` | Open/close the invisible scan tab and message it |
+| `tabs`, `scripting` | Open/close the scan window and message it |
 | `https://www.linkedin.com/*` | The pages being read |
 | `https://api.telegram.org/*` | Telegram push (only used if you enable it) |
 

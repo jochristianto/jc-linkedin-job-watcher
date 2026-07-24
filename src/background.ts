@@ -1,6 +1,6 @@
 // Background service worker (MV3) — the scan loop's side-effect wrapper (PRD §9 /
 // §15 / §17). This ticket (04, issue #15) turns the prefactor entry into the
-// first real scan: an alarm fires, an invisible tab opens on one watch's URL, the
+// first real scan: an alarm fires, a short-lived window opens on one watch's URL, the
 // content script scroll-settles and parses the page, the tab closes, the new jobs
 // land in storage and the badge shows the unread count.
 //
@@ -30,6 +30,7 @@ import {
   badgeFor,
   enabledWatches,
   mergeJobs,
+  sameSearchPage,
   scanPageUrl,
   stampJobs,
   unreadCount,
@@ -75,6 +76,13 @@ const HEALTH_NOTIFICATION_ID = "ljw-health";
 /** How long to wait for a scan tab to finish loading before messaging it. Loose
  *  because the content script settles the lazy list itself (pollUntilSettled). */
 const TAB_LOAD_TIMEOUT_MS = 30_000;
+
+/** Geometry for the scan window (see {@link scanPage}). Deliberately a real,
+ *  on-screen size rather than 1×1: LinkedIn renders the results column lazily by
+ *  viewport, so a tiny window would paint a handful of rows and stop — the very
+ *  failure this window exists to avoid. Offset from the corner so it reads as a
+ *  transient popup rather than something that has replaced the user's window. */
+const SCAN_WINDOW = { width: 1000, height: 900, top: 60, left: 60 } as const;
 
 /** Sleep for a drawn pause length — the in-cycle pacing (PRD §9/§15 decision 5).
  *  A plain timer; the *length* is decided by the tested `randomPauseMs`. */
@@ -186,7 +194,7 @@ async function fireAppliedPush(jobId: string): Promise<AppliedPushResponse> {
   return ok ? { sent: true } : { sent: false, reason: "refused" };
 }
 
-// ── Talking to the invisible tab ───────────────────────────────────────────────
+// ── Talking to the scan window ─────────────────────────────────────────────────
 
 /** Resolve `true` once the tab reports `status: "complete"`, or `false` if the
  *  timeout elapses first so a wedged load can't hang the cycle. The content script
@@ -212,24 +220,48 @@ function waitForTabComplete(tabId: number): Promise<boolean> {
  *  the raw signals it needs. */
 type PageResult = { jobs: Job[]; outcome: PageOutcome };
 
-/** Open one invisible tab on `url`, let the content script settle+parse it, and
- *  return the parsed jobs together with the page's classified {@link PageOutcome}
- *  (PRD §16). A fresh one-time token is minted per injection and stamped onto the
- *  tab's URL fragment; the same token rides the LJW_SCAN message, and the content
- *  script reads nothing unless the two match (PRD §9) — so a LinkedIn tab the user
- *  opened by hand, which carries no token, is never scraped.
+/** Open one short-lived window on `url`, let the content script settle+parse it,
+ *  and return the parsed jobs together with the page's classified
+ *  {@link PageOutcome} (PRD §16). A fresh one-time token is minted per injection
+ *  and stamped onto the URL fragment; the same token rides the LJW_SCAN message,
+ *  and the content script reads nothing unless the two match (PRD §9) — so a
+ *  LinkedIn tab the user opened by hand, which carries no token, is never scraped.
+ *
+ *  **A window, not a background tab.** The original design (PRD §9/§17 decision 2)
+ *  used `tabs.create({ active: false })` and was never verified — issue #5's
+ *  question 4, left open. Measured on 2026-07-24 it does not work: Chrome gives a
+ *  tab you cannot see no animation frames and heavily throttled timers, and
+ *  LinkedIn's results column needs both to fill in rows. The same page rendered
+ *  25 of 25 postings in a visible tab and 7 of 25 in a hidden one, and no amount
+ *  of scrolling closes that gap — the rows are never painted to be read. So the
+ *  scan window must genuinely be on screen for the few seconds it lives.
+ *
+ *  `focused` is normally false, so the window appears without taking keyboard
+ *  focus. It escalates to true only on a retry (see {@link runCycle}), because
+ *  Chrome also throttles a window it considers *fully occluded* — one that opened
+ *  silently behind everything else is, to the compositor, no better than a hidden
+ *  tab. When focus is taken it is handed back to the previously focused window.
  *
  *  The classification is `classifyPage`'s (§16 structural consequence — no
  *  decision logic here): a tab that never finishes loading is a `navError`
  *  (`load-failed`); one that lands on `/authwall` or `/checkpoint` is read from its
  *  final URL even when the content script's token gate refuses the redirected page.
- *  The tab is created `active: false` (never steals focus, PRD §17 decision 2) and
- *  ALWAYS closed in the `finally` so a parse failure can't orphan a tab. */
-async function scanPage(url: string): Promise<PageResult> {
+ *  The window is ALWAYS closed in the `finally` so a parse failure can't leave one
+ *  stranded on the user's screen. */
+async function scanPage(url: string, focused: boolean): Promise<PageResult> {
   const token = crypto.randomUUID();
-  const tab = await chrome.tabs.create({ url: withScanToken(url, token), active: false });
-  const tabId = tab.id;
-  if (tabId === undefined) return { jobs: [], outcome: "load-failed" };
+  // Captured before the window exists, so focus can be returned to whatever the
+  // user was actually working in rather than to whichever window Chrome picks.
+  const previous = focused ? await chrome.windows.getLastFocused().catch(() => undefined) : undefined;
+  const win = await chrome.windows.create({
+    url: withScanToken(url, token),
+    type: "popup",
+    focused,
+    ...SCAN_WINDOW,
+  });
+  const winId = win?.id;
+  const tabId = win?.tabs?.[0]?.id;
+  if (tabId === undefined || winId === undefined) return { jobs: [], outcome: "load-failed" };
 
   // Record the tab before the async work so a mid-cycle teardown can sweep it
   // (lifecycle.recoverStaleLock); untrack once it is cleanly closed below.
@@ -244,13 +276,24 @@ async function scanPage(url: string): Promise<PageResult> {
     let jobs: Job[] = [];
     let hasResultsList = false;
     let cardCount = 0;
+    let savedCount = 0;
+    let slotCount = 0;
+    let settled = false;
+    // Whether the page answered at all. Without this, "the content script never
+    // replied" and "the page replied that it holds no job list" both arrive as a
+    // row of zeros and get diagnosed as the same fault, which they are not.
+    let reachable = false;
     try {
       const req: ScanRequest = { type: "LJW_SCAN", token };
       const res = (await chrome.tabs.sendMessage(tabId, req)) as ScanResponse | undefined;
       if (res) {
+        reachable = true;
         jobs = res.jobs;
         hasResultsList = res.hasResultsList;
         cardCount = res.cardCount;
+        savedCount = res.savedCount;
+        slotCount = res.slotCount;
+        settled = res.settled;
       }
     } catch {
       // content script unreachable — the URL-based signals below still classify it
@@ -264,11 +307,37 @@ async function scanPage(url: string): Promise<PageResult> {
       finalUrl,
       hasResultsList,
       cardCount,
+      savedCount,
+      slotCount,
+      settled,
     };
-    return { jobs, outcome: classifyPage(signals) };
+    const outcome = classifyPage(signals);
+    // Logged for EVERY page, not just failures, and attributed to its URL while
+    // that is still known — the cycle folds every watch into one health state, so
+    // by the time anything is surfaced to the user it can only say "a page".
+    //
+    // `first` is the first posting id the page yielded, and it is here to answer a
+    // question the health state cannot: whether `&start=` still paginates. If two
+    // pages of the same watch report the same `first`, LinkedIn served the same
+    // results twice and everything past the first page is unreachable — which
+    // looks identical to a healthy scan from every other signal.
+    const line =
+      `[ljw] ${outcome} — ${url}\n` +
+      `      ${savedCount} saved / ${cardCount} rendered / ${slotCount} slots, ` +
+      `settled=${settled}, first=${jobs[0]?.id ?? "none"}\n` +
+      `      page answered=${reachable}, results list present=${hasResultsList}, ` +
+      `landed on ${sameSearchPage(finalUrl, url) ? "the requested URL" : finalUrl}`;
+    if (outcome === "ok") console.log(line);
+    else console.warn(line);
+    return { jobs, outcome };
   } finally {
-    await chrome.tabs.remove(tabId).catch(() => {});
+    // Remove the window, not the tab: closing the tab would leave an empty popup
+    // frame on screen, which is precisely what must never outlive the scan.
+    await chrome.windows.remove(winId).catch(() => {});
     await set("scanState", untrackTab(await get("scanState"), tabId));
+    if (previous?.id !== undefined) {
+      await chrome.windows.update(previous.id, { focused: true }).catch(() => {});
+    }
   }
 }
 
@@ -299,16 +368,33 @@ async function runCycle(settings: Settings, pages: number): Promise<void> {
     const watches = enabledWatches(settings.watches);
     const found: Job[] = [];
     const outcomes: PageOutcome[] = [];
+    // Logged up front so the per-page lines below can be read as a complete set:
+    // without it, a console attached partway through a cycle looks identical to a
+    // cycle that only ever scanned one page.
+    console.log(
+      `[ljw] cycle start — ${watches.length} of ${settings.watches.length} watches, ` +
+        `${pages} page(s) each`,
+    );
     for (const [w, watch] of watches.entries()) {
       for (let page = 1; page <= pages; page++) {
-        let { jobs, outcome } = await scanPage(scanPageUrl(watch.url, page));
+        const pageUrl = scanPageUrl(watch.url, page);
+        let { jobs, outcome } = await scanPage(pageUrl, false);
         // A load failure retries the page once, then skips it and continues the
         // cycle (PRD §16.5). The retry is infra, not a parser signal, so a
         // persistent `load-failed` is recorded as such — `reduceScanHealth` leaves
         // the empty-scan back-off counter untouched for it.
         if (outcome === "load-failed") {
           await sleep(randomPauseMs(settings.pacing.pagePauseMs));
-          ({ jobs, outcome } = await scanPage(scanPageUrl(watch.url, page)));
+          ({ jobs, outcome } = await scanPage(pageUrl, false));
+        }
+        // A partial read means the window was on screen but Chrome never painted
+        // it — the occluded-window case, which it throttles exactly like a hidden
+        // tab. Retrying *with* focus makes it unambiguously visible. This is the
+        // only point at which the scan takes focus, it only happens when the quiet
+        // attempt already failed, and the focus is handed straight back after.
+        if (outcome === "partial") {
+          await sleep(randomPauseMs(settings.pacing.pagePauseMs));
+          ({ jobs, outcome } = await scanPage(pageUrl, true));
         }
         found.push(...stampJobs(jobs, watch.id, Date.now()));
         outcomes.push(outcome);
@@ -320,6 +406,15 @@ async function runCycle(settings: Settings, pages: number): Promise<void> {
     // Merge-before-dedupe (PRD §5): one dedupe over every watch's results so a
     // cross-watch duplicate id collapses to a single new job.
     const { newJobs, seen } = dedupe(found, await get("seen"), filterRulesOf(settings), Date.now());
+    // The cycle's own arithmetic, so a miss can be located: how many postings were
+    // read across every page, how many of those were distinct, and how many
+    // survived. `distinct` well below `read` means the pages overlapped — the same
+    // results served more than once — rather than the search being quiet.
+    const distinct = new Set(found.map((j) => j.id)).size;
+    console.log(
+      `[ljw] cycle done — ${found.length} read, ${distinct} distinct, ` +
+        `${newJobs.length} new after dedupe+filters`,
+    );
     await set("seen", seen);
     if (newJobs.length > 0) {
       await set("jobs", mergeJobs(await get("jobs"), newJobs));
