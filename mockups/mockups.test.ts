@@ -83,9 +83,34 @@ test("both views show a blocked company greyed and tagged, still on screen", () 
     const html = read(name);
     assert.match(html, /data-blocked="true"/, `${name} state`);
     assert.match(html, /class="job-tag">Blocked</, `${name} tag`);
-    // Blocking is undoable from the row it was pressed on.
-    assert.match(html, /data-action="block" aria-pressed="true"/, `${name} unblock`);
+    // Blocking is undoable from the row it was pressed on, and the button says
+    // so in words rather than leaving it to a tooltip.
+    assert.match(html, /data-action="block"[^>]*aria-pressed="true"/, `${name} unblock`);
+    assert.match(html, /class="job-btn-label">Unblock</, `${name} unblock label`);
   }
+});
+
+test("both views spell the block action out, before the row's tick", () => {
+  for (const name of ["./popup.html", "./jobs.html"]) {
+    const html = read(name);
+    assert.match(html, /class="job-btn-label">Block</, `${name} label`);
+    // Block first, tick out at the edge — same order renderJobRow emits.
+    const actions = /<span class="job-actions">([\s\S]*?)<\/span>\s*<\/div>/.exec(html)?.[1];
+    assert.ok(actions, `${name} has a job-actions block`);
+    assert.ok(
+      actions!.indexOf('data-action="block"') < actions!.indexOf('data-action="read"'),
+      `${name} block button before read button`,
+    );
+  }
+});
+
+test("the tab shows a Block button mid-question, waiting for the second press", () => {
+  // Blocking hides every future job from a company, so it asks first; the
+  // mockup carries that state because it is the one you can't discover by
+  // looking at a resting row.
+  const html = read("./jobs.html");
+  assert.match(html, /data-armed="true"[^>]*title="Block [^"]* — press again to confirm"/);
+  assert.match(html, /class="job-btn-label">Sure\?</);
 });
 
 test("the tab shows the read toggle flipped to its undo state", () => {

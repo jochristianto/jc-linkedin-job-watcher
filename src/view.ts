@@ -163,9 +163,14 @@ export type ViewContext = {
    *  counts unread across every watch. */
   activeWatchId?: string | null;
   /** `settings.blockedCompanies`, already-normalized fragments. Greys the rows
-   *  whose company matches and flips their ban button to Unblock; those rows stay
-   *  on screen, they just stop counting towards the badge. */
+   *  whose company matches and flips their Block button to Unblock; those rows
+   *  stay on screen, they just stop counting towards the badge. */
   blockedCompanies?: string[];
+  /** The row whose Block button was pressed once and is now asking "Sure?".
+   *  Blocking a company is the one row action that changes what future scans
+   *  surface, so it takes two presses; mount.ts owns this id and clears it on
+   *  the next click or after `BLOCK_CONFIRM_MS`. */
+  armedBlockId?: string | null;
   /** A scan cycle is holding the lock right now (`scanState.isScanning`). Only
    *  changes the empty state: with nothing yet to show it reads "Scanning…"
    *  instead of "Nothing scanned yet" (mockups decision 5). */
@@ -288,7 +293,7 @@ export function renderPage(ctx: ViewContext): string {
   );
 
   const body = visible.length
-    ? renderList(views, ctx.mode)
+    ? renderList(views, ctx.mode, ctx.armedBlockId ?? null)
     : renderEmptyState(pickEmptyKind(ctx, views.length));
 
   const healthBanner = ctx.message

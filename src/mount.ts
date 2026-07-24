@@ -9,7 +9,8 @@
 //
 // Three separate row actions, because they mean three different things: opening
 // the posting (click the row), dismissing it (the tick button), and never wanting
-// that company again (the ban button). Only the second one empties the list.
+// that company again (the Block button). Only the second one empties the list,
+// and only the third asks before it commits — see `armBlock`.
 
 import * as storage from "./storage.ts";
 import {
@@ -22,7 +23,7 @@ import {
   unreadCount,
   type ViewContext,
 } from "./view.ts";
-import { renderScanStatus, type ListMode } from "./render.ts";
+import { renderScanStatus, BLOCK_CONFIRM_MS, type ListMode } from "./render.ts";
 import { SCAN_ALARM_NAME } from "./schedule.ts";
 import { badgeFor, type ScanNowRequest } from "./scan.ts";
 import { isCompanyBlocked } from "./filter.ts";
@@ -62,6 +63,13 @@ export async function mountListView(
   let nextScanAt: number | null = null;
   let lastCtx: ViewContext | null = null;
 
+  // The Block confirmation: which row's Block button is currently asking "Sure?",
+  // and the timer that takes the question back down. At most one at a time — see
+  // `armBlock`. Deliberately not persisted: a question you walked away from
+  // should not still be waiting when you reopen the popup.
+  let armedBlockId: string | null = null;
+  let armedBlockTimer: ReturnType<typeof setTimeout> | undefined;
+
   await render();
 
   // One delegated handler for the whole list — clicks and middle-clicks alike.
@@ -80,6 +88,28 @@ export async function mountListView(
 
   async function persistUi(): Promise<void> {
     await storage.set("ui", { activeWatchId, mode });
+  }
+
+  /**
+   * Put the question to one row's Block button, replacing any other row's — two
+   * buttons asking at once is two chances to answer the wrong one. It answers
+   * itself with "no" after `BLOCK_CONFIRM_MS`, so a click you meant for the row
+   * underneath can't leave a live one-press-to-block button lying around.
+   */
+  async function armBlock(id: string): Promise<void> {
+    clearTimeout(armedBlockTimer);
+    armedBlockId = id;
+    armedBlockTimer = setTimeout(() => void disarmBlock(), BLOCK_CONFIRM_MS);
+    await render();
+  }
+
+  /** Take the question back down. A no-op — no repaint at all — when nothing was
+   *  armed, which is the normal case for every click on the page. */
+  async function disarmBlock(): Promise<void> {
+    clearTimeout(armedBlockTimer);
+    if (armedBlockId === null) return;
+    armedBlockId = null;
+    await render();
   }
 
   async function render(): Promise<void> {
@@ -106,6 +136,7 @@ export async function mountListView(
       severity: health.severity,
       message: health.message,
       pushWarn: pushHealth.warn,
+      armedBlockId,
       quietHours: settings.quietHours,
       nextScanAt,
       now: Date.now(),
@@ -167,6 +198,29 @@ export async function mountListView(
 
   async function onClick(e: MouseEvent): Promise<void> {
     const target = e.target as HTMLElement;
+
+    // Opening a job is *decided* here, at the top, even though it is acted on at
+    // the bottom: it is the one branch with a synchronous obligation. A plain
+    // left click on a row has to call preventDefault() before this handler's
+    // first await, or the browser has already followed the <a href> by the time
+    // we come back — and then the tab we open is a second one. Modifier and
+    // middle clicks are deliberately left to do exactly that: the browser's own
+    // background tab (PRD §3).
+    const link = target.closest<HTMLAnchorElement>("a.job-main");
+    const background = e.button === 1 || e.ctrlKey || e.metaKey || e.shiftKey;
+    if (link && !background) e.preventDefault();
+
+    // Clicking anywhere else is how you answer "no" to an armed Block button, so
+    // that comes next, before any branch below can return early. The repaint it
+    // triggers detaches `target`, which is fine: `closest()` still walks the
+    // detached row, and every branch below works from ids and storage, never
+    // from what is currently on screen.
+    const hitBtn = target.closest<HTMLElement>(".job-btn");
+    const hitArmedBlock =
+      armedBlockId !== null &&
+      hitBtn?.dataset.action === "block" &&
+      hitBtn.closest<HTMLElement>(".job")?.dataset.jobId === armedBlockId;
+    if (!hitArmedBlock) await disarmBlock();
 
     const options = target.closest("#open-options");
     if (options) {
@@ -241,7 +295,7 @@ export async function mountListView(
       return;
     }
 
-    // Ban — blocklist this job's company straight from the row, no trip to
+    // Block — blocklist this job's company straight from the row, no trip to
     // Options. Existing rows stay on screen greyed; it's future scans that stop
     // surfacing the company (PRD §6). Pressing it again unblocks.
     if (action === "block") {
@@ -260,6 +314,19 @@ export async function mountListView(
         company,
         settings.blockedCompanies.map((b) => b.normalized),
       );
+
+      // Blocking takes two presses. It hides every future job from a company
+      // and the row it was pressed on stays put, greyed — so a mis-click looks
+      // like nothing much happened, and you find out weeks later by the jobs you
+      // never saw. The first press only arms the button; this one is it.
+      // Unblocking is single-press: it can only put jobs back.
+      if (!wasBlocked && armedBlockId !== id) {
+        await armBlock(id);
+        return;
+      }
+      clearTimeout(armedBlockTimer);
+      armedBlockId = null;
+
       const blockedCompanies = toggleBlockedCompany(
         settings.blockedCompanies,
         company,
@@ -273,16 +340,9 @@ export async function mountListView(
       return;
     }
 
-    const link = target.closest<HTMLAnchorElement>("a.job-main");
+    // Nothing but the posting itself is left: mark it opened, then open the tab
+    // (a background click already has its tab — see the top of this handler).
     if (!link) return;
-
-    // Modifier / middle clicks let the browser's own <a href> open a background
-    // tab (PRD §3). A plain left click we handle ourselves so we can write the
-    // opened state first, then open the tab in the foreground.
-    const background =
-      e.button === 1 || e.ctrlKey || e.metaKey || e.shiftKey;
-    if (!background) e.preventDefault(); // must be synchronous, before any await
-
     await openJob(id, background);
   }
 

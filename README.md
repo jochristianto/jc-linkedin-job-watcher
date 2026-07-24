@@ -85,7 +85,7 @@ In both views:
 
 - **Click a job** → opens the posting in a new tab and **highlights the row**, which stays in the list. Nothing disappears because you looked at it. Cmd/Ctrl/middle-click opens it in the background.
 - **The tick on a row** → marks that one job read: the row greys out, drops out of **New**, and the badge falls by one. This is the only thing that clears a job. Press it again (it flips to an undo arrow) to bring the job back.
-- **The ban icon on a row** → adds that job's company to your blocklist, without a trip to Options. Future scans stop surfacing it. Jobs from that company already in your list stay on screen, greyed and tagged **Blocked**, and stop counting towards the badge. Press it again to unblock.
+- **Block on a row** → adds that job's company to your blocklist, without a trip to Options. Future scans stop surfacing it. Jobs from that company already in your list stay on screen, greyed and tagged **Blocked**, and stop counting towards the badge. It asks first: the button reads **Sure?** after one press and only blocks on the second — click anywhere else, or wait five seconds, and the question goes away. The button then reads **Unblock**, which takes just the one press.
 - **Scan now** runs a cycle immediately, ignoring the interval and quiet hours. It reads *Scanning…* (greyed out) while a cycle is in flight, and the list repaints on its own when that cycle finishes. After a manual scan the next automatic one is a full interval away, not stacked minutes behind. When a verification challenge has halted scanning, the same button turns red and reads **Resume** — that is how you clear the halt.
 - **The status bar** along the bottom says what the loop is doing: *Scanning for new jobs…* with a spinning icon while a cycle is running, otherwise a live countdown to the next one (*Next scan in 4m 12s*). Inside quiet hours it says so, which is why that number is hours rather than minutes. It reads the armed alarm itself, so it can't drift from the real schedule — and with no search enabled there is nothing to scan, so the bar disappears entirely.
 - **Watch chips** filter the list to one search. The badge still counts across all of them.
@@ -103,7 +103,7 @@ A row therefore has three looks: plain (untouched), highlighted with a blue bar 
 Add, edit, remove, and individually enable/disable saved searches. Enabled searches all run on the same cycle, strictly one after another — never in parallel.
 
 ### Filters
-- **Blocked companies** — matched case-insensitively; normalised once when saved. The ban button on any job row adds and removes entries here too
+- **Blocked companies** — matched case-insensitively; normalised once when saved. The **Block** button on any job row adds and removes entries here too
 - **Blocked title keywords** — e.g. "Intern", "Senior"
 - **Hide reposted** — drop anything LinkedIn marks as "Reposted"
 

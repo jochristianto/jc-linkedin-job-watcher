@@ -35,6 +35,13 @@ export type JobView = {
   blocked: boolean;
 };
 
+/** How long an armed Block button waits for its second press before going back
+ *  to "Block" on its own. Long enough to read the question, short enough that a
+ *  popup you come back to is never still holding a half-pressed button.
+ *  mount.ts owns the timer; this is here so the markup and the timeout that
+ *  undoes it are one decision. */
+export const BLOCK_CONFIRM_MS = 5000;
+
 export type ListMode = "new" | "all";
 
 export type EmptyKind =
@@ -76,8 +83,14 @@ export function metaLine(parts: (string | null | undefined)[]): string {
  * Fields fail independently: a missing company, location or posted time is
  * simply omitted; a missing title falls back to a placeholder so the row is
  * never blank (PRD §12 "each field fails independently").
+ *
+ * `armedBlock` is this row's Block button mid-question: pressed once, now
+ * reading "Sure?" and waiting for the press that commits. It is transient view
+ * state, not job state, so it is a parameter rather than a `JobView` field —
+ * mount.ts holds which row is armed and clears it on the next click or after
+ * `BLOCK_CONFIRM_MS`.
  */
-export function renderJobRow(job: JobView): string {
+export function renderJobRow(job: JobView, armedBlock = false): string {
   // Only the title needs a fallback — it's the one field always rendered. The
   // rest (company, location, posted time) are dropped by metaLine when blank.
   const title = job.title.trim() ? esc(job.title) : "Untitled role";
@@ -94,12 +107,24 @@ export function renderJobRow(job: JobView): string {
   const readLabel = job.read ? "Mark as unread" : "Mark as read";
   const readBtn = `<button class="job-btn" data-action="read" aria-pressed="${job.read}" title="${readLabel}" aria-label="${readLabel}">${icon(job.read ? "rotate-ccw" : "check")}</button>`;
 
+  // Block says what it does in words. It is the one row action that changes what
+  // *future* scans surface, and its row doesn't visibly disappear when pressed,
+  // so a bare ban glyph reads as a status ("not allowed") rather than a control
+  // you can press — and the difference between block and unblock lived entirely
+  // in a tooltip. It also comes first now, with the tick out at the edge where a
+  // one-tap dismiss belongs.
+  //
   // A card with no company parsed has nothing to block, so it gets no button
   // rather than one that would blocklist the empty string (§12 again).
   const company = job.company.trim();
   const blockLabel = job.blocked ? `Unblock ${company}` : `Block ${company}`;
+  // Armed = pressed once, waiting for the second press that commits. Only the
+  // blocking direction ever arms — unblocking just puts jobs back, so there is
+  // nothing to be sure about — and mount.ts decides which row that is.
+  const blockText = armedBlock ? "Sure?" : job.blocked ? "Unblock" : "Block";
+  const blockTitle = esc(armedBlock ? `${blockLabel} — press again to confirm` : blockLabel);
   const blockBtn = company
-    ? `<button class="job-btn" data-action="block" aria-pressed="${job.blocked}" title="${esc(blockLabel)}" aria-label="${esc(blockLabel)}">${icon("ban")}</button>`
+    ? `<button class="job-btn job-btn-block" data-action="block" data-armed="${armedBlock}" aria-pressed="${job.blocked}" title="${blockTitle}" aria-label="${blockTitle}">${icon("ban", 14)}<span class="job-btn-label">${blockText}</span></button>`
     : "";
 
   return `
@@ -112,7 +137,7 @@ export function renderJobRow(job: JobView): string {
           ${foot || tag ? `<span class="job-foot">${foot}${tag}</span>` : ""}
         </span>
       </a>
-      <span class="job-actions">${readBtn}${blockBtn}</span>
+      <span class="job-actions">${blockBtn}${readBtn}</span>
     </div>`.trim();
 }
 
@@ -125,10 +150,18 @@ export function renderJobRow(job: JobView): string {
  * Blocked jobs stay in both modes, greyed. The blocklist governs what *future*
  * scans surface; silently deleting rows you can already see would be a second,
  * unasked-for action.
+ *
+ * `armedBlockId` is the at-most-one row whose Block button is mid-question. One
+ * id rather than a set: arming a second button disarms the first, so two rows
+ * can never be asking at once.
  */
-export function renderList(jobs: JobView[], mode: ListMode): string {
+export function renderList(
+  jobs: JobView[],
+  mode: ListMode,
+  armedBlockId: string | null = null,
+): string {
   const visible = mode === "new" ? jobs.filter((j) => !j.read) : jobs;
-  return visible.map(renderJobRow).join("\n");
+  return visible.map((j) => renderJobRow(j, j.id === armedBlockId)).join("\n");
 }
 
 /** The minimal watch shape the filter chips need: an id to filter on and a name

@@ -85,7 +85,42 @@ test("renderJobRow's read button is a toggle: mark as read, then back to unread"
 test("renderJobRow's block button names the company and flips to Unblock", () => {
   assert.match(renderJobRow(job({ blocked: false })), /title="Block Acme Corp"/);
   assert.match(renderJobRow(job({ blocked: true })), /title="Unblock Acme Corp"/);
-  assert.match(renderJobRow(job({ blocked: true })), /data-action="block" aria-pressed="true"/);
+  assert.match(renderJobRow(job({ blocked: true })), /data-action="block"[^>]*aria-pressed="true"/);
+});
+
+test("renderJobRow spells the block action out — the button says Block or Unblock", () => {
+  // The word, not just the tooltip: a lone ban icon reads as "not allowed"
+  // rather than as a control, and block vs unblock was invisible until hover.
+  assert.match(renderJobRow(job({ blocked: false })), /class="job-btn-label">Block</);
+  assert.match(renderJobRow(job({ blocked: true })), /class="job-btn-label">Unblock</);
+});
+
+test("renderJobRow puts Block before the tick, so the tick sits at the row's edge", () => {
+  const html = renderJobRow(job());
+  assert.ok(
+    html.indexOf('data-action="block"') < html.indexOf('data-action="read"'),
+    "block button should render before the read button",
+  );
+});
+
+test("renderJobRow's armed block button asks instead of blocking", () => {
+  const armed = renderJobRow(job(), true);
+  assert.match(armed, /data-armed="true"/);
+  assert.match(armed, /class="job-btn-label">Sure\?</);
+  // The label has to say what the second press does — "Sure?" alone tells a
+  // screen reader nothing about which company is about to be blocked.
+  assert.match(armed, /aria-label="Block Acme Corp — press again to confirm"/);
+});
+
+test("renderJobRow leaves the block button unarmed by default", () => {
+  assert.match(renderJobRow(job()), /data-armed="false"/);
+  assert.doesNotMatch(renderJobRow(job()), /Sure\?/);
+});
+
+test("renderJobRow escapes the company inside an armed button's label too", () => {
+  const html = renderJobRow(job({ company: 'A&B <"x">' }), true);
+  assert.match(html, /title="Block A&amp;B &lt;&quot;x&quot;&gt; — press again to confirm"/);
+  assert.doesNotMatch(html, /<"x">/);
 });
 
 test("renderJobRow's row actions are Lucide icons, and the read one flips", () => {
@@ -196,6 +231,19 @@ test("renderList keeps blocked jobs in both modes — blocking is not deleting",
     assert.match(renderList(jobs, mode), /data-job-id="1"/, mode);
     assert.match(renderList(jobs, mode), /data-blocked="true"/, mode);
   }
+});
+
+test("renderList arms the Block button on exactly the row that was pressed", () => {
+  const jobs = [job({ id: "1" }), job({ id: "2" })];
+  const html = renderList(jobs, "all", "2");
+  const rows = html.split('<div class="job"');
+  assert.doesNotMatch(rows.find((r) => r.includes('data-job-id="1"'))!, /Sure\?/);
+  assert.match(rows.find((r) => r.includes('data-job-id="2"'))!, /Sure\?/);
+});
+
+test("renderList arms nothing when no row is mid-question", () => {
+  assert.doesNotMatch(renderList([job({ id: "1" })], "all"), /Sure\?/);
+  assert.doesNotMatch(renderList([job({ id: "1" })], "all", null), /Sure\?/);
 });
 
 const chipWatches: ChipWatch[] = [

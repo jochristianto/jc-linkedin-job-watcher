@@ -321,7 +321,7 @@ body {
   min-width: 0;
 }
 
-/* ---- Row actions: tick = dismiss, ban = block the company ---- */
+/* ---- Row actions: Block the company, then the tick that dismisses ---- */
 .job-actions {
   display: flex;
   gap: var(--s-1);
@@ -358,6 +358,27 @@ body {
 }
 .job-btn[data-action="block"][aria-pressed="true"] {
   background: var(--danger-weak);
+}
+
+/* Block carries its own word, so it sizes to that word instead of the tick's
+ * 26px square: an unlabelled ban icon reads as a status, not as a control, and
+ * block vs unblock lived only in the tooltip. */
+.job-btn-block {
+  width: auto;
+  gap: var(--s-1);
+  padding: 0 var(--s-2);
+  font: 600 12px/1 var(--font);
+  white-space: nowrap;
+}
+
+/* Armed — pressed once, asking "Sure?". Filled in danger so it can't be mistaken
+ * for the resting button: the next press is the one that blocks. It reverts on
+ * its own, or on a click anywhere else (mount.ts). */
+.job-btn-block[data-armed="true"],
+.job-btn-block[data-armed="true"]:hover {
+  color: var(--danger);
+  background: var(--danger-weak);
+  border-color: var(--danger);
 }
 
 /* Says *why* a row is greyed — read and blocked look identical otherwise. */

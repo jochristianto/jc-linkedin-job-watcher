@@ -49,10 +49,10 @@
         </div>
       </div>
 
-      <!-- Every row carries its two actions: the tick dismisses just that job, the
-           ban icon puts
-           its company on the blocklist. Clicking the row itself opens the
-           posting and leaves the row here, highlighted. -->
+      <!-- Every row carries its two actions: Block puts the company on the
+           blocklist (and asks first — see jobs.html), the tick dismisses just
+           that job. Clicking the row itself opens the posting and leaves the row
+           here, highlighted. -->
       <div class="list">
         <!-- Unread: filled dot, bold title -->
         <div class="job" data-job-id="3901" data-read="false" data-opened="false" data-blocked="false">
@@ -65,8 +65,8 @@
             </span>
           </a>
           <span class="job-actions">
+            <button class="job-btn job-btn-block" data-action="block" data-armed="false" aria-pressed="false" title="Block Acme Corp" aria-label="Block Acme Corp"><svg class="lucide lucide-ban" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M4.929 4.929 19.07 19.071"/></svg><span class="job-btn-label">Block</span></button>
             <button class="job-btn" data-action="read" aria-pressed="false" title="Mark as read" aria-label="Mark as read"><svg class="lucide lucide-check" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></button>
-            <button class="job-btn" data-action="block" aria-pressed="false" title="Block Acme Corp" aria-label="Block Acme Corp"><svg class="lucide lucide-ban" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M4.929 4.929 19.07 19.071"/></svg></button>
           </span>
         </div>
 
@@ -82,8 +82,8 @@
             </span>
           </a>
           <span class="job-actions">
+            <button class="job-btn job-btn-block" data-action="block" data-armed="false" aria-pressed="false" title="Block PT Data Nusantara" aria-label="Block PT Data Nusantara"><svg class="lucide lucide-ban" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M4.929 4.929 19.07 19.071"/></svg><span class="job-btn-label">Block</span></button>
             <button class="job-btn" data-action="read" aria-pressed="false" title="Mark as read" aria-label="Mark as read"><svg class="lucide lucide-check" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></button>
-            <button class="job-btn" data-action="block" aria-pressed="false" title="Block PT Data Nusantara" aria-label="Block PT Data Nusantara"><svg class="lucide lucide-ban" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M4.929 4.929 19.07 19.071"/></svg></button>
           </span>
         </div>
 
@@ -99,15 +99,15 @@
             </span>
           </a>
           <span class="job-actions">
+            <button class="job-btn job-btn-block" data-action="block" data-armed="false" aria-pressed="false" title="Block Momo Financial" aria-label="Block Momo Financial"><svg class="lucide lucide-ban" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M4.929 4.929 19.07 19.071"/></svg><span class="job-btn-label">Block</span></button>
             <button class="job-btn" data-action="read" aria-pressed="false" title="Mark as read" aria-label="Mark as read"><svg class="lucide lucide-check" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></button>
-            <button class="job-btn" data-action="block" aria-pressed="false" title="Block Momo Financial" aria-label="Block Momo Financial"><svg class="lucide lucide-ban" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M4.929 4.929 19.07 19.071"/></svg></button>
           </span>
         </div>
 
         <!-- Blocked company: greyed and tagged, but still on screen — blocking
              stops FUTURE scans surfacing it, it doesn't delete what's here. The
-             the ban button is pressed, so it now reads "Unblock". Also shows the missing
-             posted time degrading to just the watch name. -->
+             Block button is pressed, so it now reads "Unblock". Also shows the
+             missing posted time degrading to just the watch name. -->
         <div class="job" data-job-id="3904" data-read="false" data-opened="false" data-blocked="true">
           <a class="job-main" href="#">
             <span class="job-dot" aria-hidden="true"></span>
@@ -118,8 +118,8 @@
             </span>
           </a>
           <span class="job-actions">
+            <button class="job-btn job-btn-block" data-action="block" data-armed="false" aria-pressed="true" title="Unblock Rakuten" aria-label="Unblock Rakuten"><svg class="lucide lucide-ban" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M4.929 4.929 19.07 19.071"/></svg><span class="job-btn-label">Unblock</span></button>
             <button class="job-btn" data-action="read" aria-pressed="false" title="Mark as read" aria-label="Mark as read"><svg class="lucide lucide-check" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></button>
-            <button class="job-btn" data-action="block" aria-pressed="true" title="Unblock Rakuten" aria-label="Unblock Rakuten"><svg class="lucide lucide-ban" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M4.929 4.929 19.07 19.071"/></svg></button>
           </span>
         </div>
       </div>
