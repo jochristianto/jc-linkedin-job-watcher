@@ -1,5 +1,7 @@
 # LinkedIn Job Watcher
 
+![The list view as a full tab: watch chips across the top, one row per posting with company, location and how long ago it was posted, and Block / mark-read buttons on each row.](docs/images/preview.png)
+
 A personal Chrome extension (MV3) that watches your saved LinkedIn job searches on a background alarm and tells you about **genuinely new** postings — a badge count, one merged desktop notification per scan, and optionally a Telegram message on your phone.
 
 It reads the page while you're logged in, in your own browser, in a small window that opens for a few seconds and closes itself. Notifications lead into the extension's **own** list view, never straight to LinkedIn — you pick what to open from there.
