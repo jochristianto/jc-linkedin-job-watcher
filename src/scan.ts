@@ -154,6 +154,28 @@ export function scanPageUrl(watchUrl: string, page: number): string {
 }
 
 /**
+ * Does a page's first posting id repeat the previous page's — the signature of
+ * `&start=` no longer paginating (issue #30 item 2)?
+ *
+ * If LinkedIn's results list has become append-only infinite scroll, every
+ * `scanPageUrl(watch, n)` re-serves page 1, so page 2 opens on the same first
+ * posting as page 1 and everything past position 25 is unreachable. Dedupe then
+ * silently collapses the repeated ids and the cycle looks healthy while reading a
+ * fraction of the search. This is the cheap in-cycle guard that makes that case
+ * *visible*: the caller logs a repeat rather than merging it away.
+ *
+ * Compared per consecutive page within one watch. A null/empty id never matches —
+ * a quiet or empty page (including page 1, which has no previous first id) is a
+ * different fault, `classifyPage`'s to name, not a pagination stall.
+ */
+export function repeatsPreviousPage(
+  firstId: string | null,
+  previousFirstId: string | null,
+): boolean {
+  return firstId != null && firstId !== "" && firstId === previousFirstId;
+}
+
+/**
  * Stamp the scan-context fields `parseJobCards` deliberately leaves neutral
  * (PRD §5/§12): which watch surfaced each job and when. Returns fresh records —
  * the parser's output is not mutated — so the same parsed array could be stamped

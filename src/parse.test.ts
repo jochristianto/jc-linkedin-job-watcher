@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { parseHTML } from "linkedom";
-import { findResultsScroller, parseJobCards } from "./parse.ts";
+import { findResultsScroller, parseJobCards, postingIdsOn } from "./parse.ts";
 
 /** Parse an HTML string into a Document the way the content script sees one. */
 function doc(html: string): Document {
@@ -118,6 +118,38 @@ test("isReposted is never triggered by Promoted or Easy Apply", () => {
     jobs.map((j) => j.isReposted),
     [false, false],
   );
+});
+
+test("isReposted matches the marker even when it carries a date — 'Reposted 3 days ago'", () => {
+  const [j] = parseJobCards(page([cardHtml({ jobId: "1", footer: "Reposted 3 days ago" })]));
+  assert.equal(j!.isReposted, true);
+});
+
+test("isReposted ignores the word 'reposted' in a description snippet — only the footer marker counts (issue #30 item 1)", () => {
+  // The permanent-over-block case: `hideReposted` filters this out AND writes it
+  // to `seen`, so a whole-card textContent match on a description mentioning the
+  // word strands the job forever. The marker lives in the footer, not the body.
+  const jobs = parseJobCards(
+    page([
+      `<li data-occludable-job-id="1">
+         <div class="job-card-container" data-job-id="1">
+           <a class="job-card-container__link" href="/jobs/view/1/">
+             <div class="artdeco-entity-lockup__title"><span aria-hidden="true">Editor</span></div>
+           </a>
+           <div class="job-card-list__description">We hire fast — this role was reposted after our last editor left.</div>
+           <ul class="job-card-container__metadata-wrapper">
+             <li class="job-card-container__footer-item"><time>2 hours ago</time></li>
+           </ul>
+         </div>
+       </li>`,
+    ]),
+  );
+  assert.equal(jobs[0]!.isReposted, false);
+});
+
+test("isReposted ignores the word 'reposted' in the title", () => {
+  const [j] = parseJobCards(page([cardHtml({ jobId: "1", title: "Reposted Content Manager" })]));
+  assert.equal(j!.isReposted, false);
 });
 
 test("url strips LinkedIn's tracking query (?trk=...) down to the canonical path", () => {
@@ -348,14 +380,26 @@ function fixtureHtml(): string | null {
   return html ? fs.readFileSync(path.join(dir, html), "utf8") : null;
 }
 
-test("parses a captured page-1 fixture into jobs with ids and titles (§14)", (t) => {
+test("parses a captured page-1 fixture — every rendered posting becomes a job, full count (§14, issue #30 item 3)", (t) => {
   const html = fixtureHtml();
   if (html === null) {
-    t.skip("no page-1 fixture captured — see issue #2 checklist");
+    t.skip("no page-1 fixture captured — see issue #2 / #30 checklist");
     return;
   }
-  const jobs = parseJobCards(doc(html));
-  assert.ok(jobs.length > 0, "expected the fixture to contain at least one job card");
+  const d = doc(html);
+  const jobs = parseJobCards(d);
+  // The count assertion, not just "at least one". `postingIdsOn` is what the page
+  // *rendered*; every one of those must parse into a job. The drift this exists to
+  // catch — two card layouts, 5 of 25 postings dropped for having no title — shows
+  // up here as jobs < rendered rather than shipping as a silent partial read, and
+  // deliberately breaking one title selector turns this red.
+  const rendered = postingIdsOn(d);
+  assert.ok(rendered.length > 0, "expected the fixture to contain rendered job cards");
+  assert.equal(
+    jobs.length,
+    rendered.length,
+    `every rendered posting must parse into a job: ${rendered.length} rendered, ${jobs.length} parsed`,
+  );
   for (const j of jobs) {
     assert.match(j.id, /^\d+$/, "every parsed job carries a numeric LinkedIn id");
     assert.notEqual(j.title.trim(), "", "every parsed job carries a title");

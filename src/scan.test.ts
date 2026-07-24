@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   enabledWatches,
+  repeatsPreviousPage,
   scanPageUrl,
   stampJobs,
   mergeJobs,
@@ -73,6 +74,26 @@ test("scanPageUrl overrides an existing start= rather than appending a second on
   const url = scanPageUrl("https://www.linkedin.com/jobs/search/?keywords=remote&start=99", 2);
   const params = new URL(url).searchParams.getAll("start");
   assert.deepEqual(params, ["25"]);
+});
+
+test("repeatsPreviousPage flags a page whose first id repeats the previous page's (issue #30 item 2)", () => {
+  // The signature of `&start=` no longer paginating: page 2 opens on the same
+  // first posting as page 1, so everything past position 25 is unreachable.
+  assert.equal(repeatsPreviousPage("4012345678", "4012345678"), true);
+});
+
+test("repeatsPreviousPage is false for two genuinely different pages", () => {
+  assert.equal(repeatsPreviousPage("4099999999", "4012345678"), false);
+});
+
+test("repeatsPreviousPage never flags on a null/empty first id — an empty page is a different fault", () => {
+  // A quiet or empty page has no first id; that is classifyPage's business, not a
+  // pagination stall, so it must not be mistaken for a repeat (including page 1,
+  // where there is no previous first id to compare against).
+  assert.equal(repeatsPreviousPage(null, null), false);
+  assert.equal(repeatsPreviousPage("", ""), false);
+  assert.equal(repeatsPreviousPage(null, "4012345678"), false);
+  assert.equal(repeatsPreviousPage("4012345678", null), false);
 });
 
 test("stampJobs fills the scan-context fields the parser left neutral", () => {

@@ -197,11 +197,33 @@ function jobUrlOf(card: Element): string {
   }
 }
 
-/** True only for LinkedIn's "Reposted" marker. "Promoted" and "Easy Apply" are
- *  distinct badges that never contain the word, so a word-boundary match on the
- *  card's metadata text distinguishes them (§16, issue #2 finding 3). */
+/** Where LinkedIn's "Reposted" marker actually lives: the card's footer /
+ *  metadata strip — the same row that carries the posted-date and the Promoted /
+ *  Easy Apply badges — never the title and never the description snippet.
+ *
+ *  Narrowed here rather than matched against the whole card's `textContent`
+ *  (issue #30 item 1). The over-block a whole-card match risks is *permanent*: a
+ *  posting whose description merely mentions the word "reposted" is filtered out
+ *  under `hideReposted: true` AND written to `seen` (dedupe.ts), so it is never
+ *  re-surfaced even after the rule is corrected. Confining the match to the
+ *  footer trades a theoretical missed marker (harmless — the job still shows) for
+ *  no false over-block, which is the asymmetry that matters. */
+const REPOSTED_MARKER_SELECTORS = [
+  ".job-card-container__metadata-wrapper",
+  ".job-card-container__footer-wrapper",
+  ".job-card-container__footer-item",
+  ".job-card-list__footer-wrapper",
+  ".job-card-job-posting-card-wrapper__footer-items",
+];
+
+/** True only for LinkedIn's "Reposted" marker in the card's footer/metadata strip.
+ *  "Promoted" and "Easy Apply" are distinct badges that never contain the word,
+ *  and a word-boundary match keeps a title or description mentioning "reposted"
+ *  from tripping it (§16, issue #2 finding 3 / issue #30 item 1). */
 function isRepostedCard(card: Element): boolean {
-  return /\breposted\b/i.test(norm(card.textContent));
+  return REPOSTED_MARKER_SELECTORS.some((selector) =>
+    Array.from(card.querySelectorAll(selector)).some((el) => /\breposted\b/i.test(norm(el.textContent))),
+  );
 }
 
 /**

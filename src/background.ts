@@ -30,6 +30,7 @@ import {
   badgeFor,
   enabledWatches,
   mergeJobs,
+  repeatsPreviousPage,
   sameSearchPage,
   scanPageUrl,
   stampJobs,
@@ -444,6 +445,9 @@ async function runCycle(settings: Settings, pages: number): Promise<void> {
     const session = watches.length > 0 ? await openScanSession() : null;
     try {
       for (const [w, watch] of watches.entries()) {
+        // The first posting id of the page just read, for the pagination guard
+        // below. Reset per watch — a repeat only means anything within one search.
+        let previousFirstId: string | null = null;
         for (let page = 1; page <= pages; page++) {
           const pageUrl = scanPageUrl(watch.url, page);
           // No window means no read at all; report it as the infra failure it is
@@ -468,6 +472,20 @@ async function runCycle(settings: Settings, pages: number): Promise<void> {
             await sleep(randomPauseMs(settings.pacing.pagePauseMs));
             ({ jobs, outcome } = await scanPageIn(session, pageUrl, true));
           }
+          // In-cycle pagination guard (issue #30 item 2). A page whose first id
+          // repeats the previous page's is `&start=` no longer paginating — the
+          // list has gone append-only and this page re-served page 1. Dedupe would
+          // collapse the repeat silently and the miss would read as a healthy scan,
+          // so it is logged here, where the two pages are still distinguishable.
+          const firstId = jobs[0]?.id ?? null;
+          if (repeatsPreviousPage(firstId, previousFirstId)) {
+            console.warn(
+              `[ljw] pagination stall — ${watch.url}\n` +
+                `      page ${page} first id (${firstId}) repeats page ${page - 1}'s; ` +
+                `&start= may no longer paginate, so results past page 1 are unreachable (issue #30)`,
+            );
+          }
+          previousFirstId = firstId;
           found.push(...stampJobs(jobs, watch.id, Date.now()));
           outcomes.push(outcome);
           if (page < pages) await sleep(randomPauseMs(settings.pacing.pagePauseMs));
