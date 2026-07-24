@@ -294,10 +294,39 @@ test("JobList arms nothing when no row is mid-question", () => {
   assert.doesNotMatch(list([job({ id: "1" })], "all", null), /Sure\?/);
 });
 
+/** The list with the apply question pinned to one of its rows. */
+const listWithPrompt = (jobs: JobView[], applyPromptJobId: string | null): string =>
+  html(
+    <JobList
+      jobs={jobs}
+      mode="all"
+      applyPromptJobId={applyPromptJobId}
+      applyPrompt={<p data-testid="pinned">pinned</p>}
+      onOpen={noop}
+      onToggleRead={noop}
+      onBlock={noop}
+      onUnapply={noop}
+    />,
+  );
+
+test("JobList pins the apply question inside the card of the job it is about", () => {
+  const h = listWithPrompt([job({ id: "1" }), job({ id: "2" })], "2");
+  const rows = h.split("data-job-id=").slice(1);
+  assert.doesNotMatch(rows.find((r) => r.startsWith('"1"'))!, /data-testid="pinned"/);
+  assert.match(rows.find((r) => r.startsWith('"2"'))!, /data-testid="pinned"/);
+});
+
+test("JobList pins nothing when no row has a question waiting", () => {
+  assert.doesNotMatch(listWithPrompt([job({ id: "1" })], null), /data-testid="pinned"/);
+  // And an id for a job that is not on this list pins it to nothing at all,
+  // rather than to whichever row happens to be first.
+  assert.doesNotMatch(listWithPrompt([job({ id: "1" })], "9"), /data-testid="pinned"/);
+});
+
 // ── ApplyPrompt: "Did you apply for this job?" ───────────────────────────────
 //
-// Two dialogs, one per step, so each can be rendered on its own here — a static
-// render has no click to pick Yes with. Which answer opens which is
+// Two components, one per step, so each can be rendered on its own here — a
+// static render has no click to pick Yes with. Which answer opens which is
 // `applyPromptStep`'s, proved with plain values in view-model.test.ts; what
 // `ApplyPrompt` renders unanswered is the first of the two, asserted below.
 
@@ -321,21 +350,33 @@ const note = (over: Partial<React.ComponentProps<typeof ApplyNote>> = {}): strin
     />,
   );
 
-test("ApplyPrompt asks the question and names the job it is asking about", () => {
+test("ApplyPrompt asks the question, on the row it is asking about", () => {
   const h = prompt();
   assert.match(h, /Did you apply for this job\?/);
-  // Asked minutes later, in a popup you reopened — without the job it is asking
-  // about nothing in particular.
-  assert.match(h, /Senior Software Engineer · Acme Corp/);
   assert.match(h, /data-job-id="3901"/);
+  assert.match(h, /data-placement="row"/);
+  // Pinned in that job's own card, one line under its title: repeating the title
+  // inside the strip would be the same sentence twice.
+  assert.doesNotMatch(h, /Senior Software Engineer/);
 });
 
-test("ApplyPrompt is a labelled modal dialog", () => {
+test("ApplyPrompt names the job when it has no row to sit in", () => {
+  const h = prompt({ placement: "list" });
+  assert.match(h, /data-placement="list"/);
+  // Asked minutes later, in a popup you reopened, with the row filtered out from
+  // under it — without the job it is asking about nothing in particular.
+  assert.match(h, /Senior Software Engineer · Acme Corp/);
+});
+
+test("ApplyPrompt is a labelled strip in the layout, not a modal over it", () => {
   const h = prompt();
-  assert.match(h, /role="dialog"/);
-  assert.match(h, /aria-modal="true"/);
   assert.match(h, /aria-labelledby="apply-prompt-title"/);
   assert.match(h, /id="apply-prompt-title"/);
+  // Inline: the list behind it stays readable and clickable while the question
+  // waits, so there is no dialog role, no modal flag and no backdrop to trap in.
+  assert.doesNotMatch(h, /role="dialog"/);
+  assert.doesNotMatch(h, /aria-modal/);
+  assert.doesNotMatch(h, /\bfixed inset-0\b/);
 });
 
 test("ApplyPrompt answers with two buttons, not a toggle to be set", () => {
@@ -351,8 +392,8 @@ test("ApplyPrompt answers with two buttons, not a toggle to be set", () => {
 
 test("ApplyPrompt asks the question first and nothing else", () => {
   const h = prompt();
-  // The notes box and the button that commits it are the second dialog's; here
-  // the card is the question and its two answers.
+  // The notes box and the button that commits it are the second step's; here the
+  // strip is the question and its two answers.
   assert.doesNotMatch(h, /<textarea/);
   assert.doesNotMatch(h, /id="apply-notes"/);
   assert.doesNotMatch(h, /data-action="apply-submit"/);
@@ -363,21 +404,24 @@ test("ApplyPrompt asks the question first and nothing else", () => {
 });
 
 test("ApplyPrompt falls back to a placeholder when the title never parsed", () => {
-  assert.match(prompt({ job: { id: "7", title: "  ", company: "Acme Corp" } }), /Untitled role/);
+  const h = prompt({ placement: "list", job: { id: "7", title: "  ", company: "Acme Corp" } });
+  assert.match(h, /Untitled role/);
 });
 
 test("ApplyPrompt escapes the job it names", () => {
-  const h = prompt({ job: { id: "a&b", title: "R&D <lead>", company: 'A<"B">' } });
+  const job = { id: "a&b", title: "R&D <lead>", company: 'A<"B">' };
+  const h = prompt({ placement: "list", job });
   assert.match(h, /R&amp;D &lt;lead&gt;/);
-  assert.match(h, /data-job-id="a&amp;b"/);
   assert.doesNotMatch(h, /<lead>/);
+  // The id is an attribute in both placements, whether or not the title is shown.
+  assert.match(prompt({ job }), /data-job-id="a&amp;b"/);
 });
 
-test("ApplyNote is the second dialog, and still says which job", () => {
+test("ApplyNote is the second step, and stays where the question was", () => {
   const h = note();
-  assert.match(h, /role="dialog"/);
   assert.match(h, /Add a note\?/);
-  assert.match(h, /Senior Software Engineer · Acme Corp/);
+  assert.match(h, /data-placement="row"/);
+  assert.match(note({ placement: "list" }), /Senior Software Engineer · Acme Corp/);
   // The question is behind you by now: no Yes/No to answer a second time.
   assert.doesNotMatch(h, /data-answer=/);
 });
@@ -386,7 +430,9 @@ test("ApplyNote opens the box the note is typed in, empty and enabled", () => {
   const h = note();
   assert.match(h, /<textarea/);
   assert.doesNotMatch(h, /<textarea[^>]*\sdisabled=""/);
-  // Labelled, not placeholder-only — the placeholder disappears the moment you type.
+  // "Add a note?" above it is the visible label, so this one is for screen
+  // readers only — but it is there, rather than leaving the box to a placeholder
+  // that disappears the moment you type.
   assert.match(h, /for="apply-notes"/);
   assert.match(h, /id="apply-notes"/);
   assert.match(h, /Notes \(optional\)/);

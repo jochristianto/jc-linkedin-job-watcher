@@ -49,7 +49,7 @@ import {
   toggleBlockedCompany,
   unreadCount,
 } from "@/view.ts";
-import type { ListMode, ViewVariant } from "@/view-model.ts";
+import { visibleJobs, type ListMode, type ViewVariant } from "@/view-model.ts";
 
 /** How long to wait before re-sending a message no listener took. Long enough for a
  *  cold MV3 worker to evaluate its script and register its handlers, short enough
@@ -111,6 +111,20 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
     const ui = await storage.get("ui");
     await storage.set("ui", { ...ui, ...patch });
   }, []);
+
+  /**
+   * Close the open apply question, recording nothing — which is the whole of what
+   * a "No" does, since only Yes is ever written. Four things mean exactly this and
+   * share it: No itself, the note step's Cancel, and the two ways of ticking a job
+   * read (see `onToggleRead`).
+   *
+   * The question does not come back on its own — being asked again on every reopen
+   * would make the popup unusable — but clicking the row re-queues it.
+   */
+  const closeApplyQuestion = useCallback(async () => {
+    setPendingApplyId(null);
+    await persistUi({ pendingApplyId: null });
+  }, [persistUi]);
 
   /** Repaint the toolbar badge from storage. The background sets it after every
    *  scan, but marking a row read (or blocking its company) changes the count
@@ -236,9 +250,12 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
     const jobs = await storage.get("jobs");
     const next = markAllRead(jobs, Date.now());
     if (next !== jobs) await storage.set("jobs", next);
+    // Whatever the open question was about is among the jobs just dismissed, so it
+    // is answered too — same rule as the single tick in `onToggleRead`.
+    await closeApplyQuestion();
     await refreshBadge();
     await reload();
-  }, [refreshBadge, reload]);
+  }, [closeApplyQuestion, refreshBadge, reload]);
 
   /** Mark the job opened *before* the tab opens (PRD §9 — a closing popup can cut
    *  off a write in flight). The badge does NOT move: opening is not dismissing,
@@ -285,9 +302,8 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
     async (applied: boolean, notes: string) => {
       const id = pendingApplyId;
       if (!id) return;
-      setPendingApplyId(null);
       setNotice(null);
-      await persistUi({ pendingApplyId: null });
+      await closeApplyQuestion();
       if (!applied) return;
 
       const jobs = await storage.get("jobs");
@@ -314,7 +330,7 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
       const line = appliedPushNotice(res);
       if (line) setNotice(line);
     },
-    [pendingApplyId, persistUi, reload],
+    [closeApplyQuestion, pendingApplyId, reload],
   );
 
   /** The row's "Applied" tag, tapped: throw the record away — flag, timestamp and
@@ -333,15 +349,6 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
     [disarm, reload],
   );
 
-  /** Escape, the backdrop, or the note dialog's "Cancel": the question goes without
-   *  an answer and nothing is recorded — a Yes cancelled at the note is a Yes taken
-   *  back. It does not come back on its own — being asked again on every reopen
-   *  would make the popup unusable — but clicking the row re-queues it. */
-  const onDismissApply = useCallback(async () => {
-    setPendingApplyId(null);
-    await persistUi({ pendingApplyId: null });
-  }, [persistUi]);
-
   /** The job the open question is about, read from the raw `jobs` map rather than
    *  the rendered list: the question outlives a chip switch, a mode switch and the
    *  popup itself, so the row it came from may well not be on screen. A job that has
@@ -352,16 +359,64 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
     return job ? { id: job.id, title: job.title, company: job.company } : null;
   }, [state, pendingApplyId]);
 
+  /**
+   * Which of the two places the question gets asked in.
+   *
+   * Inside the row's card whenever that row is on screen — asked *on* the job it
+   * is about, which is the whole point of it being inline. Everything above is
+   * why it cannot always be: watching paused hides the list, and a chip or a
+   * New⇄All switch can filter the row out from under a question already waiting.
+   * Rather than let it vanish — nothing else clears `pendingApplyId`, so a
+   * question with nowhere to render would be a question you could never answer —
+   * it falls back to a band under the header, naming the job itself.
+   */
+  const applyPromptInRow = useMemo(() => {
+    // `emptyKind` swaps the whole list out for a message, so there are no rows to
+    // sit in even when one would otherwise have matched.
+    if (!view?.enabled || view.emptyKind || !pendingApplyJob) return false;
+    return visibleJobs(view.jobs, view.mode).some((j) => j.id === pendingApplyJob.id);
+  }, [view, pendingApplyJob]);
+
+  const applyPrompt = pendingApplyJob && (
+    <ApplyPrompt
+      // Keyed by the job: a question about a different posting starts from
+      // unanswered, never with the previous one's typed note.
+      key={pendingApplyJob.id}
+      job={pendingApplyJob}
+      placement={applyPromptInRow ? "row" : "list"}
+      onAnswer={onAnswerApply}
+      // The note step's "Cancel": a Yes cancelled at the note is a Yes taken back,
+      // which lands in exactly the same place a No does — nothing recorded.
+      onDismiss={closeApplyQuestion}
+    />
+  );
+
+  /**
+   * The row's tick — the only thing that dismisses a job — and, on the row with a
+   * question waiting, the answer to it as well.
+   *
+   * Ticking a job read while it is still asking "Did you apply for this job?" is
+   * an answer: you are done with the posting. It counts as No, because No is what
+   * records nothing — so the tick can never write an applied record you didn't ask
+   * for, and a job you *did* apply to is still one Yes away right up until you
+   * dismiss it. Without this the tick would file the job away and leave its
+   * question homeless, to reappear stranded above the list.
+   *
+   * Only the read direction answers: un-ticking a job puts it back on the list
+   * with nothing waiting on it.
+   */
   const onToggleRead = useCallback(
     async (id: string) => {
       disarm();
       const jobs = await storage.get("jobs");
-      const next = setJobRead(jobs, id, !jobs[id]?.read, Date.now());
+      const read = !jobs[id]?.read;
+      const next = setJobRead(jobs, id, read, Date.now());
       if (next !== jobs) await storage.set("jobs", next);
+      if (read && id === pendingApplyId) await closeApplyQuestion();
       await refreshBadge();
       await reload();
     },
-    [disarm, refreshBadge, reload],
+    [closeApplyQuestion, disarm, pendingApplyId, refreshBadge, reload],
   );
 
   /** Blocklist this job's company straight from the row, no trip to Options.
@@ -461,6 +516,13 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
               onOpenOptions={onOpenOptions}
             />
 
+            {/* The fallback placement, and only that: a band under the header for
+                a question whose row is nowhere to be seen. Above the paused branch
+                because the question is about a job you already opened, so pausing
+                the loop is no reason to drop it — and paused hides the list
+                entirely, which is exactly one of the ways the row can be missing. */}
+            {applyPrompt && !applyPromptInRow && applyPrompt}
+
             {/* Paused (§ master): the whole app body collapses to one message —
                 no toolbar, no list, no footer — so the switch in the header is
                 the only thing to act on. Everything below is watching-on. */}
@@ -492,6 +554,8 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
                       jobs={view.jobs}
                       mode={view.mode}
                       armedBlockId={view.armedBlockId}
+                      applyPromptJobId={applyPromptInRow ? pendingApplyJob?.id : null}
+                      applyPrompt={applyPromptInRow ? applyPrompt : null}
                       onOpen={onOpen}
                       onToggleRead={onToggleRead}
                       onBlock={onBlock}
@@ -506,20 +570,6 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
               <div className="flex flex-1 flex-col">
                 <EmptyState kind="paused" />
               </div>
-            )}
-
-            {/* Last, and outside the paused branch: the question is about a job you
-                already opened, so pausing the loop is no reason to drop it. A fixed
-                overlay, so where it sits in the markup only decides stacking. */}
-            {pendingApplyJob && (
-              <ApplyPrompt
-                // Keyed by the job: a question about a different posting starts
-                // from unanswered, never with the previous one's typed note.
-                key={pendingApplyJob.id}
-                job={pendingApplyJob}
-                onAnswer={onAnswerApply}
-                onDismiss={onDismissApply}
-              />
             )}
           </>
         )}
