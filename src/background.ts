@@ -52,7 +52,13 @@ import {
   type PageSignals,
   type Severity,
 } from "./health.ts";
-import { sendPush } from "./push.ts";
+import {
+  sendAppliedPush,
+  sendPush,
+  type AppliedPushFailure,
+  type AppliedPushRequest,
+  type AppliedPushResponse,
+} from "./push.ts";
 import { buildScanNotification, SCAN_NOTIFICATION_ID } from "./notify.ts";
 import { focusOrOpenJobsTab } from "./jobs-tab.ts";
 import type { HealthState, Job, Settings } from "./types.ts";
@@ -131,7 +137,9 @@ async function fireHealthNotification(health: HealthState): Promise<void> {
  *  or a wrong chat id can never break the scan or the badge (§8). Only an actually
  *  attempted send moves the §16.7 failure counter, so a cycle that pushes nothing
  *  (disabled, unconfigured, or zero new jobs) leaves `pushHealth` untouched; three
- *  real failures in a row raise the soft warning, and one good send resets it. */
+ *  real failures in a row raise the soft warning, and one good send resets it. A
+ *  batch over ten jobs goes out as several messages (§8) but still counts once —
+ *  the counter tracks cycles that failed to reach the phone, not requests. */
 async function firePush(settings: Settings, newJobs: Job[]): Promise<void> {
   const cfg = settings.push;
   if (!cfg.enabled || !cfg.botToken || !cfg.chatId || newJobs.length === 0) return;
@@ -141,6 +149,41 @@ async function firePush(settings: Settings, newJobs: Job[]): Promise<void> {
     "pushHealth",
     reducePushHealth(ok, prior.consecutivePushFailures, settings.pushFailWarnThreshold),
   );
+}
+
+/** Send the `[Applied]` message for one job — PRD §8's push, reused for the answer
+ *  to "Did you apply for this job?".
+ *
+ *  The list view has already written the record (`applied`, `appliedAt` and the
+ *  note) before it asks for this, so the job is read back from storage rather than
+ *  carried in the message, and a failure here costs the message only, never the
+ *  application.
+ *
+ *  The three "didn't even try" cases are told apart and reported, because they need
+ *  three different things from the user (see {@link AppliedPushFailure}) — and only
+ *  a send that was actually *attempted* moves the §16.7 failure counter, the same
+ *  rule `firePush` follows: a push skipped because the toggle is off is not a
+ *  failing credential. */
+async function fireAppliedPush(jobId: string): Promise<AppliedPushResponse> {
+  const [settings, jobs] = await Promise.all([get("settings"), get("jobs")]);
+  const job = jobs[jobId];
+  if (!job) return { sent: false, reason: "unknown-job" };
+
+  const cfg = settings.push;
+  // Credentials first: empty ones in *saved* settings usually mean the Options form
+  // was filled in and tested but never saved, which is the more actionable of the
+  // two — Send test message reads the live fields and forces the toggle on, so it
+  // succeeds in exactly that state.
+  if (!cfg.botToken || !cfg.chatId) return { sent: false, reason: "unconfigured" };
+  if (!cfg.enabled) return { sent: false, reason: "push-off" };
+
+  const ok = await sendAppliedPush(job, job.applyNotes ?? "", cfg);
+  const prior = await get("pushHealth");
+  await set(
+    "pushHealth",
+    reducePushHealth(ok, prior.consecutivePushFailures, settings.pushFailWarnThreshold),
+  );
+  return ok ? { sent: true } : { sent: false, reason: "refused" };
 }
 
 // ── Talking to the invisible tab ───────────────────────────────────────────────
@@ -496,6 +539,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ ok: false });
     }
   })();
+  return true;
+});
+
+/** The list view answering "Yes" to "Did you apply for this job?". The send lives
+ *  here rather than in the page because the popup is destroyed the moment it loses
+ *  focus, which would cut off a request in flight — and because the §16.7 push
+ *  counter is the worker's. The reply is honest either way, so a `sent: false` (push
+ *  off, unconfigured, or refused) shows up as a line in the view instead of a
+ *  message that quietly never arrives. Channel kept open for the async reply, as above. */
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  const req = message as AppliedPushRequest | undefined;
+  if (req?.type !== "LJW_APPLIED") return;
+  fireAppliedPush(req.jobId).then(sendResponse, (err) => {
+    console.error("[ljw] Applied push failed:", err);
+    sendResponse({ sent: false } satisfies AppliedPushResponse);
+  });
   return true;
 });
 

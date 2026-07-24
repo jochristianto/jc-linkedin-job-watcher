@@ -14,6 +14,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import { ApplyNote, ApplyPrompt } from "./apply-prompt.tsx";
 import { EmptyState } from "./empty-state.tsx";
 import { HowItWorks } from "./how-it-works.tsx";
 import { JobList } from "./job-list.tsx";
@@ -43,6 +44,7 @@ function job(overrides: Partial<JobView> = {}): JobView {
     opened: false,
     read: false,
     blocked: false,
+    applied: false,
     ...overrides,
   };
 }
@@ -51,7 +53,16 @@ const noop = () => {};
 
 /** A row on its own, with its three callbacks stubbed. */
 const row = (j: JobView, armed = false): string =>
-  html(<JobRow job={j} armed={armed} onOpen={noop} onToggleRead={noop} onBlock={noop} />);
+  html(
+    <JobRow
+      job={j}
+      armed={armed}
+      onOpen={noop}
+      onToggleRead={noop}
+      onBlock={noop}
+      onUnapply={noop}
+    />,
+  );
 
 const list = (jobs: JobView[], mode: "new" | "all", armedBlockId: string | null = null): string =>
   html(
@@ -62,6 +73,7 @@ const list = (jobs: JobView[], mode: "new" | "all", armedBlockId: string | null 
       onOpen={noop}
       onToggleRead={noop}
       onBlock={noop}
+      onUnapply={noop}
     />,
   );
 
@@ -149,6 +161,42 @@ test("JobRow drops the block button when no company was parsed", () => {
   const h = row(job({ company: "   " }));
   assert.doesNotMatch(h, /data-action="block"/);
   assert.match(h, /data-action="read"/);
+});
+
+test("JobRow tags a job you applied to, so the list is also the record", () => {
+  assert.match(row(job({ applied: true })), />Applied</);
+  assert.match(row(job({ applied: true })), /data-applied="true"/);
+  assert.doesNotMatch(row(job({ applied: false })), />Applied</);
+  assert.match(row(job({ applied: false })), /data-applied="false"/);
+  // ...and it survives a row with nothing else in its footer.
+  assert.match(row(job({ postedText: "", watchName: "", applied: true })), />Applied</);
+});
+
+test("JobRow's Applied tag is the undo, and its label admits what it costs", () => {
+  const h = row(job({ applied: true }));
+  assert.match(h, /data-action="unapply"/);
+  // "Applied" alone reads as a label, not a control — the accessible name has to
+  // say that pressing it drops the record, note and all.
+  assert.match(h, /aria-label="Applied — undo, and forget the note"/);
+  assert.match(h, /lucide-badge-check/);
+  // Not the read tick's icon: two different actions must not wear one glyph.
+  const button = h.split("<button").find((c) => c.includes('data-action="unapply"'))!;
+  assert.doesNotMatch(button, /lucide-check\b/);
+});
+
+test("JobRow keeps the Applied undo out of the anchor, where it would be unclickable", () => {
+  const h = row(job({ applied: true }));
+  const anchor = h.slice(h.indexOf("<a "), h.indexOf("</a>"));
+  assert.doesNotMatch(anchor, /Applied/);
+  // Left of Block, so the two rightmost buttons stay where the hand expects them.
+  assert.ok(
+    h.indexOf('data-action="unapply"') < h.indexOf('data-action="block"'),
+    "the Applied undo should render before the block button",
+  );
+});
+
+test("JobRow offers no undo on a job that was never applied to", () => {
+  assert.doesNotMatch(row(job({ applied: false })), /data-action="unapply"/);
 });
 
 test("JobRow marks a blocked job and says why it is greyed", () => {
@@ -244,6 +292,113 @@ test("JobList arms the Block button on exactly the row that was pressed", () => 
 test("JobList arms nothing when no row is mid-question", () => {
   assert.doesNotMatch(list([job({ id: "1" })], "all"), /Sure\?/);
   assert.doesNotMatch(list([job({ id: "1" })], "all", null), /Sure\?/);
+});
+
+// ── ApplyPrompt: "Did you apply for this job?" ───────────────────────────────
+//
+// Two dialogs, one per step, so each can be rendered on its own here — a static
+// render has no click to pick Yes with. Which answer opens which is
+// `applyPromptStep`'s, proved with plain values in view-model.test.ts; what
+// `ApplyPrompt` renders unanswered is the first of the two, asserted below.
+
+const prompt = (over: Partial<React.ComponentProps<typeof ApplyPrompt>> = {}): string =>
+  html(
+    <ApplyPrompt
+      job={{ id: "3901", title: "Senior Software Engineer", company: "Acme Corp" }}
+      onAnswer={noop}
+      onDismiss={noop}
+      {...over}
+    />,
+  );
+
+const note = (over: Partial<React.ComponentProps<typeof ApplyNote>> = {}): string =>
+  html(
+    <ApplyNote
+      job={{ id: "3901", title: "Senior Software Engineer", company: "Acme Corp" }}
+      onSave={noop}
+      onDismiss={noop}
+      {...over}
+    />,
+  );
+
+test("ApplyPrompt asks the question and names the job it is asking about", () => {
+  const h = prompt();
+  assert.match(h, /Did you apply for this job\?/);
+  // Asked minutes later, in a popup you reopened — without the job it is asking
+  // about nothing in particular.
+  assert.match(h, /Senior Software Engineer · Acme Corp/);
+  assert.match(h, /data-job-id="3901"/);
+});
+
+test("ApplyPrompt is a labelled modal dialog", () => {
+  const h = prompt();
+  assert.match(h, /role="dialog"/);
+  assert.match(h, /aria-modal="true"/);
+  assert.match(h, /aria-labelledby="apply-prompt-title"/);
+  assert.match(h, /id="apply-prompt-title"/);
+});
+
+test("ApplyPrompt answers with two buttons, not a toggle to be set", () => {
+  const h = prompt();
+  assert.match(buttonWith(h, 'data-answer="yes"'), />Yes</);
+  assert.match(buttonWith(h, 'data-answer="no"'), />No</);
+  // Both live from the start, and neither is preselected: this is a question
+  // being answered once, not a setting sitting in a position.
+  assert.doesNotMatch(buttonWith(h, 'data-answer="yes"'), DISABLED_ATTR);
+  assert.doesNotMatch(buttonWith(h, 'data-answer="no"'), DISABLED_ATTR);
+  assert.doesNotMatch(h, /data-state="on"/);
+});
+
+test("ApplyPrompt asks the question first and nothing else", () => {
+  const h = prompt();
+  // The notes box and the button that commits it are the second dialog's; here
+  // the card is the question and its two answers.
+  assert.doesNotMatch(h, /<textarea/);
+  assert.doesNotMatch(h, /id="apply-notes"/);
+  assert.doesNotMatch(h, /data-action="apply-submit"/);
+  // And no third way out beside them: No already records nothing, so a "not now"
+  // next to it would be the same button twice.
+  assert.doesNotMatch(h, /data-action="apply-dismiss"/);
+  assert.doesNotMatch(h, />Not now</);
+});
+
+test("ApplyPrompt falls back to a placeholder when the title never parsed", () => {
+  assert.match(prompt({ job: { id: "7", title: "  ", company: "Acme Corp" } }), /Untitled role/);
+});
+
+test("ApplyPrompt escapes the job it names", () => {
+  const h = prompt({ job: { id: "a&b", title: "R&D <lead>", company: 'A<"B">' } });
+  assert.match(h, /R&amp;D &lt;lead&gt;/);
+  assert.match(h, /data-job-id="a&amp;b"/);
+  assert.doesNotMatch(h, /<lead>/);
+});
+
+test("ApplyNote is the second dialog, and still says which job", () => {
+  const h = note();
+  assert.match(h, /role="dialog"/);
+  assert.match(h, /Add a note\?/);
+  assert.match(h, /Senior Software Engineer · Acme Corp/);
+  // The question is behind you by now: no Yes/No to answer a second time.
+  assert.doesNotMatch(h, /data-answer=/);
+});
+
+test("ApplyNote opens the box the note is typed in, empty and enabled", () => {
+  const h = note();
+  assert.match(h, /<textarea/);
+  assert.doesNotMatch(h, /<textarea[^>]*\sdisabled=""/);
+  // Labelled, not placeholder-only — the placeholder disappears the moment you type.
+  assert.match(h, /for="apply-notes"/);
+  assert.match(h, /id="apply-notes"/);
+  assert.match(h, /Notes \(optional\)/);
+});
+
+test("ApplyNote commits with Submit, and takes the Yes back with Cancel", () => {
+  const h = note();
+  assert.match(buttonWith(h, 'data-action="apply-submit"'), />Submit</);
+  // Nothing to fill in first — the note is optional, so Submit is live on arrival.
+  assert.doesNotMatch(buttonWith(h, 'data-action="apply-submit"'), DISABLED_ATTR);
+  // The way out of a Yes that was a misclick: it dismisses, so nothing is recorded.
+  assert.match(buttonWith(h, 'data-action="apply-dismiss"'), />Cancel</);
 });
 
 // ── Toolbar: the watch chips and the New⇄All toggle ──────────────────────────

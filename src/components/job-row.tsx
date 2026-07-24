@@ -1,4 +1,4 @@
-import { Ban, Check, RotateCcw } from "lucide-react";
+import { BadgeCheck, Ban, Check, RotateCcw } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,10 +17,14 @@ export type JobRowProps = {
   onOpen: (background: boolean) => void;
   onToggleRead: () => void;
   onBlock: () => void;
+  /** The "Applied" tag, tapped: throw the record away and let the question be asked
+   *  again. Only ever reachable on a row that carries one. */
+  onUnapply: () => void;
 };
 
 /**
- * One job row: the posting itself as a link, plus the two row actions.
+ * One job row: the posting itself as a link, plus the row actions — the tick, the
+ * Block button, and, on a job you answered "Yes" to, the Applied tag that undoes it.
  *
  * The row is a `<div>` wrapping an `<a>`, not one big `<a>`, because buttons
  * cannot legally live inside an anchor. The anchor still covers the whole
@@ -32,11 +36,18 @@ export type JobRowProps = {
  * simply omitted; a missing title falls back to a placeholder so the row is
  * never blank (PRD §12 "each field fails independently").
  *
- * `data-read`/`data-opened`/`data-blocked` are no longer read by an event
- * delegate — React wires the callbacks directly — but they stay as the handle
+ * `data-read`/`data-opened`/`data-blocked`/`data-applied` are no longer read by an
+ * event delegate — React wires the callbacks directly — but they stay as the handle
  * the tests and QA assert a row's state through.
  */
-export function JobRow({ job, armed = false, onOpen, onToggleRead, onBlock }: JobRowProps) {
+export function JobRow({
+  job,
+  armed = false,
+  onOpen,
+  onToggleRead,
+  onBlock,
+  onUnapply,
+}: JobRowProps) {
   // Only the title needs a fallback — it's the one field always rendered. The
   // rest (company, location, posted time) are dropped by metaLine when blank.
   const title = job.title.trim() || "Untitled role";
@@ -46,10 +57,15 @@ export function JobRow({ job, armed = false, onOpen, onToggleRead, onBlock }: Jo
   // Read and blocked both grey the row, so the row says which one it is.
   const dimmed = job.read || job.blocked;
 
-  // Both actions are toggles, so every one of them is undoable from the row it
-  // was pressed on. That matters most for Block: the only other way back is
-  // hunting the company down in Options.
+  // Every action on the row is undoable from the row it was pressed on. That matters
+  // most for Block: the only other way back is hunting the company down in Options.
   const readLabel = job.read ? "Mark as unread" : "Mark as read";
+
+  // The one exception to that, and the reason the label spells it out: undoing an
+  // applied record takes the note with it, and only answering the question again
+  // brings a note back. One tap all the same — a confirm on every correction would
+  // cost more than the note does.
+  const appliedLabel = "Applied — undo, and forget the note";
 
   // A card with no company parsed has nothing to block, so it gets no button
   // rather than one that would blocklist the empty string (§12 again).
@@ -66,6 +82,7 @@ export function JobRow({ job, armed = false, onOpen, onToggleRead, onBlock }: Jo
       data-read={job.read}
       data-opened={job.opened}
       data-blocked={job.blocked}
+      data-applied={job.applied}
       className={cn(
         "group relative flex items-start gap-2 rounded-lg border bg-card px-2.5 py-2 transition-colors",
         "hover:bg-accent/40 has-[a:focus-visible]:ring-[3px] has-[a:focus-visible]:ring-ring/50",
@@ -120,8 +137,29 @@ export function JobRow({ job, armed = false, onOpen, onToggleRead, onBlock }: Jo
         </span>
       </a>
 
-      {/* Block first, the tick out at the edge where a one-tap dismiss belongs. */}
+      {/* Applied, then Block, then the tick out at the edge where a one-tap dismiss
+          belongs. The Applied tag lives here rather than in the footer with the
+          Blocked one because it is tappable, and interactive content inside the
+          row's `<a>` is both invalid and unclickable. */}
       <span className="flex shrink-0 items-center gap-1">
+        {job.applied && (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            data-action="unapply"
+            aria-pressed={true}
+            // The visible word is only "Applied", so the accessible name is what has
+            // to say that pressing it takes the record — and the note — away again.
+            title={appliedLabel}
+            aria-label={appliedLabel}
+            onClick={onUnapply}
+            className="h-7 gap-1 px-2 text-xs text-ok hover:bg-ok/10 hover:text-ok"
+          >
+            <BadgeCheck className="size-3.5" aria-hidden="true" />
+            Applied
+          </Button>
+        )}
         {company && (
           <Button
             type="button"

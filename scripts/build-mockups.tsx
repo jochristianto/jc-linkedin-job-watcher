@@ -64,6 +64,7 @@ function job(over: Partial<JobView> = {}): JobView {
     opened: false,
     read: false,
     blocked: false,
+    applied: false,
     ...over,
   };
 }
@@ -168,6 +169,7 @@ function listView(opts: {
             onOpen={noop}
             onToggleRead={noop}
             onBlock={noop}
+            onUnapply={noop}
           />
         </div>
         <ScanStatusBar status={opts.status} />

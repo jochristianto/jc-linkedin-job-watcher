@@ -36,6 +36,21 @@ export type Job = {
   openedAt: number | null;
   read: boolean;
   readAt: number | null;
+  // Applying is a third thing again, and the only one that means you *acted* on
+  // the posting rather than looked at it or dismissed the row. It is stored so
+  // the row can say "Applied" afterwards, so the question is never asked twice
+  // about the same job, and because the `[Applied]` Telegram message (§8) is
+  // built from the job plus whatever note was typed alongside the answer.
+  //
+  // Optional, unlike `read`: records written before this shipped carry none of
+  // the three fields, and an absent `applied` simply reads as "never applied", so
+  // no `migrateJobs` branch is needed. Answering "No" writes nothing at all — you
+  // might apply tomorrow, and a stored "no" would be a fact with a shelf life.
+  applied?: boolean;
+  appliedAt?: number | null;
+  /** What was typed in the notes box when the answer was Yes; `""` when the box
+   *  was left empty (the note is optional, the answer is not). */
+  applyNotes?: string;
 };
 
 export type Watch = {

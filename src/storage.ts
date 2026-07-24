@@ -24,11 +24,27 @@ export type JobsMap = Record<string, Job>;
  * null = "use the view's default" (New for the popup, All for the tab) — it
  * becomes concrete the first time the user toggles it.
  */
-export type UiState = { activeWatchId: string | null; mode: ListMode | null };
+export type UiState = {
+  activeWatchId: string | null;
+  mode: ListMode | null;
+  /** The job whose "Did you apply for this job?" question is still unanswered, or
+   *  null when nothing is pending.
+   *
+   *  It is persisted rather than held in component state because clicking a row
+   *  opens LinkedIn in a focused tab — and *that closes the popup*, which would
+   *  take the question with it. Stored, the popup asks the next time it is opened
+   *  and the jobs tab asks as soon as you come back to it, which is also the only
+   *  moment the answer can be known. One id, not a list: a second click replaces
+   *  the first, the same way only one row's Block button can be mid-question.
+   *
+   *  Optional because `ui` records written before this shipped have no such field;
+   *  absent reads as "nothing pending". */
+  pendingApplyId?: string | null;
+};
 
 /** The unset UI state — no chip filter, no chosen mode (each view uses its own
- *  default until the user picks one). */
-export const DEFAULT_UI: UiState = { activeWatchId: null, mode: null };
+ *  default until the user picks one), no question waiting to be answered. */
+export const DEFAULT_UI: UiState = { activeWatchId: null, mode: null, pendingApplyId: null };
 
 /** The §6 top-level keys and the shape each holds. `pushHealth` (§16.7) tracks
  *  consecutive Telegram-push failures separately from scan `health`; `ui` holds

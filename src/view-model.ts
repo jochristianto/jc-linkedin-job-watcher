@@ -30,7 +30,33 @@ export type JobView = {
    *  greyed; it stays on screen (the blocklist only stops *future* scans from
    *  surfacing it) and the Block button flips to Unblock. */
   blocked: boolean;
+  /** You answered Yes to "Did you apply for this job?" after opening it. Tags the
+   *  row so the list is also a record of what you have applied to, and stops the
+   *  question being asked about this job a second time. */
+  applied: boolean;
 };
+
+/** The answer to "Did you apply for this job?". `null` is a real third state, not
+ *  a missing value: it is the question as first asked, unanswered. `"no"` barely
+ *  lives here at all — it closes the question the moment it is clicked (see
+ *  `ApplyPrompt`), so only `"yes"` is ever held. */
+export type ApplyAnswer = "yes" | "no" | null;
+
+/** Which of the apply prompt's two dialogs is on screen. `"ask"` is the question
+ *  itself, two buttons and nothing else; `"note"` is the one Yes opens. */
+export type ApplyPromptStep = "ask" | "note";
+
+/**
+ * The dialog a given answer puts on screen — the "the note belongs to Yes" rule,
+ * provable with plain values. The component holds the answer in `useState` and
+ * renders what this returns; nothing about the rule lives in JSX.
+ *
+ * There is nothing to note about a job you did not apply to, so No never reaches
+ * the second dialog: it answers and closes the question on the click.
+ */
+export function applyPromptStep(answer: ApplyAnswer): ApplyPromptStep {
+  return answer === "yes" ? "note" : "ask";
+}
 
 /** How long an armed Block button waits for its second press before going back
  *  to "Block" on its own. Long enough to read the question, short enough that a

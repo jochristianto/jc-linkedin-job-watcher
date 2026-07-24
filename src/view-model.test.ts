@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { metaLine, formatCountdown } from "./view-model.ts";
+import { applyPromptStep, metaLine, formatCountdown } from "./view-model.ts";
 
 // The two pure formatters left over from the string-rendering era. They stayed
 // out of the components precisely so they could be proved like this — with plain
@@ -30,4 +30,12 @@ test("formatCountdown never reads 0s while there is still time on the clock", ()
   assert.equal(formatCountdown(0), "0s");
   // A time already past is the `due` state, never a negative countdown.
   assert.equal(formatCountdown(-5_000), "0s");
+});
+
+test("applyPromptStep opens the note dialog for Yes and nothing else", () => {
+  // Unanswered is the question itself…
+  assert.equal(applyPromptStep(null), "ask");
+  // …and No never leaves it: it answers and closes on the click.
+  assert.equal(applyPromptStep("no"), "ask");
+  assert.equal(applyPromptStep("yes"), "note");
 });

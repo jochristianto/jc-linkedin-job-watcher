@@ -24,7 +24,7 @@
 // Then check the message on your PHONE (not just desktop Telegram): confirm the
 // link is tappable and the layout reads well.
 
-import { sendPush, buildPushMessage, type PushJob } from "../src/push.ts";
+import { sendPush, buildPushMessages, type PushJob } from "../src/push.ts";
 
 const botToken = process.env.TELEGRAM_BOT_TOKEN ?? "";
 const chatId = process.env.TELEGRAM_CHAT_ID ?? "";
@@ -54,8 +54,11 @@ const sampleJobs: PushJob[] = [
   },
 ];
 
-console.log("Sending this message body:\n");
-console.log(buildPushMessage(sampleJobs));
+// A batch over ten goes out as several messages (PRD §8), so print each one the
+// way it will arrive rather than pretending the body is always a single message.
+const bodies = buildPushMessages(sampleJobs);
+console.log(`Sending ${bodies.length} message${bodies.length > 1 ? "s" : ""}:\n`);
+console.log(bodies.join("\n\n--- (next message) ---\n\n"));
 console.log("\n---");
 
 const ok = await sendPush(sampleJobs, {

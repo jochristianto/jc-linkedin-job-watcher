@@ -335,6 +335,39 @@ Token and chat ID go in the options page. Never hardcoded.
 ]
 ```
 
+### Message format
+
+Two messages, one shape. Every job is a linked title followed by labelled lines, so a posting reads the same whether it arrived as new or as one you told the extension you applied to. The title is always the link — on a phone the message *is* the way back to the posting.
+
+New jobs:
+
+```
+[New Job Posts]
+
+1. {jobTitle}
+Company: {companyName}
+Location: {location}
+
+2. {jobTitle}
+Company: {companyName}
+Location: {location}
+```
+
+Applied (the answer to "Did you apply for this job?"):
+
+```
+[Applied]
+
+{jobTitle}
+Company: {companyName}
+Location: {location}
+Notes: {notes}
+```
+
+A batch is **split at 10 jobs per message**, not truncated: 100 new jobs arrive as ten messages, numbered 1–100 straight through, so ten messages read as one list continued rather than ten lists that each begin at 1. Messages go out one after another with a ~1s gap, since a bot posting to the same chat is throttled at roughly a message a second and a 429 would drop the tail of the batch silently.
+
+Each line degrades on its own (§12): an unparsed company drops the `Company:` line rather than printing an empty label, an empty note drops `Notes:`, a job with no url keeps its title as plain text, and a job with no title falls back to "Untitled role" so the link is never invisible anchor text.
+
 ### Send function
 
 ```ts
@@ -343,35 +376,15 @@ async function sendPush(jobs: Job[], cfg: PushConfig): Promise<boolean> {
     return false;
   }
 
-  const lines = jobs
-    .slice(0, 10)
-    .map(
-      (j) =>
-        `<a href="${j.url}">${escapeHtml(j.title)}</a>\n` +
-        `${escapeHtml(j.company)} · ${escapeHtml(j.location)}`,
-    );
-  if (jobs.length > 10) lines.push(`<i>+${jobs.length - 10} more</i>`);
-
-  try {
-    const res = await fetch(
-      `https://api.telegram.org/bot${cfg.botToken}/sendMessage`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: cfg.chatId,
-          text:
-            `<b>${jobs.length} new job${jobs.length > 1 ? "s" : ""}</b>\n\n` +
-            lines.join("\n\n"),
-          parse_mode: "HTML",
-          disable_web_page_preview: true,
-        }),
-      },
-    );
-    return res.ok;
-  } catch {
-    return false; // never let push failure break the scan
+  let allSent = true;
+  for (const [i, text] of buildPushMessages(jobs).entries()) {
+    if (i > 0) await sleep(1000); // pace a split batch
+    // POST { chat_id, text, parse_mode: "HTML", disable_web_page_preview: true }
+    // to https://api.telegram.org/bot<token>/sendMessage; res.ok decides.
+    // A refusal does not abandon the messages after it, but does fail the batch.
+    if (!(await postMessage(text, cfg))) allSent = false;
   }
+  return allSent; // never throws — push failure must not break the scan
 }
 ```
 
@@ -394,10 +407,10 @@ Desktop notification and push both fire. They serve different moments — one fo
 
 | Issue                      | Handling                                                                                                                                                                                                     |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 4096-char message cap      | `slice(0, 10)` covers it. Chunk with a delay between if you'd rather send everything.                                                                                                                        |
+| 4096-char message cap      | 10 jobs per message covers it with room to spare; a longer batch is split across messages rather than truncated.                                                                                             |
 | Push failure               | Caught and swallowed. Offline phone or Telegram outage must not stop the scan or the badge update.                                                                                                           |
 | Token is a real credential | Anyone holding it can post as your bot. Lives in `chrome.storage.local`, readable by anything with access to the Chrome profile. Fine for a personal tool — don't commit it; revoke via BotFather if leaked. |
-| Rate limits                | ~30 messages/second allowed. Irrelevant at one message per 5 minutes.                                                                                                                                        |
+| Rate limits                | ~30 messages/second overall, but ~1/second to one chat — hence the gap between the messages of a split batch. Irrelevant for a routine cycle's single message.                                               |
 
 ### Options page: "Send test message"
 
