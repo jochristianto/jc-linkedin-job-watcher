@@ -70,16 +70,21 @@ function ApplyDialog({
         aria-modal="true"
         aria-labelledby="apply-prompt-title"
         data-job-id={job.id}
-        className="flex w-full max-w-[340px] flex-col gap-3 rounded-lg border bg-card p-4 shadow-lg"
+        className="flex w-full max-w-[340px] flex-col gap-6 rounded-lg border bg-card p-4 shadow-lg"
       >
         <div className="flex flex-col gap-1">
-          <h2 id="apply-prompt-title" className="text-sm font-semibold text-foreground">
+          <h2
+            id="apply-prompt-title"
+            className="text-sm font-semibold text-foreground"
+          >
             {heading}
           </h2>
           {/* Which job — a question that arrives minutes later, in a popup you
               reopened, is meaningless without it. And it is repeated on the second
               dialog: by then you have answered one question already. */}
-          <p className="text-xs text-muted-foreground">{metaLine([title, job.company])}</p>
+          <p className="text-xs text-muted-foreground">
+            {metaLine([title, job.company])}
+          </p>
         </div>
         {children}
       </div>
@@ -111,14 +116,31 @@ export function ApplyQuestion({
   onDismiss: () => void;
 }) {
   return (
-    <ApplyDialog job={job} heading="Did you apply for this job?" onDismiss={onDismiss}>
+    <ApplyDialog
+      job={job}
+      heading="Did you apply for this job?"
+      onDismiss={onDismiss}
+    >
       {/* Right-aligned and No first: the ordinary dialog footer, with the answer
           that does something last, under the thumb. */}
       <div className="flex items-center justify-end gap-2">
-        <Button type="button" size="sm" variant="outline" data-answer="no" onClick={onNo}>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          data-answer="no"
+          onClick={onNo}
+          className="px-6"
+        >
           No
         </Button>
-        <Button type="button" size="sm" data-answer="yes" onClick={onYes}>
+        <Button
+          type="button"
+          size="sm"
+          data-answer="yes"
+          onClick={onYes}
+          className="px-10"
+        >
           Yes
         </Button>
       </div>
@@ -180,7 +202,12 @@ export function ApplyNote({
         >
           Cancel
         </Button>
-        <Button type="button" size="sm" data-action="apply-submit" onClick={() => onSave(notes)}>
+        <Button
+          type="button"
+          size="sm"
+          data-action="apply-submit"
+          onClick={() => onSave(notes)}
+        >
           Submit
         </Button>
       </div>
@@ -215,6 +242,10 @@ export function ApplyPrompt({ job, onAnswer, onDismiss }: ApplyPromptProps) {
       onDismiss={onDismiss}
     />
   ) : (
-    <ApplyNote job={job} onSave={(notes) => onAnswer(true, notes)} onDismiss={onDismiss} />
+    <ApplyNote
+      job={job}
+      onSave={(notes) => onAnswer(true, notes)}
+      onDismiss={onDismiss}
+    />
   );
 }
