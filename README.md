@@ -133,7 +133,7 @@ Optional, and *additive* to the desktop notification — never a replacement. Se
 ### Retention
 How long records are kept: seen IDs `15` days, jobs you've opened or read `7` days, untouched jobs `30` days, seen hard cap `50,000`. **Not yet enforced** — see [Known limitations](#known-limitations).
 
-> **Save settings** writes your changes. **Reset** reverts the form to the last-saved values — it is not a factory reset.
+> **Save settings** writes your changes. **Reset** reverts the form to the last-saved values — it is not a factory reset. It asks before discarding, and is greyed out while there's nothing unsaved to discard.
 
 ---
 
