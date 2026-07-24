@@ -26,7 +26,12 @@ import { useNow } from "@/hooks/use-now.ts";
 import { cn } from "@/lib/utils";
 import { isCompanyBlocked } from "@/filter.ts";
 import { focusOrOpenJobsTab } from "@/jobs-tab.ts";
-import { badgeFor, type ScanNowRequest } from "@/scan.ts";
+import {
+  badgeFor,
+  type ScanNowRequest,
+  type ScanNowResponse,
+  type SetEnabledRequest,
+} from "@/scan.ts";
 import * as storage from "@/storage.ts";
 import {
   markAllRead,
@@ -69,6 +74,17 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
   // than from the reply.
   const [pendingScan, setPendingScan] = useState(false);
 
+  // A short-lived line explaining a click that started no *new* scan — the worker
+  // was unreachable, or a cycle was already running. Without it those replies are
+  // silent and the button just blinks (the background answers, but nothing here
+  // reads the answer). Cleared on the next click and after a few seconds.
+  const [scanNotice, setScanNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!scanNotice) return;
+    const t = setTimeout(() => setScanNotice(null), 4000);
+    return () => clearTimeout(t);
+  }, [scanNotice]);
+
   const persistUi = useCallback(
     (next: { activeWatchId: string | null; mode: ListMode }) => storage.set("ui", next),
     [],
@@ -109,6 +125,8 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
       quietHours: state.settings.quietHours,
       nextScanAt: state.nextScanAt,
       now,
+      // Absent (settings from before the master switch existed) reads as on.
+      enabled: state.settings.enabled !== false,
     });
   }, [state, mode, title, activeWatchId, pendingScan, armedBlockId, now]);
 
@@ -137,15 +155,60 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
    */
   const onScan = useCallback(async () => {
     if (pendingScan) return;
+    setScanNotice(null);
     setPendingScan(true);
     try {
-      const request: ScanNowRequest = { type: "LJW_SCAN_NOW" };
-      await chrome.runtime.sendMessage(request).catch(() => {});
+      // `null` = the message reached no listener. Right after a reload the MV3
+      // worker can be torn down and miss the first wake, so retry once before
+      // blaming it. A `started: false` reply is the worker answering that it did
+      // not begin a *new* cycle — most often because one is already running,
+      // which is not an error (the scan the click asked for is under way).
+      const send = () =>
+        chrome.runtime
+          .sendMessage({ type: "LJW_SCAN_NOW" } as ScanNowRequest)
+          .then((r) => r as ScanNowResponse, () => null);
+      let res = await send();
+      if (res == null) res = await send();
+
+      if (res == null) {
+        setScanNotice("Couldn't reach the scanner — reload the extension and try again.");
+      } else if (!res.started) {
+        setScanNotice(
+          res.reason === "already-scanning"
+            ? "A scan is already running — hang tight."
+            : "Couldn't start the scan — try again in a moment.",
+        );
+      }
     } finally {
       setPendingScan(false);
       await reload();
     }
   }, [pendingScan, reload]);
+
+  /**
+   * The header's master on/off switch (§ master). Flip `settings.enabled` in
+   * storage first so every open surface repaints the switch and the footer at
+   * once — `settings` is a rendered key — then wake the background to reconcile
+   * the alarm (arm it on, clear it off), which only the service worker can do.
+   *
+   * The message is retried once for the same reason "Scan now" is: a click can
+   * land while Chrome has torn the MV3 worker down and miss the first wake. If
+   * both miss, an alarm left armed after an OFF is swept by `onAlarm`'s own
+   * self-heal on its next tick, and turning it back ON simply re-sends this.
+   */
+  const onToggleEnabled = useCallback(
+    async (next: boolean) => {
+      const settings = await storage.get("settings");
+      await storage.set("settings", { ...settings, enabled: next });
+      const send = () =>
+        chrome.runtime
+          .sendMessage({ type: "LJW_SET_ENABLED", enabled: next } as SetEnabledRequest)
+          .then(() => true, () => false);
+      if (!(await send())) await send();
+      await reload();
+    },
+    [reload],
+  );
 
   const onMarkAllRead = useCallback(async () => {
     const jobs = await storage.get("jobs");
@@ -275,41 +338,58 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
               badge={view.badge}
               scanButton={view.scanButton}
               variant={variant}
+              enabled={view.enabled}
+              onToggleEnabled={onToggleEnabled}
               onScan={onScan}
               onMarkAllRead={onMarkAllRead}
               onOpenTab={onOpenTab}
               onOpenOptions={onOpenOptions}
             />
 
-            <Toolbar
-              watches={view.chips}
-              activeWatchId={view.activeWatchId}
-              mode={view.mode}
-              onWatchChange={onWatchChange}
-              onModeChange={onModeChange}
-            />
-
-            {view.banners.map((b) => (
-              <HealthBanner key={b.message} message={b.message} severity={b.severity} />
-            ))}
-
-            {/* The list scrolls; the header above and the status bar below stay put. */}
-            <div className="flex flex-1 flex-col overflow-y-auto px-2 pb-2">
-              {view.emptyKind ? (
-                <EmptyState kind={view.emptyKind} />
-              ) : (
-                <JobList
-                  jobs={view.jobs}
+            {/* Paused (§ master): the whole app body collapses to one message —
+                no toolbar, no list, no footer — so the switch in the header is
+                the only thing to act on. Everything below is watching-on. */}
+            {view.enabled ? (
+              <>
+                <Toolbar
+                  watches={view.chips}
+                  activeWatchId={view.activeWatchId}
                   mode={view.mode}
-                  armedBlockId={view.armedBlockId}
-                  onOpen={onOpen}
-                  onToggleRead={onToggleRead}
-                  onBlock={onBlock}
+                  onWatchChange={onWatchChange}
+                  onModeChange={onModeChange}
                 />
-              )}
-            </div>
 
-            <ScanStatusBar status={view.status} />
+                {view.banners.map((b) => (
+                  <HealthBanner key={b.message} message={b.message} severity={b.severity} />
+                ))}
+
+                {/* A transient heads-up for a click that started no new scan. Amber,
+                    the softest banner tier — neither case is an error. */}
+                {scanNotice && <HealthBanner message={scanNotice} severity="warn" />}
+
+                {/* The list scrolls; the header above and the status bar below stay put. */}
+                <div className="flex flex-1 flex-col overflow-y-auto px-2 pb-2">
+                  {view.emptyKind ? (
+                    <EmptyState kind={view.emptyKind} />
+                  ) : (
+                    <JobList
+                      jobs={view.jobs}
+                      mode={view.mode}
+                      armedBlockId={view.armedBlockId}
+                      onOpen={onOpen}
+                      onToggleRead={onToggleRead}
+                      onBlock={onBlock}
+                    />
+                  )}
+                </div>
+
+                <ScanStatusBar status={view.status} />
+              </>
+            ) : (
+              <div className="flex flex-1 flex-col">
+                <EmptyState kind="paused" />
+              </div>
+            )}
           </>
         )}
       </div>

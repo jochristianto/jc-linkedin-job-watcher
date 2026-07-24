@@ -33,11 +33,17 @@ export type ScanRequest = { type: "LJW_SCAN"; token: string };
  *  other way (background → invisible tab) and carries the injection token. */
 export type ScanNowRequest = { type: "LJW_SCAN_NOW" };
 
+/** The message the header's master on/off toggle sends the background. The UI
+ *  writes `settings.enabled` itself (so the switch flips instantly); this only
+ *  asks the background to reconcile the *alarm* — arm the cadence when turned on,
+ *  clear it when turned off — because alarm management lives in the worker. */
+export type SetEnabledRequest = { type: "LJW_SET_ENABLED"; enabled: boolean };
+
 /** The background's reply, sent as soon as the lock is resolved rather than when
  *  the cycle ends — a cycle takes 60–90s (§9) and the popup must repaint now.
  *  `already-scanning` is not an error: a cycle is running, which is what the
- *  click asked for. */
-export type ScanNowResponse = { started: boolean; reason?: "already-scanning" };
+ *  click asked for. `disabled` means the master switch is off — turn it on first. */
+export type ScanNowResponse = { started: boolean; reason?: "already-scanning" | "disabled" };
 
 /** Fragment key under which `background.ts` stamps a page's one-time scan token.
  *  A URL *fragment* (never sent to LinkedIn) so the server sees the plain search

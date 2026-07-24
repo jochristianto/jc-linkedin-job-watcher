@@ -1,4 +1,4 @@
-import { Clock, Moon, RefreshCw, TriangleAlert, type LucideIcon } from "lucide-react";
+import { Clock, Moon, PowerOff, RefreshCw, TriangleAlert, type LucideIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { formatCountdown, type ScanStatus } from "@/view-model.ts";
@@ -21,6 +21,8 @@ function statusFace(status: ScanStatus): { icon: LucideIcon; text: string } {
       return { icon: Clock, text: "No scan scheduled — press Scan now" };
     case "off":
       return { icon: Clock, text: "" };
+    case "disabled":
+      return { icon: PowerOff, text: "Paused — turn on to scan" };
   }
 }
 

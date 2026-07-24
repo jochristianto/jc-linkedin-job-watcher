@@ -59,6 +59,11 @@ test("DEFAULT_SETTINGS starts with empty lists and push disabled", () => {
   assert.equal(DEFAULT_SETTINGS.push.enabled, false);
 });
 
+test("DEFAULT_SETTINGS ships with the master switch on (§ master)", () => {
+  // A fresh install watches straight away; only an explicit toggle turns it off.
+  assert.equal(DEFAULT_SETTINGS.enabled, true);
+});
+
 test("DEFAULT_SETTINGS satisfies the Settings type it is declared as", () => {
   // A compile-time guarantee made a runtime assertion: if the shape drifted from
   // Settings, tsc would already have failed. This keeps the intent visible.

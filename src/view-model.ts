@@ -46,7 +46,11 @@ export type EmptyKind =
   | "no-jobs-yet"
   | "no-new"
   | "scanning"
-  | "scan-error";
+  | "scan-error"
+  // The master switch is off (§ master): the list, toolbar and footer are all
+  // hidden and this takes their place. Never produced by `pickEmptyKind` — the
+  // `<ListView>` renders it directly, ahead of the normal empty-state logic.
+  | "paused";
 
 /** The two places the list view mounts (PRD §4). The popup is a fixed 380px
  *  panel that closes on an outside click; the tab is a full page. It is the only
@@ -90,6 +94,9 @@ export type ScanButtonState = "idle" | "scanning" | "halted";
  *                   one armed), so it says so rather than showing a fake countdown.
  * - `off`         — no enabled search, so there is nothing to scan and a countdown
  *                   would be a promise the loop can't keep. Renders nothing.
+ * - `disabled`    — the user flipped the master switch off (§ master). The whole
+ *                   loop is paused on purpose, so the bar says "Paused" rather
+ *                   than counting down to a scan that isn't coming.
  */
 export type ScanStatus =
   | { kind: "scanning" }
@@ -97,7 +104,8 @@ export type ScanStatus =
   | { kind: "due" }
   | { kind: "halted" }
   | { kind: "unscheduled" }
-  | { kind: "off" };
+  | { kind: "off" }
+  | { kind: "disabled" };
 
 /** Join the present parts with " · ", dropping any that are missing so a blank
  * company or location never leaves a dangling separator (see #9). */

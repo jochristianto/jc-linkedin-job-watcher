@@ -142,6 +142,8 @@ function listView(opts: {
           badge={opts.badge}
           scanButton={opts.status.kind === "scanning" ? "scanning" : "idle"}
           variant={opts.variant}
+          enabled={opts.status.kind !== "disabled"}
+          onToggleEnabled={noop}
           onScan={noop}
           onMarkAllRead={noop}
           onOpenTab={noop}

@@ -38,6 +38,7 @@ import {
   type ScanNowResponse,
   type ScanRequest,
   type ScanResponse,
+  type SetEnabledRequest,
 } from "./scan.ts";
 import {
   OK_HEALTH,
@@ -361,15 +362,19 @@ async function takeScanLock(settings: Settings, state: ScanLifecycleState): Prom
   return pages;
 }
 
-/** Run the cycle the lock was taken for, then always release the lock and re-arm
- *  the cadence — so a manual scan resets the next automatic one to a full
- *  interval from now, rather than leaving two scans stacked minutes apart. */
-async function runLockedCycle(settings: Settings, pages: number): Promise<void> {
+/** Run the cycle the lock was taken for, then always release the lock and — for
+ *  the alarm path — re-arm the cadence, so a routine tick resets the next one to
+ *  a full interval from now rather than leaving two scans stacked minutes apart.
+ *  The manual "Scan now" passes `rearm: false`: it arms the alarm up front, from
+ *  the click, so the countdown resets the instant the button is pressed instead
+ *  of a minute later when the cycle ends (and a crash mid-cycle can't strand the
+ *  cadence on the old, already-passed alarm). */
+async function runLockedCycle(settings: Settings, pages: number, rearm = true): Promise<void> {
   try {
     await runCycle(settings, pages);
   } finally {
     await set("scanState", endScan(await get("scanState")));
-    await armNextAlarm(settings);
+    if (rearm) await armNextAlarm(settings);
   }
 }
 
@@ -386,6 +391,10 @@ async function runLockedCycle(settings: Settings, pages: number): Promise<void> 
 async function runScanNow(): Promise<ScanNowResponse> {
   const settings = await get("settings");
 
+  // The master switch is off (§ master): the header hides "Scan now" while off,
+  // so this only guards a race — a click that raced the toggle. Nothing starts.
+  if (settings.enabled === false) return { started: false, reason: "disabled" };
+
   // Same first step as an alarm tick: a lock a torn-down cycle left stuck must
   // not make the button silently do nothing (§16.6/§17.2).
   const recovered = recoverStaleLock(await get("scanState"), Date.now(), settings.staleLockMs);
@@ -395,16 +404,31 @@ async function runScanNow(): Promise<ScanNowResponse> {
   if ((await get("health")).mode === "halted") await set("health", { ...OK_HEALTH });
 
   const pages = await takeScanLock(settings, recovered.state);
+  // Re-arm the cadence from *now* — the click — so the next automatic scan is a
+  // full interval after this manual one, and the footer's countdown resets the
+  // moment the button is pressed rather than when the ~minute-long cycle ends.
+  // runLockedCycle therefore runs with `rearm: false`; arming here, before the
+  // cycle, is why it must not arm again after.
+  await armNextAlarm(settings);
   // Deliberately not awaited: the reply goes back now so the popup repaints as
   // "Scanning…" instead of hanging for the 60–90s the cycle takes. The keepalive
   // inside runCycle (§17 decision 1) is what keeps the worker alive meanwhile.
-  void runLockedCycle(settings, pages);
+  void runLockedCycle(settings, pages, false);
   return { started: true };
 }
 
 /** The alarm handler — the whole cadence in one place (PRD §9). */
 async function onAlarm(): Promise<void> {
   const settings = await get("settings");
+
+  // The master switch is off (§ master): stop the loop and clear the alarm so a
+  // sleeping worker isn't woken every interval for nothing. Self-healing — if a
+  // toggle-off missed the worker, the next tick tidies up the stray alarm here.
+  // Turning it back on re-arms via the LJW_SET_ENABLED handler below.
+  if (settings.enabled === false) {
+    await chrome.alarms.clear(ALARM_NAME);
+    return;
+  }
 
   // Every tick, before anything else: clear a lock the previous (torn-down) cycle
   // left stuck and sweep the tabs it orphaned (PRD §16.6/§17.2).
@@ -442,7 +466,36 @@ chrome.alarms.onAlarm.addListener((alarm) => {
  *  content script is messaged the other way round, via `chrome.tabs.sendMessage`). */
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if ((message as ScanNowRequest | undefined)?.type !== "LJW_SCAN_NOW") return;
-  void runScanNow().then(sendResponse);
+  // Always answer, even on failure: a rejected runScanNow that never called
+  // sendResponse would leave the channel to close empty, which the popup can only
+  // read as a dead worker. Reply `{ started: false }` and log the real cause so
+  // the service-worker console names it instead of the popup guessing.
+  runScanNow().then(sendResponse, (err) => {
+    console.error("[ljw] Scan now failed:", err);
+    sendResponse({ started: false });
+  });
+  return true;
+});
+
+/** The header's master on/off toggle (§ master). The UI has already written
+ *  `settings.enabled`; this only reconciles the *alarm*, which only the worker
+ *  can touch: arm the cadence when turned on, clear it when turned off. Reads the
+ *  desired state from the message rather than storage so a storage write still in
+ *  flight can't make it arm the wrong way. Keeping the channel open (`return true`)
+ *  lets the popup await the ack before it trusts the switch settled. */
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  const req = message as SetEnabledRequest | undefined;
+  if (req?.type !== "LJW_SET_ENABLED") return;
+  void (async () => {
+    try {
+      if (req.enabled) await ensureAlarmExists(await get("settings"));
+      else await chrome.alarms.clear(ALARM_NAME);
+      sendResponse({ ok: true });
+    } catch (err) {
+      console.error("[ljw] Toggle failed:", err);
+      sendResponse({ ok: false });
+    }
+  })();
   return true;
 });
 
@@ -462,7 +515,10 @@ chrome.notifications.onClicked.addListener((id) => {
  *  already-armed alarm from a prior version is left as-is). */
 chrome.runtime.onInstalled.addListener(() => {
   void (async () => {
-    await ensureAlarmExists(await get("settings"));
+    const settings = await get("settings");
+    // Never against the master switch (§ master): an upgrade of an install the
+    // user had turned off must stay off rather than silently arm a fresh alarm.
+    if (settings.enabled !== false) await ensureAlarmExists(settings);
   })();
 });
 
@@ -475,6 +531,8 @@ chrome.runtime.onStartup.addListener(() => {
     const recovered = recoverStaleLock(await get("scanState"), Date.now(), settings.staleLockMs);
     await Promise.all(recovered.tabIdsToClose.map((id) => chrome.tabs.remove(id).catch(() => {})));
     await set("scanState", requestCatchUp(recovered.state));
-    await ensureAlarmExists(settings);
+    // Honour the master switch across a relaunch (§ master): a browser the user
+    // left with scanning off comes back up off, no alarm armed.
+    if (settings.enabled !== false) await ensureAlarmExists(settings);
   })();
 });

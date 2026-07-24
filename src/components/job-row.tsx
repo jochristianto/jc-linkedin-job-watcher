@@ -69,9 +69,10 @@ export function JobRow({ job, armed = false, onOpen, onToggleRead, onBlock }: Jo
       className={cn(
         "group relative flex items-start gap-2 rounded-lg border bg-card px-2.5 py-2 transition-colors",
         "hover:bg-accent/40 has-[a:focus-visible]:ring-[3px] has-[a:focus-visible]:ring-ring/50",
-        // Opened is a *highlight*, not a dismissal: you clicked through and the
-        // row stays put so you can come back to it (PRD §9).
-        job.opened && !dimmed && "border-l-primary/70 border-l-[3px] pl-2 bg-accent/25",
+        // Opened is not a dismissal — the row stays put so you can come back to
+        // it (PRD §9) — but clicking through marks it visited: no dot, no
+        // highlight, just faded so the ones you haven't touched stand out.
+        job.opened && !dimmed && "opacity-80",
         dimmed && "opacity-55",
       )}
     >
@@ -90,13 +91,15 @@ export function JobRow({ job, armed = false, onOpen, onToggleRead, onBlock }: Jo
           if (e.button === 1) onOpen(true);
         }}
       >
-        {/* The unread dot. Blocked rows never carry one — they are greyed out of
-            the badge count too, so a dot would be claiming a job that isn't. */}
+        {/* The unread dot. Opened rows drop it too — a click through counts as
+            seen, even though the row stays until you tick it. Blocked rows never
+            carry one either: greyed out of the badge count, so a dot would be
+            claiming a job that isn't. */}
         <span
           aria-hidden="true"
           className={cn(
             "mt-1.5 size-2 shrink-0 rounded-full",
-            !job.read && !job.blocked ? "bg-unread" : "bg-transparent",
+            !job.read && !job.opened && !job.blocked ? "bg-unread" : "bg-transparent",
           )}
         />
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">

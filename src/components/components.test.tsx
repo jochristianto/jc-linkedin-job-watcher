@@ -325,15 +325,17 @@ const EMPTY_KINDS = [
   "no-new",
   "scanning",
   "scan-error",
+  "paused",
 ] as const satisfies readonly EmptyKind[];
 
 test("EmptyState gives a distinct, actionable message per situation", () => {
   const messages = EMPTY_KINDS.map((k) => html(<EmptyState kind={k} />));
-  // All five are distinct.
-  assert.equal(new Set(messages).size, 5);
+  // All six are distinct.
+  assert.equal(new Set(messages).size, 6);
   assert.match(html(<EmptyState kind="no-watches" />), /Options|Add a search/i);
   assert.match(html(<EmptyState kind="no-new" />), /caught up|no new/i);
   assert.match(html(<EmptyState kind="scan-error" />), /failed|broke|selector/i);
+  assert.match(html(<EmptyState kind="paused" />), /paused|watching is off/i);
 });
 
 test("each empty state gets its own Lucide icon, sized as artwork not a button", () => {
@@ -343,6 +345,7 @@ test("each empty state gets its own Lucide icon, sized as artwork not a button",
     "no-new": /lucide-circle-check/,
     scanning: /lucide-refresh-cw/,
     "scan-error": /lucide-triangle-alert/,
+    paused: /lucide-power-off/,
   };
   for (const kind of EMPTY_KINDS) {
     const h = html(<EmptyState kind={kind} />);
@@ -377,6 +380,8 @@ const header = (over: Partial<React.ComponentProps<typeof ListHeader>> = {}): st
       badge={0}
       scanButton="idle"
       variant="popup"
+      enabled={true}
+      onToggleEnabled={noop}
       onScan={noop}
       onMarkAllRead={noop}
       onOpenTab={noop}
@@ -411,6 +416,22 @@ test("ListHeader offers to open the popup's list as a full page", () => {
   // Icon-only, so the label lives on the button — the <svg> is aria-hidden.
   assert.match(h, /id="open-tab"[^>]*aria-label="Open as a full page"/);
   assert.match(h, /lucide-external-link/);
+});
+
+test("ListHeader renders the master on/off switch, checked while watching", () => {
+  const h = header({ enabled: true });
+  assert.match(h, /id="master-switch"/);
+  assert.match(h, /data-state="checked"/);
+});
+
+test("ListHeader hides Scan now while the master switch is off", () => {
+  // Nothing to scan while paused, so the manual trigger goes away with the loop;
+  // the switch itself is the way back on.
+  const off = header({ enabled: false });
+  assert.doesNotMatch(off, /id="scan-now"/);
+  assert.match(off, /data-state="unchecked"/);
+  // ...and it comes back the moment watching resumes.
+  assert.match(header({ enabled: true }), /id="scan-now"/);
 });
 
 test("ListHeader omits the expand control in the tab, which already is one", () => {
@@ -492,4 +513,12 @@ test("ScanStatusBar points a halted loop at the button that revives it", () => {
 test("ScanStatusBar renders nothing at all when there is nothing to scan", () => {
   // Not "no scans scheduled" — no bar, so the footer takes up no room.
   assert.equal(html(<ScanStatusBar status={{ kind: "off" }} />), "");
+});
+
+test("ScanStatusBar says Paused when the master switch is off (§ master)", () => {
+  // Unlike `off`, this one renders: the user turned it off and the bar confirms it.
+  const h = html(<ScanStatusBar status={{ kind: "disabled" }} />);
+  assert.match(h, /data-kind="disabled"/);
+  assert.match(h, /Paused/);
+  assert.match(h, /lucide-power-off/);
 });
