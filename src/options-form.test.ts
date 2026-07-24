@@ -8,6 +8,7 @@ import {
   parseSettingsForm,
   settingsToForm,
   applyPushPrefill,
+  hasUnsavedChanges,
   type OptionsFormValues,
 } from "./options-form.ts";
 import { DEFAULT_SETTINGS, type Settings } from "./types.ts";
@@ -171,6 +172,71 @@ test("parseSettingsForm reports every bad field at once, not just the first", ()
   assert.ok(r.errors.intervalMinutes);
   assert.ok(r.errors.seenHardCap);
   assert.ok(r.errors.quietStart);
+});
+
+// ── unsaved edits (what Reset would throw away) ──────────────────────────────
+
+test("hasUnsavedChanges: a form straight out of storage has nothing to discard", () => {
+  assert.equal(hasUnsavedChanges(settingsToForm(DEFAULT_SETTINGS), DEFAULT_SETTINGS), false);
+});
+
+test("hasUnsavedChanges spots an edit in every kind of field", () => {
+  const stored = settingsToForm(DEFAULT_SETTINGS);
+  const edits: Partial<OptionsFormValues>[] = [
+    { intervalMinutes: "45" }, // a number typed over
+    { quietStart: "22:30" }, // a time
+    { hideReposted: !stored.hideReposted }, // a toggle
+    { pushBotToken: "123:ABC" }, // a credential
+    { blockedTitleKeywords: ["Intern"] }, // a list of strings
+    { blockedCompanies: [makeBlockedCompany("Acme")] }, // a list of records
+    { watches: [{ id: "w1", name: "Indonesia", url: "https://x", enabled: true }] },
+  ];
+  for (const edit of edits) {
+    assert.equal(hasUnsavedChanges({ ...stored, ...edit }, DEFAULT_SETTINGS), true, JSON.stringify(edit));
+  }
+});
+
+test("hasUnsavedChanges compares list contents, not identity", () => {
+  const saved: Settings = {
+    ...DEFAULT_SETTINGS,
+    watches: [{ id: "w1", name: "Indonesia", url: "https://x", enabled: true }],
+    blockedCompanies: [makeBlockedCompany("Acme")],
+    blockedTitleKeywords: ["Intern"],
+  };
+  // Rebuilt arrays and objects, same values: re-rendering the page must not make
+  // it look edited.
+  const rebuilt: OptionsFormValues = {
+    ...settingsToForm(saved),
+    watches: [{ id: "w1", name: "Indonesia", url: "https://x", enabled: true }],
+    blockedCompanies: [{ display: "Acme", normalized: "acme" }],
+    blockedTitleKeywords: ["Intern"],
+  };
+  assert.equal(hasUnsavedChanges(rebuilt, saved), false);
+
+  // One field of one record differs, and the lengths still match.
+  const toggled = { ...rebuilt, watches: [{ ...rebuilt.watches[0]!, enabled: false }] };
+  assert.equal(hasUnsavedChanges(toggled, saved), true);
+
+  // A removed entry, and an added one.
+  assert.equal(hasUnsavedChanges({ ...rebuilt, blockedTitleKeywords: [] }, saved), true);
+  assert.equal(
+    hasUnsavedChanges({ ...rebuilt, blockedTitleKeywords: ["Intern", "Junior"] }, saved),
+    true,
+  );
+});
+
+test("hasUnsavedChanges counts a text-only edit that would parse to the same number", () => {
+  const stored = settingsToForm(DEFAULT_SETTINGS);
+  assert.equal(
+    hasUnsavedChanges({ ...stored, intervalMinutes: `0${stored.intervalMinutes}` }, DEFAULT_SETTINGS),
+    true,
+  );
+});
+
+test("hasUnsavedChanges: a .env prefill is an unsaved edit", () => {
+  const stored = settingsToForm(DEFAULT_SETTINGS);
+  const seeded = applyPushPrefill(stored, { botToken: "123:ABC", chatId: "999" });
+  assert.equal(hasUnsavedChanges(seeded, DEFAULT_SETTINGS), true);
 });
 
 // ── round-trip ───────────────────────────────────────────────────────────────

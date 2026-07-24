@@ -14,7 +14,18 @@ import { useEffect, useState } from "react";
 import { HowItWorks } from "@/components/how-it-works.tsx";
 import { TagInput } from "@/components/tag-input.tsx";
 import { WatchList } from "@/components/watch-list.tsx";
-import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,6 +35,7 @@ import { cn } from "@/lib/utils";
 import { OK_PUSH_HEALTH, PUSH_FAILING_MESSAGE } from "@/health.ts";
 import {
   applyPushPrefill,
+  hasUnsavedChanges,
   makeBlockedCompany,
   parseSettingsForm,
   parseWatchInput,
@@ -85,7 +97,11 @@ export function OptionsPage() {
 
   if (!form || !base) return null;
 
-  const set = <K extends keyof OptionsFormValues>(key: K, value: OptionsFormValues[K]): void =>
+  // What Reset would throw away, recomputed on every render: it drives both the
+  // button's enabled state and whether the confirmation is worth asking for.
+  const dirty = hasUnsavedChanges(form, base);
+
+  const set =<K extends keyof OptionsFormValues>(key: K, value: OptionsFormValues[K]): void =>
     setForm({ ...form, [key]: value });
 
   async function onSave(): Promise<void> {
@@ -99,12 +115,19 @@ export function OptionsPage() {
     }
     await storage.set("settings", result.settings);
     setBase(result.settings); // future saves carry through from what we just wrote
+    // Re-seed the fields from what was actually written, so what is on screen is
+    // what is in storage: " 15 " comes back as "15", a trimmed token as trimmed.
+    // Without this the form stays textually different from the saved settings and
+    // the page would go on claiming there are unsaved edits right after a save.
+    setForm(settingsToForm(result.settings));
     // Any .env prefill is now real stored state, so the "not saved yet" notice
     // has served its purpose and should not reappear.
     setPrefilled(false);
     setSaveStatus({ message: "Saved.", kind: "ok" });
   }
 
+  /** Only reached through the confirmation dialog, and only when there is
+   *  something to lose — see the Reset button in the save bar. */
   function onReset(): void {
     if (!base) return;
     // Reset means "back to what is stored" — so it drops an unsaved .env prefill
@@ -437,9 +460,41 @@ export function OptionsPage() {
           </p>
           <div className="flex shrink-0 items-center gap-3">
             <StatusText id="save-status" status={saveStatus} />
-            <Button type="button" variant="outline" id="reset" onClick={onReset}>
-              Reset
-            </Button>
+            {/* Reset throws away work with no undo, and it stands right next to
+                Save — so it asks first. A modal here, unlike the list view's
+                in-layout questions: this one is about the page it would change,
+                and there is nothing to go on looking at while you answer it.
+                With no unsaved edits it has nothing to throw away, so the button
+                is disabled rather than opening a dialog about nothing. */}
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button type="button" variant="outline" id="reset" disabled={!dirty}>
+                  Reset
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Discard your unsaved changes?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Every field goes back to the settings last saved. Anything typed since —
+                    searches added, filters, times, Telegram credentials — is lost, and there is
+                    no undo. Nothing already saved is deleted, and no jobs are touched.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  {/* The way out is the wide, safe one; the act that costs
+                      something wears destructive and sits under the thumb. */}
+                  <AlertDialogCancel id="reset-cancel">Keep editing</AlertDialogCancel>
+                  <AlertDialogAction
+                    id="reset-confirm"
+                    onClick={onReset}
+                    className={cn(buttonVariants({ variant: "destructive" }))}
+                  >
+                    Discard changes
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
             <Button type="button" id="save" onClick={onSave}>
               Save settings
             </Button>

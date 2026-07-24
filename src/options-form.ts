@@ -200,6 +200,45 @@ export function settingsToForm(s: Settings): OptionsFormValues {
   };
 }
 
+// ── Unsaved edits (what Reset would throw away) ──────────────────────────────
+
+/** Structural equality over the shapes a form field can hold — strings,
+ *  booleans, and the three lists of plain records. Written out rather than
+ *  reached for from a library because the values are this small, and because a
+ *  field added to `OptionsFormValues` later is covered without touching it. */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((item, i) => sameValue(item, b[i]));
+  }
+  if (typeof a === "object" && typeof b === "object" && a !== null && b !== null) {
+    const keys = Object.keys(a);
+    return (
+      keys.length === Object.keys(b).length &&
+      keys.every((k) => sameValue((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]))
+    );
+  }
+  return false;
+}
+
+/**
+ * Is there anything in the form that isn't in storage yet — i.e. does Reset have
+ * something to throw away?
+ *
+ * Compared against `settingsToForm(saved)` rather than against `saved` itself,
+ * so the comparison happens in the form's own vocabulary: "23:00" against
+ * "23:00", "15" against "15". That makes a *textual* difference count as an
+ * edit even when it would parse to the same number — typing "015" over "15"
+ * leaves the field genuinely unsaved, and saying otherwise would disable Reset
+ * on a form the user can see they have touched.
+ *
+ * A build-time .env prefill counts too: it fills blank fields and writes
+ * nothing, which is exactly an unsaved edit (see {@link applyPushPrefill}).
+ */
+export function hasUnsavedChanges(form: OptionsFormValues, saved: Settings): boolean {
+  return !sameValue(form, settingsToForm(saved));
+}
+
 // ── Build-time .env prefill (the `npm run build:dev` path) ───────────────────
 
 /**

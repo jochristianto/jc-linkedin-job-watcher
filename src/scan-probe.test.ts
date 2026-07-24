@@ -57,17 +57,23 @@ test("extractJobIds skips cards with no recoverable id (fail-independent, PRD §
   assert.deepEqual(ids, ["1", "2"]);
 });
 
-/** Build PollDeps whose sample() walks a fixed script of counts, one per call. */
-function scriptedDeps(counts: number[]): PollDeps & { calls: number } {
+/**
+ * Build PollDeps whose sample() walks a fixed script, one entry per call.
+ * A bare number is shorthand for "this many postings accumulated, and the walk
+ * has reached the end" — the ordinary case; a tuple spells out `atEnd` for the
+ * cases that turn on it.
+ */
+function scriptedDeps(script: (number | [count: number, atEnd: boolean])[]): PollDeps & { calls: number } {
   let i = 0;
   let clock = 0;
   const deps = {
     calls: 0,
     sample: async () => {
       deps.calls++;
-      const c = counts[Math.min(i, counts.length - 1)]!;
+      const entry = script[Math.min(i, script.length - 1)]!;
       i++;
-      return c;
+      const [count, atEnd] = typeof entry === "number" ? [entry, true] : entry;
+      return { count, expected: 0, atEnd };
     },
     sleep: async (ms: number) => {
       clock += ms;
@@ -79,14 +85,36 @@ function scriptedDeps(counts: number[]): PollDeps & { calls: number } {
 
 const OPTS = { intervalMs: 500, timeoutMs: 20_000, stableSamples: 3 };
 
-test("pollUntilSettled settles once the count stops growing (lazy list scrolled in)", async () => {
-  // 0,0 -> not rendered yet; grows as scroll materialises cards; 25 three times -> settled.
+test("pollUntilSettled settles once the walk hits the end and stops finding postings", async () => {
+  // 0,0 -> not rendered yet; grows as the walk materialises rows; 25 three times -> settled.
   const deps = scriptedDeps([0, 0, 12, 20, 25, 25, 25, 25]);
   const r = await pollUntilSettled(deps, OPTS);
   assert.equal(r.settled, true);
   assert.equal(r.count, 25);
   // Stops the first time it sees 3 equal non-zero counts; does not keep sampling.
   assert.equal(deps.calls, 7);
+});
+
+test("pollUntilSettled keeps walking while the count is stable but the end is not reached", async () => {
+  // The shipped bug: LinkedIn paints 11 rows, nothing scrolls them, so the count
+  // is trivially "stable" from the very first sample. Stability alone must not
+  // settle — there is more list below, and those postings are the missed ones.
+  const deps = scriptedDeps([
+    [11, false], [11, false], [11, false], [11, false],
+    [18, false], [25, false], [25, true], [25, true], [25, true],
+  ]);
+  const r = await pollUntilSettled(deps, OPTS);
+  assert.equal(r.settled, true);
+  assert.equal(r.count, 25);
+});
+
+test("pollUntilSettled reports settled=false when the walk never reaches the end", async () => {
+  // Stable count, but the column keeps scrolling forever: an incomplete read, and
+  // it must say so rather than passing 11 postings off as the whole list.
+  const deps = scriptedDeps([[11, false]]);
+  const r = await pollUntilSettled(deps, { ...OPTS, timeoutMs: 2_000 });
+  assert.equal(r.settled, false);
+  assert.equal(r.count, 11);
 });
 
 test("pollUntilSettled reports settled=false on an empty page (question #1 = no)", async () => {
@@ -103,4 +131,14 @@ test("pollUntilSettled times out when the count never stabilises", async () => {
   const r = await pollUntilSettled(deps, { ...OPTS, timeoutMs: 2_000 });
   assert.equal(r.settled, false);
   assert.ok(r.elapsedMs >= 2_000);
+});
+
+test("pollUntilSettled carries the page's declared slot count through to the caller", async () => {
+  const deps: PollDeps = {
+    sample: async () => ({ count: 11, expected: 25, atEnd: true }),
+    sleep: async () => {},
+    now: () => 0,
+  };
+  const r = await pollUntilSettled(deps, { ...OPTS, timeoutMs: 0 });
+  assert.equal(r.expected, 25);
 });
