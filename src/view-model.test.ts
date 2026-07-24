@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { applyPromptState, metaLine, formatCountdown } from "./view-model.ts";
+import { applyPromptStep, metaLine, formatCountdown } from "./view-model.ts";
 
 // The two pure formatters left over from the string-rendering era. They stayed
 // out of the components precisely so they could be proved like this — with plain
@@ -32,21 +32,10 @@ test("formatCountdown never reads 0s while there is still time on the clock", ()
   assert.equal(formatCountdown(-5_000), "0s");
 });
 
-test("applyPromptState keeps the notes box shut until the answer is Yes", () => {
-  assert.equal(applyPromptState(null).notesEnabled, false);
-  assert.equal(applyPromptState("no").notesEnabled, false);
-  assert.equal(applyPromptState("yes").notesEnabled, true);
-});
-
-test("applyPromptState has nothing to commit until the question is answered", () => {
-  assert.equal(applyPromptState(null).submitEnabled, false);
-  assert.equal(applyPromptState("no").submitEnabled, true);
-  assert.equal(applyPromptState("yes").submitEnabled, true);
-});
-
-test("applyPromptState says which button pushes a message and which just closes", () => {
-  // The label is the only warning that Yes sends something to a phone.
-  assert.equal(applyPromptState("yes").submitLabel, "Save & send");
-  assert.equal(applyPromptState("no").submitLabel, "Done");
-  assert.equal(applyPromptState(null).submitLabel, "Done");
+test("applyPromptStep opens the note dialog for Yes and nothing else", () => {
+  // Unanswered is the question itself…
+  assert.equal(applyPromptStep(null), "ask");
+  // …and No never leaves it: it answers and closes on the click.
+  assert.equal(applyPromptStep("no"), "ask");
+  assert.equal(applyPromptStep("yes"), "note");
 });

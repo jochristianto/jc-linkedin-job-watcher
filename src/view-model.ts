@@ -37,35 +37,25 @@ export type JobView = {
 };
 
 /** The answer to "Did you apply for this job?". `null` is a real third state, not
- *  a missing value: until one of the two is picked the notes box is dead and there
- *  is nothing to commit. */
+ *  a missing value: it is the question as first asked, unanswered. `"no"` barely
+ *  lives here at all — it closes the question the moment it is clicked (see
+ *  `ApplyPrompt`), so only `"yes"` is ever held. */
 export type ApplyAnswer = "yes" | "no" | null;
 
-/** What the apply prompt's notes box and commit button do for a given answer. */
-export type ApplyPromptState = {
-  /** The notes box only comes alive on Yes. There is nothing to note about a job
-   *  you did not apply to, and a box you can type into before answering invites
-   *  writing something that is then thrown away. */
-  notesEnabled: boolean;
-  /** Nothing to commit until the question has actually been answered. */
-  submitEnabled: boolean;
-  /** Yes records the application and sends it to your phone; No only closes the
-   *  question. The button says which, so it can never push a message you did not
-   *  ask for. */
-  submitLabel: string;
-};
+/** Which of the apply prompt's two dialogs is on screen. `"ask"` is the question
+ *  itself, two buttons and nothing else; `"note"` is the one Yes opens. */
+export type ApplyPromptStep = "ask" | "note";
 
 /**
- * The apply prompt's three states, as plain data — the "the box is only enabled
- * on Yes" rule, provable with plain values. The component holds the answer in
- * `useState` and renders what this returns; nothing about the rule lives in JSX.
+ * The dialog a given answer puts on screen — the "the note belongs to Yes" rule,
+ * provable with plain values. The component holds the answer in `useState` and
+ * renders what this returns; nothing about the rule lives in JSX.
+ *
+ * There is nothing to note about a job you did not apply to, so No never reaches
+ * the second dialog: it answers and closes the question on the click.
  */
-export function applyPromptState(answer: ApplyAnswer): ApplyPromptState {
-  return {
-    notesEnabled: answer === "yes",
-    submitEnabled: answer !== null,
-    submitLabel: answer === "yes" ? "Save & send" : "Done",
-  };
+export function applyPromptStep(answer: ApplyAnswer): ApplyPromptStep {
+  return answer === "yes" ? "note" : "ask";
 }
 
 /** How long an armed Block button waits for its second press before going back

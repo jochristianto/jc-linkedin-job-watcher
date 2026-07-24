@@ -333,9 +333,10 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
     [disarm, reload],
   );
 
-  /** Escape, the backdrop, or "Not now": the question goes without an answer and
-   *  nothing is recorded. It does not come back on its own — being asked again on
-   *  every reopen would make the popup unusable — but clicking the row re-queues it. */
+  /** Escape, the backdrop, or the note dialog's "Cancel": the question goes without
+   *  an answer and nothing is recorded — a Yes cancelled at the note is a Yes taken
+   *  back. It does not come back on its own — being asked again on every reopen
+   *  would make the popup unusable — but clicking the row re-queues it. */
   const onDismissApply = useCallback(async () => {
     setPendingApplyId(null);
     await persistUi({ pendingApplyId: null });

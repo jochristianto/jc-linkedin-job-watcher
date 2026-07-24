@@ -14,7 +14,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { ApplyPrompt } from "./apply-prompt.tsx";
+import { ApplyNote, ApplyPrompt } from "./apply-prompt.tsx";
 import { EmptyState } from "./empty-state.tsx";
 import { HowItWorks } from "./how-it-works.tsx";
 import { JobList } from "./job-list.tsx";
@@ -296,17 +296,26 @@ test("JobList arms nothing when no row is mid-question", () => {
 
 // ── ApplyPrompt: "Did you apply for this job?" ───────────────────────────────
 //
-// A static render only ever shows the unanswered state — there is no click here
-// to pick Yes with. That is deliberate: the three states of the notes box and the
-// commit button are `applyPromptState`'s, proved with plain values in
-// view-model.test.ts, and what is asserted below is that this component renders
-// what that function returns.
+// Two dialogs, one per step, so each can be rendered on its own here — a static
+// render has no click to pick Yes with. Which answer opens which is
+// `applyPromptStep`'s, proved with plain values in view-model.test.ts; what
+// `ApplyPrompt` renders unanswered is the first of the two, asserted below.
 
 const prompt = (over: Partial<React.ComponentProps<typeof ApplyPrompt>> = {}): string =>
   html(
     <ApplyPrompt
       job={{ id: "3901", title: "Senior Software Engineer", company: "Acme Corp" }}
       onAnswer={noop}
+      onDismiss={noop}
+      {...over}
+    />,
+  );
+
+const note = (over: Partial<React.ComponentProps<typeof ApplyNote>> = {}): string =>
+  html(
+    <ApplyNote
+      job={{ id: "3901", title: "Senior Software Engineer", company: "Acme Corp" }}
+      onSave={noop}
       onDismiss={noop}
       {...over}
     />,
@@ -329,30 +338,28 @@ test("ApplyPrompt is a labelled modal dialog", () => {
   assert.match(h, /id="apply-prompt-title"/);
 });
 
-test("ApplyPrompt offers exactly Yes and No", () => {
+test("ApplyPrompt answers with two buttons, not a toggle to be set", () => {
   const h = prompt();
   assert.match(buttonWith(h, 'data-answer="yes"'), />Yes</);
   assert.match(buttonWith(h, 'data-answer="no"'), />No</);
-  // Neither is picked for you: the answer starts unanswered.
-  assert.match(buttonWith(h, 'data-answer="yes"'), /data-state="off"/);
-  assert.match(buttonWith(h, 'data-answer="no"'), /data-state="off"/);
+  // Both live from the start, and neither is preselected: this is a question
+  // being answered once, not a setting sitting in a position.
+  assert.doesNotMatch(buttonWith(h, 'data-answer="yes"'), DISABLED_ATTR);
+  assert.doesNotMatch(buttonWith(h, 'data-answer="no"'), DISABLED_ATTR);
+  assert.doesNotMatch(h, /data-state="on"/);
 });
 
-test("ApplyPrompt's notes box starts disabled, and says what opens it", () => {
+test("ApplyPrompt asks the question first and nothing else", () => {
   const h = prompt();
-  assert.match(h, /<textarea[^>]*\sdisabled=""/);
-  assert.match(h, /placeholder="Answer Yes to add a note"/);
-  // Labelled, not placeholder-only — the placeholder disappears the moment you type.
-  assert.match(h, /for="apply-notes"/);
-  assert.match(h, /id="apply-notes"/);
-});
-
-test("ApplyPrompt cannot be committed before the question is answered", () => {
-  const h = prompt();
-  assert.match(buttonWith(h, 'data-action="apply-submit"'), DISABLED_ATTR);
-  // The way out that records nothing is always live.
-  assert.doesNotMatch(buttonWith(h, 'data-action="apply-dismiss"'), DISABLED_ATTR);
-  assert.match(h, />Not now</);
+  // The notes box and the button that commits it are the second dialog's; here
+  // the card is the question and its two answers.
+  assert.doesNotMatch(h, /<textarea/);
+  assert.doesNotMatch(h, /id="apply-notes"/);
+  assert.doesNotMatch(h, /data-action="apply-submit"/);
+  // And no third way out beside them: No already records nothing, so a "not now"
+  // next to it would be the same button twice.
+  assert.doesNotMatch(h, /data-action="apply-dismiss"/);
+  assert.doesNotMatch(h, />Not now</);
 });
 
 test("ApplyPrompt falls back to a placeholder when the title never parsed", () => {
@@ -364,6 +371,34 @@ test("ApplyPrompt escapes the job it names", () => {
   assert.match(h, /R&amp;D &lt;lead&gt;/);
   assert.match(h, /data-job-id="a&amp;b"/);
   assert.doesNotMatch(h, /<lead>/);
+});
+
+test("ApplyNote is the second dialog, and still says which job", () => {
+  const h = note();
+  assert.match(h, /role="dialog"/);
+  assert.match(h, /Add a note\?/);
+  assert.match(h, /Senior Software Engineer · Acme Corp/);
+  // The question is behind you by now: no Yes/No to answer a second time.
+  assert.doesNotMatch(h, /data-answer=/);
+});
+
+test("ApplyNote opens the box the note is typed in, empty and enabled", () => {
+  const h = note();
+  assert.match(h, /<textarea/);
+  assert.doesNotMatch(h, /<textarea[^>]*\sdisabled=""/);
+  // Labelled, not placeholder-only — the placeholder disappears the moment you type.
+  assert.match(h, /for="apply-notes"/);
+  assert.match(h, /id="apply-notes"/);
+  assert.match(h, /Notes \(optional\)/);
+});
+
+test("ApplyNote commits with Submit, and takes the Yes back with Cancel", () => {
+  const h = note();
+  assert.match(buttonWith(h, 'data-action="apply-submit"'), />Submit</);
+  // Nothing to fill in first — the note is optional, so Submit is live on arrival.
+  assert.doesNotMatch(buttonWith(h, 'data-action="apply-submit"'), DISABLED_ATTR);
+  // The way out of a Yes that was a misclick: it dismisses, so nothing is recorded.
+  assert.match(buttonWith(h, 'data-action="apply-dismiss"'), />Cancel</);
 });
 
 // ── Toolbar: the watch chips and the New⇄All toggle ──────────────────────────
