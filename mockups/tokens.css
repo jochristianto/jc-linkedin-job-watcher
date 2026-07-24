@@ -424,6 +424,55 @@ body {
   font-size: 13px;
 }
 
+/* ---- Status bar: what the scan loop is doing, and when it runs next ---- */
+/* A footer, not a banner: the list above is flex:1 and scrolls inside itself, so
+ * this strip stays put at the bottom of both the popup and the tab. It is the
+ * quietest thing on screen on purpose — ambient status, glanced at, never
+ * competing with the health banners or a job row. */
+.statusbar {
+  flex: 0 0 auto;
+  padding: var(--s-2) var(--s-4);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+/* No enabled search means nothing is scheduled and `renderScanStatus` emits
+ * nothing, so the bar itself disappears rather than sitting there empty. This
+ * relies on the footer's contents being written with no surrounding whitespace —
+ * a stray text node would defeat :empty. */
+.statusbar:empty {
+  display: none;
+}
+.scan-status {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: 12px;
+  color: var(--faint);
+}
+/* A scan in progress is the one state worth noticing from across the room. */
+.scan-status[data-kind="scanning"] {
+  color: var(--accent);
+  font-weight: 600;
+}
+.scan-status[data-kind="halted"] {
+  color: var(--danger);
+  font-weight: 600;
+}
+/* The spin is what makes "Scanning…" read as *now* rather than as a label. */
+@keyframes ljw-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.scan-status[data-kind="scanning"] .lucide {
+  animation: ljw-spin 1.4s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .scan-status[data-kind="scanning"] .lucide {
+    animation: none;
+  }
+}
+
 /* ---- Options page ---- */
 .opt-wrap {
   max-width: 640px;

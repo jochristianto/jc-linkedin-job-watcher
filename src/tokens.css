@@ -457,7 +457,7 @@ body {
   font-size: 12px;
   color: var(--faint);
 }
-/* A fetch in progress is the one state worth noticing from across the room. */
+/* A scan in progress is the one state worth noticing from across the room. */
 .scan-status[data-kind="scanning"] {
   color: var(--accent);
   font-weight: 600;
@@ -466,7 +466,7 @@ body {
   color: var(--danger);
   font-weight: 600;
 }
-/* The spin is what makes "Fetching…" read as *now* rather than as a label. */
+/* The spin is what makes "Scanning…" read as *now* rather than as a label. */
 @keyframes ljw-spin {
   to {
     transform: rotate(360deg);

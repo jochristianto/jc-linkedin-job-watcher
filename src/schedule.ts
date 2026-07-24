@@ -15,6 +15,19 @@
 export type Rand = () => number;
 
 /**
+ * The name of the single re-armed one-shot alarm (PRD §15, decision 3).
+ *
+ * It lives here rather than in background.ts because the *list view* reads that
+ * alarm too: `chrome.alarms.get(SCAN_ALARM_NAME).scheduledTime` is the one true
+ * answer to "when is the next scan?", and the alternative — mirroring the fire
+ * time into a storage key — would be a second copy that can disagree with the
+ * alarm actually armed. Importing the name from background.ts is not an option:
+ * that module registers service-worker listeners at import time, so pulling it
+ * into the popup bundle would run the scan loop's wiring inside the popup.
+ */
+export const SCAN_ALARM_NAME = "ljw-scan";
+
+/**
  * Quiet hours (PRD §15, decision 4). A clock-based window in the user's *local*
  * time, expressed as minutes since local midnight so the pure logic never has to
  * parse "23:00". `enabled` off means scan around the clock. The window may wrap

@@ -9,6 +9,8 @@ import {
   renderChips,
   renderModeToggle,
   renderScanButton,
+  renderScanStatus,
+  formatCountdown,
   renderToolbar,
   type JobView,
   type ChipWatch,
@@ -317,4 +319,62 @@ test("renderScanButton labels itself as the manual resume when scanning is halte
   assert.match(html, />Resume</);
   // A halted extension can only recover through this button, so it must stay live.
   assert.doesNotMatch(html, /disabled/);
+});
+
+// ── formatCountdown / renderScanStatus: the footer status bar ────────────────
+
+test("formatCountdown shows the coarsest two units", () => {
+  assert.equal(formatCountdown(45_000), "45s");
+  assert.equal(formatCountdown(252_000), "4m 12s");
+  assert.equal(formatCountdown(300_000), "5m 0s");
+  // Past an hour the seconds are noise, so they go.
+  assert.equal(formatCountdown(26_100_000), "7h 15m");
+});
+
+test("formatCountdown never reads 0s while there is still time on the clock", () => {
+  assert.equal(formatCountdown(1), "1s");
+  assert.equal(formatCountdown(999), "1s");
+  assert.equal(formatCountdown(0), "0s");
+  // A time already past is the `due` state, never a negative countdown.
+  assert.equal(formatCountdown(-5_000), "0s");
+});
+
+test("renderScanStatus says it is scanning while a cycle is in flight", () => {
+  const html = renderScanStatus({ kind: "scanning" });
+  assert.match(html, /data-kind="scanning"/);
+  // The same word the header button and the empty state use — one name for one
+  // thing, or the two controls read as two different mechanisms.
+  assert.match(html, /Scanning for new jobs…/);
+  // This text lands once and stays, so it is safe to announce.
+  assert.match(html, /role="status"/);
+});
+
+test("renderScanStatus counts down to the next scan", () => {
+  const html = renderScanStatus({ kind: "waiting", remainingMs: 252_000, quiet: false });
+  assert.match(html, /data-kind="waiting"/);
+  assert.match(html, /Next scan in 4m 12s/);
+  // The countdown must NOT be a live region: it would be announced every second.
+  assert.doesNotMatch(html, /role="status"/);
+});
+
+test("renderScanStatus explains an hours-long countdown as quiet hours", () => {
+  const html = renderScanStatus({ kind: "waiting", remainingMs: 26_100_000, quiet: true });
+  assert.match(html, /Quiet hours · next scan in 7h 15m/);
+  assert.match(html, /lucide-moon/);
+});
+
+test("renderScanStatus covers the gap between an alarm firing and its cycle", () => {
+  assert.match(renderScanStatus({ kind: "due" }), /any moment/);
+});
+
+test("renderScanStatus points a halted loop at the button that revives it", () => {
+  const html = renderScanStatus({ kind: "halted" });
+  assert.match(html, /data-kind="halted"/);
+  assert.match(html, /Resume/);
+});
+
+test("renderScanStatus emits nothing at all when there is nothing to scan", () => {
+  // Not "no scans scheduled" — an empty string, so the footer collapses entirely
+  // (`.statusbar:empty` in tokens.css).
+  assert.equal(renderScanStatus({ kind: "off" }), "");
 });

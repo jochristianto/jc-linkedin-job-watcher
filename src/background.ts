@@ -15,7 +15,7 @@
 import { get, set } from "./storage.ts";
 import { dedupe } from "./dedupe.ts";
 import type { FilterRules } from "./filter.ts";
-import { nextScanDelayMs, randomPauseMs } from "./schedule.ts";
+import { nextScanDelayMs, randomPauseMs, SCAN_ALARM_NAME } from "./schedule.ts";
 import {
   KEEPALIVE_PING_MS,
   beginScan,
@@ -55,9 +55,10 @@ import { sendPush } from "./push.ts";
 import { buildScanNotification, jobsTabToFocus, SCAN_NOTIFICATION_ID } from "./notify.ts";
 import type { HealthState, Job, Settings } from "./types.ts";
 
-/** The single re-armed one-shot alarm (PRD §15 decision 3). One name, re-created
- *  with a fresh `{ when }` at the end of every cycle. */
-const ALARM_NAME = "ljw-scan";
+/** The single re-armed one-shot alarm (PRD §15 decision 3): one name, re-created
+ *  with a fresh `{ when }` at the end of every cycle. The name is `schedule.ts`'s
+ *  because the list view reads the same alarm to count down to the next scan. */
+const ALARM_NAME = SCAN_ALARM_NAME;
 
 /** The fixed id for the hard-failure health notification (PRD §16.8). Fixed so a
  *  new transition replaces the prior alert rather than stacking one per cycle. */

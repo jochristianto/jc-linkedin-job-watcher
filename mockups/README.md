@@ -12,7 +12,7 @@ files directly in a browser (`file://…`):
 | File | What it shows |
 | --- | --- |
 | [`popup.html`](./popup.html) | The list view as the **popup** — ~380px, New mode, unread rows, a field-missing row |
-| [`jobs.html`](./jobs.html) | The **same** component as the full **tab** — wider, All mode, read rows on screen, scanning banner |
+| [`jobs.html`](./jobs.html) | The **same** component as the full **tab** — wider, All mode, read rows on screen, mid-scan status bar |
 | [`states.html`](./states.html) | All five **empty / degraded** states side by side |
 | [`options.html`](./options.html) | The **options** page — one long scroll, sectioned |
 | [`tokens.css`](./tokens.css) | Design tokens + component styles, light **and** dark |

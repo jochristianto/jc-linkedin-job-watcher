@@ -9,9 +9,11 @@ import {
   toggleBlockedCompany,
   renderPage,
   scanButtonState,
+  scanStatus,
 } from "./view.ts";
 import { PUSH_FAILING_MESSAGE } from "./health.ts";
-import type { Job, Watch, BlockedCompany } from "./types.ts";
+import { minutesOfDay } from "./schedule.ts";
+import type { Job, Watch, BlockedCompany, QuietHours } from "./types.ts";
 import type { JobsMap } from "./storage.ts";
 
 function job(overrides: Partial<Job> = {}): Job {
@@ -468,6 +470,112 @@ test("scanButtonState stays idle for paused — that one resumes on its own (§1
     scanButtonState({ jobs: [], watches, mode: "new", title: "New", scanMode: "paused" }),
     "idle",
   );
+});
+
+// ── scanStatus: what the footer says the loop is doing ───────────────────────
+
+/** A fixed instant so the countdowns are exact. Quiet-hours windows below are
+ *  built *relative to its local minutes-of-day*, because the window is a local
+ *  clock rule (§15) and the suite must pass in any timezone. */
+const NOW = 1_700_000_000_000;
+const NOW_MINUTE = minutesOfDay(new Date(NOW));
+
+/** A window one hour wide, starting `offsetMinutes` from now — so offset 0 is a
+ *  window we are inside, and offset 60 one we are not. Wraps midnight safely. */
+function window(offsetMinutes: number): QuietHours {
+  const startMinute = (NOW_MINUTE + offsetMinutes + 1440) % 1440;
+  return { enabled: true, startMinute, endMinute: (startMinute + 60) % 1440 };
+}
+
+const base = { jobs: [], watches, mode: "new" as const, title: "New" };
+
+test("scanStatus counts down to the armed alarm", () => {
+  assert.deepEqual(scanStatus({ ...base, nextScanAt: NOW + 252_000, now: NOW }), {
+    kind: "waiting",
+    remainingMs: 252_000,
+    quiet: false,
+  });
+});
+
+test("scanStatus marks a countdown that is running through quiet hours", () => {
+  const status = scanStatus({
+    ...base,
+    quietHours: window(0),
+    nextScanAt: NOW + 3_600_000,
+    now: NOW,
+  });
+  assert.deepEqual(status, { kind: "waiting", remainingMs: 3_600_000, quiet: true });
+});
+
+test("scanStatus does not blame quiet hours outside the window", () => {
+  const status = scanStatus({
+    ...base,
+    quietHours: window(60),
+    nextScanAt: NOW + 300_000,
+    now: NOW,
+  });
+  assert.equal(status.kind === "waiting" && status.quiet, false);
+});
+
+test("scanStatus reports the scan in flight, whatever the schedule says", () => {
+  assert.deepEqual(
+    scanStatus({ ...base, scanning: true, nextScanAt: NOW + 300_000, now: NOW }),
+    { kind: "scanning" },
+  );
+});
+
+test("scanStatus has nothing to count down to while halted (§16.2)", () => {
+  // The alarm stays armed through a halt, but it will not scan when it fires —
+  // counting down to it would be a lie the user acts on.
+  assert.deepEqual(
+    scanStatus({ ...base, scanMode: "halted", nextScanAt: NOW + 300_000, now: NOW }),
+    { kind: "halted" },
+  );
+});
+
+test("scanStatus still counts down while paused — that one resumes itself (§16.1)", () => {
+  const status = scanStatus({
+    ...base,
+    scanMode: "paused",
+    nextScanAt: NOW + 300_000,
+    now: NOW,
+  });
+  assert.equal(status.kind, "waiting");
+});
+
+test("scanStatus goes silent when no search is enabled", () => {
+  const off: Watch[] = [{ id: "w-id", name: "Indonesia", url: "https://x", enabled: false }];
+  assert.deepEqual(
+    scanStatus({ ...base, watches: off, nextScanAt: NOW + 300_000, now: NOW }),
+    { kind: "off" },
+  );
+  assert.deepEqual(scanStatus({ ...base, watches: [], now: NOW }), { kind: "off" });
+});
+
+test("scanStatus reports an armed time already past as due, never as a negative", () => {
+  assert.deepEqual(scanStatus({ ...base, nextScanAt: NOW - 5_000, now: NOW }), { kind: "due" });
+});
+
+test("scanStatus says so when no alarm is armed at all", () => {
+  assert.deepEqual(scanStatus({ ...base, nextScanAt: null, now: NOW }), { kind: "unscheduled" });
+});
+
+test("renderPage puts the status in a footer slot the countdown tick can repaint", () => {
+  const html = renderPage({ ...base, jobs: [job()], nextScanAt: NOW + 252_000, now: NOW });
+  assert.match(html, /<footer class="statusbar" id="statusbar"><div class="scan-status"/);
+  assert.match(html, /Next scan in 4m 12s/);
+});
+
+test("renderPage says it is scanning while a cycle holds the lock", () => {
+  const html = renderPage({ ...base, jobs: [job()], scanning: true, now: NOW });
+  assert.match(html, /Scanning for new jobs…/);
+});
+
+test("renderPage leaves the footer literally empty when there is nothing to scan", () => {
+  const html = renderPage({ ...base, watches: [], now: NOW });
+  // No whitespace inside the element, or `.statusbar:empty` will not match it
+  // and an empty bar sits at the bottom of the popup.
+  assert.match(html, /<footer class="statusbar" id="statusbar"><\/footer>/);
 });
 
 test("renderPage puts the scan control in the header, in the right state", () => {

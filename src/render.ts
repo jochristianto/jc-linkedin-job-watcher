@@ -221,7 +221,7 @@ export function renderScanButton(state: ScanButtonState): string {
 /**
  * What the footer status bar is saying about the scan loop:
  *
- * - `scanning`    — a cycle is fetching right now (`scanState.isScanning`).
+ * - `scanning`    — a cycle is scanning right now (`scanState.isScanning`).
  * - `waiting`     — the next scan is armed; `remainingMs` counts down to it, and
  *                   `quiet` means we are inside the quiet-hours window (PRD §15,
  *                   decision 4), which is why that number is hours and not minutes.
@@ -233,7 +233,7 @@ export function renderScanButton(state: ScanButtonState): string {
  *                   scheduled; the header's Resume button is the only way on.
  * - `unscheduled` — no alarm exists at all. Shouldn't happen (§17 decision 5 keeps
  *                   one armed), so it says so rather than showing a fake countdown.
- * - `off`         — no enabled search, so there is nothing to fetch and a countdown
+ * - `off`         — no enabled search, so there is nothing to scan and a countdown
  *                   would be a promise the loop can't keep. Renders nothing.
  */
 export type ScanStatus =
@@ -265,7 +265,7 @@ export function formatCountdown(ms: number): string {
 function statusFace(status: ScanStatus): { icon: IconName; text: string } {
   switch (status.kind) {
     case "scanning":
-      return { icon: "refresh-cw", text: "Fetching new jobs…" };
+      return { icon: "refresh-cw", text: "Scanning for new jobs…" };
     case "waiting":
       return status.quiet
         ? { icon: "moon", text: `Quiet hours · next scan in ${formatCountdown(status.remainingMs)}` }

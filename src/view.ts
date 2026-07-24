@@ -225,10 +225,10 @@ export function scanButtonState(ctx: ViewContext): ScanButtonState {
  * What the footer status bar says — the answer to "is this thing still running?".
  *
  * The order is the priority order. A live cycle wins over everything: while the
- * lock is held the extension *is* fetching, whatever the schedule or the health
+ * lock is held the extension *is* scanning, whatever the schedule or the health
  * record say. A halted loop comes next, because there is genuinely nothing armed
  * to count down to (§16.2 waits for a manual resume). With no enabled search
- * there is nothing to fetch either, so the bar goes away entirely rather than
+ * there is nothing to scan either, so the bar goes away entirely rather than
  * promise a scan that would find nothing. Only then is it a countdown — and a
  * `nextScanAt` already in the past means the alarm has fired but its cycle hasn't
  * reached storage yet, which is `due`, not a negative number.

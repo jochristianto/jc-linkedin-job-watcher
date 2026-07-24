@@ -40,6 +40,14 @@ test("both popup and tab carry the manual Scan now control in the header", () =>
   }
 });
 
+test("both views carry the scan status bar, showing its two everyday states", () => {
+  // The bar is the only thing on the page that says the loop is alive, so both
+  // sides of it are worth seeing: mid-scan in the tab, counting down in the
+  // popup. It is a footer under the scrolling list in both.
+  assert.match(read("./popup.html"), /<footer class="statusbar">.*Next scan in \d+m \d+s/s);
+  assert.match(read("./jobs.html"), /<footer class="statusbar">.*Scanning for new jobs…/s);
+});
+
 test("the tab shows read jobs staying on screen in All mode", () => {
   const html = read("./jobs.html");
   assert.match(html, /data-read="true"/);
