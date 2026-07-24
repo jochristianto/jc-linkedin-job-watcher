@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { EmptyState } from "./empty-state.tsx";
+import { HowItWorks } from "./how-it-works.tsx";
 import { JobList } from "./job-list.tsx";
 import { JobRow } from "./job-row.tsx";
 import { ListHeader } from "./list-header.tsx";
@@ -521,4 +522,34 @@ test("ScanStatusBar says Paused when the master switch is off (§ master)", () =
   assert.match(h, /data-kind="disabled"/);
   assert.match(h, /Paused/);
   assert.match(h, /lucide-power-off/);
+});
+
+// ── HowItWorks: the Options-page explainer ───────────────────────────────────
+
+test("HowItWorks starts collapsed, so Options still opens on the settings", () => {
+  const h = html(<HowItWorks />);
+  assert.match(h, /<details[^>]*id="how-it-works"/);
+  // No `open` attribute — the essay is one click away, not in the way.
+  assert.doesNotMatch(h, /<details[^>]*\sopen\b/);
+});
+
+test("HowItWorks links out to the repo, in a new tab", () => {
+  const h = html(<HowItWorks />);
+  assert.match(h, /href="https:\/\/github\.com\/jochristianto\/jc-linkedin-job-watcher"/);
+  // The Options page is a form with unsaved edits in it — navigating away from
+  // it to read the README would throw them away.
+  assert.match(h, /id="repo-link"[^>]*target="_blank"/);
+  assert.match(h, /rel="noreferrer"/);
+});
+
+test("HowItWorks explains the mechanism without jargon or PRD section numbers", () => {
+  const h = html(<HowItWorks />);
+  // The four claims someone needs before they can trust a background scraper:
+  // what it opens, where the data goes, what reaches them, and the ToS risk.
+  assert.match(h, /hidden tab/i);
+  assert.match(h, /Nothing is sent to a server/i);
+  assert.match(h, /one desktop notification for the whole round/i);
+  assert.match(h, /against\s+their\s+terms/i);
+  // No "PRD §7", no "dedupe pass", no "MV3 service worker".
+  assert.doesNotMatch(h, /PRD|§|dedupe|MV3|service worker|chrome\.storage/i);
 });

@@ -1,7 +1,7 @@
 // Options page — PRD §11 step 7. The §14 side-effect wrapper for the settings
 // form: it reads/writes the `settings` storage key, renders the five section
-// cards (Searches, Filters, Scanning, Telegram push, Retention), and wires every
-// control.
+// cards (Searches, Filters, Scanning, Telegram push, Retention) under the
+// collapsed how-it-works explainer, and wires every control.
 //
 // Every DECISION lives tested in options-form.ts — validation, the quiet-hours
 // time mapping, and the §6 normalize-on-write rule. This file only moves values
@@ -11,6 +11,7 @@
 
 import { useEffect, useState } from "react";
 
+import { HowItWorks } from "@/components/how-it-works.tsx";
 import { TagInput } from "@/components/tag-input.tsx";
 import { WatchList } from "@/components/watch-list.tsx";
 import { Button } from "@/components/ui/button";
@@ -180,6 +181,8 @@ export function OptionsPage() {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-8">
       <h1 className="text-xl font-semibold">LinkedIn Job Watcher — Settings</h1>
+
+      <HowItWorks />
 
       <Card>
         <CardHeader>

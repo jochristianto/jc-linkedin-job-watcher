@@ -100,6 +100,9 @@ A row therefore has three looks: plain (untouched), highlighted with a blue bar 
 
 ## Options reference
 
+### How this works
+A collapsed explainer at the top of the page: what a scan round actually does, in plain English, plus the things worth knowing before you trust a background scraper (nothing runs while Chrome is closed, it slows itself down when nothing turns up, the ToS caveat). Click the row to open it; it links back here for the rest.
+
 ### Searches
 Add, edit, remove, and individually enable/disable saved searches. Enabled searches all run on the same cycle, strictly one after another — never in parallel.
 

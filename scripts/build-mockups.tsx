@@ -20,6 +20,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { EmptyState } from "../src/components/empty-state.tsx";
 import { HealthBanner } from "../src/components/health-banner.tsx";
+import { HowItWorks } from "../src/components/how-it-works.tsx";
 import { JobList } from "../src/components/job-list.tsx";
 import { ListHeader } from "../src/components/list-header.tsx";
 import { ScanStatusBar } from "../src/components/scan-status.tsx";
@@ -236,14 +237,18 @@ const files: Record<string, string> = {
   "options.html": page(
     "Options — LinkedIn Job Watcher",
     css,
-    // The Options page reads chrome.storage on mount, so it cannot be rendered
-    // headlessly the way the list view can. It gets the banner pair instead —
-    // the two things on that page a screenshot would otherwise never show.
+    // The Options *form* reads chrome.storage on mount, so it cannot be rendered
+    // headlessly the way the list view can. What can: the how-it-works explainer
+    // that sits above it, which reads nothing — it ships here collapsed exactly
+    // as production shows it, and `<details>` is native, so the file opens it on
+    // a click with no script. Below it, the banner pair — the two things on that
+    // page a screenshot would otherwise never show.
     renderToStaticMarkup(
       <div className="mx-auto flex max-w-3xl flex-col gap-4 p-8">
         <h1 className="text-xl font-semibold">LinkedIn Job Watcher — Settings</h1>
+        <HowItWorks />
         <p className="text-sm text-muted-foreground">
-          The settings page is a live form over <code>chrome.storage</code>, so it is not
+          The settings form itself is live over <code>chrome.storage</code>, so it is not
           rendered here — load the unpacked extension and open Options to see it. Its two
           transient banners are below, since neither shows on a healthy first open.
         </p>

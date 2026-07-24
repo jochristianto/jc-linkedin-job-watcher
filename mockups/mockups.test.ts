@@ -163,6 +163,14 @@ test("the options mockup carries the two banners a healthy page never shows", ()
   assert.match(html, /data-severity="error"/);
 });
 
+test("the options mockup carries the how-it-works explainer and its repo link", () => {
+  // The one part of that page with no storage behind it, so it is the one part
+  // the mockup can show for real rather than describe.
+  const html = read("./options.html");
+  assert.match(html, /id="how-it-works"/);
+  assert.match(html, /href="https:\/\/github\.com\/jochristianto\/jc-linkedin-job-watcher"/);
+});
+
 test("every mockup draws its icons as Lucide SVG, never a font glyph", () => {
   const glyphs = /[\u{2190}-\u{21FF}\u{2200}-\u{22FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{1F300}-\u{1FAFF}]/u;
   for (const name of [...LIST_VIEWS, "./states.html", "./options.html"]) {
