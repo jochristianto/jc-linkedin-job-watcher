@@ -1,9 +1,11 @@
-import { CheckCheck, ExternalLink, Settings } from "lucide-react";
+import { CheckCheck, ExternalLink, Power, Settings } from "lucide-react";
 
 import { ScanButton } from "@/components/scan-button.tsx";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import type { ScanButtonState, ViewVariant } from "@/view-model.ts";
 
 export type ListHeaderProps = {
@@ -12,6 +14,10 @@ export type ListHeaderProps = {
   badge: number;
   scanButton: ScanButtonState;
   variant: ViewVariant;
+  /** The master on/off switch (§ master). Off pauses the whole loop and hides
+   *  "Scan now" — there is nothing to scan until it's back on. */
+  enabled: boolean;
+  onToggleEnabled: (next: boolean) => void;
   onScan: () => void;
   onMarkAllRead: () => void;
   onOpenTab: () => void;
@@ -30,6 +36,8 @@ export function ListHeader({
   badge,
   scanButton,
   variant,
+  enabled,
+  onToggleEnabled,
   onScan,
   onMarkAllRead,
   onOpenTab,
@@ -50,7 +58,29 @@ export function ListHeader({
       )}
 
       <span className="ml-auto flex shrink-0 items-center gap-0.5">
-        <ScanButton state={scanButton} onScan={onScan} />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="flex items-center gap-1.5 pr-1">
+              <Power
+                className={cn("size-3.5", enabled ? "text-primary" : "text-muted-foreground")}
+                aria-hidden="true"
+              />
+              <Switch
+                size="sm"
+                id="master-switch"
+                checked={enabled}
+                onCheckedChange={onToggleEnabled}
+                aria-label={enabled ? "Watching for jobs — turn off" : "Paused — turn on"}
+              />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>
+            {enabled ? "Watching — click to pause" : "Paused — click to resume"}
+          </TooltipContent>
+        </Tooltip>
+
+        {/* Nothing to scan while paused, so the manual trigger goes away with it. */}
+        {enabled && <ScanButton state={scanButton} onScan={onScan} />}
 
         <Tooltip>
           <TooltipTrigger asChild>

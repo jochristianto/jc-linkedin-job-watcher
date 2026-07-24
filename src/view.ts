@@ -205,6 +205,11 @@ export type ViewContext = {
   /** The clock, injected so the countdown is a pure function of its inputs
    *  (PRD §14). Defaults to `Date.now()` for callers that render no countdown. */
   now?: number;
+  /** The master on/off switch (`settings.enabled`, § master). `false` = the user
+   *  paused the whole loop from the header: the footer says "Paused" and the
+   *  header hides "Scan now". Absent (settings from before the switch existed)
+   *  reads as on, so callers pass `settings.enabled !== false`. */
+  enabled?: boolean;
 };
 
 /**
@@ -261,6 +266,10 @@ export function scanButtonState(ctx: ViewContext): ScanButtonState {
  */
 export function scanStatus(ctx: ViewContext): ScanStatus {
   if (isScanning(ctx)) return { kind: "scanning" };
+  // The master switch (§ master) outranks the schedule and the health record: a
+  // loop the user turned off is paused whatever a stale halt or armed alarm says.
+  // A cycle already in flight still wins above — it finishes, then this takes over.
+  if (ctx.enabled === false) return { kind: "disabled" };
   if (ctx.scanMode === "halted") return { kind: "halted" };
   if (!ctx.watches.some((w) => w.enabled)) return { kind: "off" };
   if (ctx.nextScanAt == null) return { kind: "unscheduled" };
@@ -293,6 +302,10 @@ export type ViewProps = {
   emptyKind: EmptyKind | null;
   scanButton: ScanButtonState;
   status: ScanStatus;
+  /** The master on/off switch (§ master). `false` = the user paused everything:
+   *  the header hides "Scan now" and the whole body collapses to the paused
+   *  message. `ctx.enabled` absent (pre-switch settings) reads as on. */
+  enabled: boolean;
   /** The health banner and the §16.7 push warning, in the order they stack. Both
    *  can be present at once — a broken read and a broken push are independent. */
   banners: { message: string; severity: NonNullable<HealthState["severity"]> }[];
@@ -340,6 +353,7 @@ export function selectView(ctx: ViewContext): ViewProps {
     emptyKind: visible.length ? null : pickEmptyKind(ctx, jobs.length),
     scanButton: scanButtonState(ctx),
     status: scanStatus(ctx),
+    enabled: ctx.enabled !== false,
     banners,
     armedBlockId: ctx.armedBlockId ?? null,
   };

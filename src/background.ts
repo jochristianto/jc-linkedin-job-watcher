@@ -38,6 +38,7 @@ import {
   type ScanNowResponse,
   type ScanRequest,
   type ScanResponse,
+  type SetEnabledRequest,
 } from "./scan.ts";
 import {
   OK_HEALTH,
@@ -390,6 +391,10 @@ async function runLockedCycle(settings: Settings, pages: number, rearm = true): 
 async function runScanNow(): Promise<ScanNowResponse> {
   const settings = await get("settings");
 
+  // The master switch is off (§ master): the header hides "Scan now" while off,
+  // so this only guards a race — a click that raced the toggle. Nothing starts.
+  if (settings.enabled === false) return { started: false, reason: "disabled" };
+
   // Same first step as an alarm tick: a lock a torn-down cycle left stuck must
   // not make the button silently do nothing (§16.6/§17.2).
   const recovered = recoverStaleLock(await get("scanState"), Date.now(), settings.staleLockMs);
@@ -415,6 +420,15 @@ async function runScanNow(): Promise<ScanNowResponse> {
 /** The alarm handler — the whole cadence in one place (PRD §9). */
 async function onAlarm(): Promise<void> {
   const settings = await get("settings");
+
+  // The master switch is off (§ master): stop the loop and clear the alarm so a
+  // sleeping worker isn't woken every interval for nothing. Self-healing — if a
+  // toggle-off missed the worker, the next tick tidies up the stray alarm here.
+  // Turning it back on re-arms via the LJW_SET_ENABLED handler below.
+  if (settings.enabled === false) {
+    await chrome.alarms.clear(ALARM_NAME);
+    return;
+  }
 
   // Every tick, before anything else: clear a lock the previous (torn-down) cycle
   // left stuck and sweep the tabs it orphaned (PRD §16.6/§17.2).
@@ -463,6 +477,28 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return true;
 });
 
+/** The header's master on/off toggle (§ master). The UI has already written
+ *  `settings.enabled`; this only reconciles the *alarm*, which only the worker
+ *  can touch: arm the cadence when turned on, clear it when turned off. Reads the
+ *  desired state from the message rather than storage so a storage write still in
+ *  flight can't make it arm the wrong way. Keeping the channel open (`return true`)
+ *  lets the popup await the ack before it trusts the switch settled. */
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  const req = message as SetEnabledRequest | undefined;
+  if (req?.type !== "LJW_SET_ENABLED") return;
+  void (async () => {
+    try {
+      if (req.enabled) await ensureAlarmExists(await get("settings"));
+      else await chrome.alarms.clear(ALARM_NAME);
+      sendResponse({ ok: true });
+    } catch (err) {
+      console.error("[ljw] Toggle failed:", err);
+      sendResponse({ ok: false });
+    }
+  })();
+  return true;
+});
+
 /** Notification click (PRD §3/§9): open our own list, never LinkedIn, and clear
  *  the notification. Marks nothing as opened. `openPopup()` can't be triggered
  *  from a click, so this opens the full jobs.html tab (the list component is
@@ -479,7 +515,10 @@ chrome.notifications.onClicked.addListener((id) => {
  *  already-armed alarm from a prior version is left as-is). */
 chrome.runtime.onInstalled.addListener(() => {
   void (async () => {
-    await ensureAlarmExists(await get("settings"));
+    const settings = await get("settings");
+    // Never against the master switch (§ master): an upgrade of an install the
+    // user had turned off must stay off rather than silently arm a fresh alarm.
+    if (settings.enabled !== false) await ensureAlarmExists(settings);
   })();
 });
 
@@ -492,6 +531,8 @@ chrome.runtime.onStartup.addListener(() => {
     const recovered = recoverStaleLock(await get("scanState"), Date.now(), settings.staleLockMs);
     await Promise.all(recovered.tabIdsToClose.map((id) => chrome.tabs.remove(id).catch(() => {})));
     await set("scanState", requestCatchUp(recovered.state));
-    await ensureAlarmExists(settings);
+    // Honour the master switch across a relaunch (§ master): a browser the user
+    // left with scanning off comes back up off, no alarm armed.
+    if (settings.enabled !== false) await ensureAlarmExists(settings);
   })();
 });

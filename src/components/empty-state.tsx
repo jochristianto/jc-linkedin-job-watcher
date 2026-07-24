@@ -1,5 +1,6 @@
 import {
   CircleCheck,
+  PowerOff,
   RefreshCw,
   Search,
   Sprout,
@@ -38,6 +39,11 @@ const EMPTY_STATES: Record<EmptyKind, { icon: LucideIcon; title: string; body: s
     icon: TriangleAlert,
     title: "Last scan failed",
     body: "LinkedIn's page may have changed — selectors returned nothing. See Options.",
+  },
+  paused: {
+    icon: PowerOff,
+    title: "Paused",
+    body: "Watching is off. Flip the switch above on to scan for new jobs again.",
   },
 };
 

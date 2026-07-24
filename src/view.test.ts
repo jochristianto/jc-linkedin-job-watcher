@@ -489,6 +489,41 @@ test("scanStatus goes silent when no search is enabled", () => {
   assert.deepEqual(scanStatus({ ...base, watches: [], now: NOW }), { kind: "off" });
 });
 
+test("scanStatus says Paused when the master switch is off (§ master)", () => {
+  // Off means off: even with a watch enabled and an alarm armed, the loop is
+  // paused on purpose, so the footer must not count down to a scan that won't run.
+  assert.deepEqual(
+    scanStatus({ ...base, enabled: false, nextScanAt: NOW + 300_000, now: NOW }),
+    { kind: "disabled" },
+  );
+});
+
+test("scanStatus: the master switch outranks a stale halt", () => {
+  // A loop turned off should read as paused, not as a challenge waiting on Resume.
+  assert.deepEqual(
+    scanStatus({ ...base, enabled: false, scanMode: "halted", now: NOW }),
+    { kind: "disabled" },
+  );
+});
+
+test("scanStatus: a cycle in flight still wins over the master switch", () => {
+  // Toggling off mid-scan lets that cycle finish; only the next status is paused.
+  assert.deepEqual(
+    scanStatus({ ...base, enabled: false, scanning: true, now: NOW }),
+    { kind: "scanning" },
+  );
+});
+
+test("scanStatus treats an absent master switch as on (upgrade back-compat)", () => {
+  // Settings written before the switch existed have no `enabled`; they keep
+  // counting down rather than reading as paused.
+  assert.deepEqual(scanStatus({ ...base, nextScanAt: NOW + 300_000, now: NOW }), {
+    kind: "waiting",
+    remainingMs: 300_000,
+    quiet: false,
+  });
+});
+
 test("scanStatus reports an armed time already past as due, never as a negative", () => {
   assert.deepEqual(scanStatus({ ...base, nextScanAt: NOW - 5_000, now: NOW }), { kind: "due" });
 });

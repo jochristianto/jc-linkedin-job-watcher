@@ -63,6 +63,12 @@ export type RetentionConfig = {
 };
 
 export type Settings = {
+  /** The master on/off switch behind the header toggle. `false` stops the whole
+   *  loop — the routine alarm is cleared and "Scan now" is inert — until the user
+   *  turns it back on. Distinct from a *per-watch* `enabled` (that silences one
+   *  search); this pauses everything at once. Settings written before this field
+   *  existed have no `enabled`, which reads as on, so an upgrade never goes dark. */
+  enabled: boolean; // default true
   watches: Watch[];
   blockedCompanies: BlockedCompany[];
   blockedTitleKeywords: string[];
@@ -90,6 +96,7 @@ export type ScanState = {
 // ── Shipped defaults (PRD §15, §7, §16) ──────────────────────────────────────
 // The single source for every default so no later ticket has to invent one.
 export const DEFAULT_SETTINGS: Settings = {
+  enabled: true,
   watches: [],
   blockedCompanies: [],
   blockedTitleKeywords: [],
