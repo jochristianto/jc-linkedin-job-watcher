@@ -24,6 +24,7 @@ import { ScanButton } from "./scan-button.tsx";
 import { ScanStatusBar } from "./scan-status.tsx";
 import { Toolbar } from "./toolbar.tsx";
 import { TooltipProvider } from "./ui/tooltip";
+import { WatchList } from "./watch-list.tsx";
 import type { ChipWatch, EmptyKind, JobView } from "../view-model.ts";
 
 /** Render to static markup. Radix needs a TooltipProvider in scope for anything
@@ -727,11 +728,12 @@ test("ScanStatusBar says Paused when the master switch is off (§ master)", () =
 
 // ── HowItWorks: the Options-page explainer ───────────────────────────────────
 
-test("HowItWorks starts collapsed, so Options still opens on the settings", () => {
+test("HowItWorks starts expanded in its own column beside the settings", () => {
   const h = html(<HowItWorks />);
   assert.match(h, /<details[^>]*id="how-it-works"/);
-  // No `open` attribute — the essay is one click away, not in the way.
-  assert.doesNotMatch(h, /<details[^>]*\sopen\b/);
+  // It no longer sits above the form, so an open essay pushes nothing down —
+  // and a collapsed one would leave its column empty.
+  assert.match(h, /<details[^>]*\sopen\b/);
 });
 
 test("HowItWorks links out to the repo, in a new tab", () => {
@@ -753,4 +755,24 @@ test("HowItWorks explains the mechanism without jargon or PRD section numbers", 
   assert.match(h, /against\s+their\s+terms/i);
   // No "PRD §7", no "dedupe pass", no "MV3 service worker".
   assert.doesNotMatch(h, /PRD|§|dedupe|MV3|service worker|chrome\.storage/i);
+});
+
+// ── WatchList: the saved searches on the Options page ────────────────────────
+
+const watch = {
+  id: "w1",
+  name: "Indonesia",
+  url: "https://www.linkedin.com/jobs/?f=1&k=x",
+  enabled: true,
+};
+
+test("WatchList makes the saved search URL a link, opened in a new tab", () => {
+  const h = html(<WatchList watches={[watch]} onChange={() => {}} />);
+  assert.match(h, /<a[^>]*href="https:\/\/www\.linkedin\.com\/jobs\/\?f=1&amp;k=x"/);
+  // Same reasoning as the repo link: Options is a form with unsaved edits in it,
+  // so checking a search must never navigate this page away.
+  assert.match(h, /<a[^>]*target="_blank"[^>]*data-act="open-url"/);
+  assert.match(h, /<a[^>]*rel="noreferrer"/);
+  // Truncated to one line, so the full URL has to be reachable some other way.
+  assert.match(h, /<a[^>]*title="https:\/\/www\.linkedin\.com\/jobs\/\?f=1&amp;k=x"/);
 });
