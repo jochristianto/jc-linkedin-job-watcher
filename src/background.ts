@@ -137,7 +137,9 @@ async function fireHealthNotification(health: HealthState): Promise<void> {
  *  or a wrong chat id can never break the scan or the badge (§8). Only an actually
  *  attempted send moves the §16.7 failure counter, so a cycle that pushes nothing
  *  (disabled, unconfigured, or zero new jobs) leaves `pushHealth` untouched; three
- *  real failures in a row raise the soft warning, and one good send resets it. */
+ *  real failures in a row raise the soft warning, and one good send resets it. A
+ *  batch over ten jobs goes out as several messages (§8) but still counts once —
+ *  the counter tracks cycles that failed to reach the phone, not requests. */
 async function firePush(settings: Settings, newJobs: Job[]): Promise<void> {
   const cfg = settings.push;
   if (!cfg.enabled || !cfg.botToken || !cfg.chatId || newJobs.length === 0) return;

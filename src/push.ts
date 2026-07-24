@@ -25,13 +25,11 @@ export type PushJob = {
 
 /**
  * The fields of a Job the `[Applied]` message needs — the same structural-subset
- * trick as {@link PushJob}, so a full `Job` record satisfies it.
+ * trick as {@link PushJob}, so a full `Job` record satisfies it. The same four
+ * fields as {@link PushJob}: both messages carry the identical job block, so a
+ * posting reads the same whether it arrived as new or as one you applied to.
  */
-export type AppliedJob = {
-  title: string;
-  company: string;
-  url: string;
-};
+export type AppliedJob = PushJob;
 
 /**
  * The message the list view sends the background when you answer "Yes" to "Did
@@ -69,12 +67,25 @@ export type AppliedPushFailure = "push-off" | "unconfigured" | "refused" | "unkn
  *  four reasons it was. */
 export type AppliedPushResponse = { sent: boolean; reason?: AppliedPushFailure };
 
-/** Max jobs listed in one message; the rest are summarised as "+N more". */
-const MAX_LISTED = 10;
+/** Jobs listed per message. A batch longer than this is split across several
+ *  messages rather than truncated — 100 new jobs arrive as 10 messages of 10, so
+ *  nothing is summarised away as "+N more" and every posting keeps its link. Ten
+ *  also keeps each message far under Telegram's 4096-char cap (PRD §8). */
+export const JOBS_PER_MESSAGE = 10;
+
+/** Pause between the messages of one split batch. Telegram tolerates bursts but
+ *  throttles a bot posting to the same chat at roughly a message a second, and a
+ *  429 here would drop part of the batch silently — the PRD's own advice for
+ *  sending everything: "chunk with a delay between" (§8). */
+const MESSAGE_GAP_MS = 1000;
 
 /** Stand-in when a posting somehow carries no title, so the message's link is
  *  never invisible, untappable anchor text. The same words the row falls back to. */
 const UNTITLED = "Untitled role";
+
+/** The real pause between messages; injectable in {@link sendPush} purely so
+ *  tests don't spend a second per message. */
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
  * Escape the characters that would otherwise break Telegram's HTML parse mode.
@@ -90,46 +101,83 @@ export function escapeHtml(value: string): string {
 }
 
 /**
- * Build the HTML message body for a batch of new jobs. Lists up to
- * {@link MAX_LISTED} jobs, then summarises the remainder — this is what keeps
- * the message under Telegram's 4096-char cap (PRD §8).
+ * One job as it appears in either message — the shared block that makes the two
+ * formats read alike:
+ *
+ *     {prefix}{jobTitle}
+ *     Company: {companyName}
+ *     Location: {location}
+ *
+ * The title always carries the posting's link, so the message doubles as the way
+ * back to the job from a phone; that link is the whole reason a message is worth
+ * pushing rather than only writing down. `prefix` is the list number in the
+ * new-jobs message ("1. ") and empty in the `[Applied]` one, and stays *outside*
+ * the anchor so the tappable text is the title alone.
+ *
+ * Every line degrades on its own (PRD §12): a job whose company never parsed
+ * drops the `Company:` line rather than showing an empty label, and a job with no
+ * url keeps its title as plain text rather than an anchor with nothing behind it.
  */
-export function buildPushMessage(jobs: PushJob[]): string {
-  const lines = jobs
-    .slice(0, MAX_LISTED)
-    .map(
-      (j) =>
-        `<a href="${j.url}">${escapeHtml(j.title)}</a>\n` +
-        `${escapeHtml(j.company)} · ${escapeHtml(j.location)}`,
-    );
-  if (jobs.length > MAX_LISTED) {
-    lines.push(`<i>+${jobs.length - MAX_LISTED} more</i>`);
-  }
+function jobBlock(job: PushJob, prefix = ""): string {
+  const title = escapeHtml(job.title.trim() || UNTITLED);
+  const link = job.url ? `<a href="${job.url}">${title}</a>` : title;
+  const lines = [`${prefix}${link}`];
+  const company = job.company.trim();
+  if (company) lines.push(`Company: ${escapeHtml(company)}`);
+  const location = job.location.trim();
+  if (location) lines.push(`Location: ${escapeHtml(location)}`);
+  return lines.join("\n");
+}
 
-  const header = `<b>${jobs.length} new job${jobs.length > 1 ? "s" : ""}</b>`;
-  return `${header}\n\n${lines.join("\n\n")}`;
+/**
+ * Build the messages for a batch of new jobs:
+ *
+ *     [New Job Posts]
+ *
+ *     1. {jobTitle}
+ *     Company: {companyName}
+ *     Location: {location}
+ *
+ *     2. {jobTitle}
+ *     …
+ *
+ * Returns one string per message: the batch is split {@link JOBS_PER_MESSAGE} at
+ * a time, so a 100-job catch-up scan arrives as ten messages instead of one list
+ * cut off at ten with the rest lost. Numbering runs across the whole batch rather
+ * than restarting per message, so ten messages read as one list continued (…10,
+ * then 11…) instead of ten lists that all begin at 1. An empty batch yields no
+ * messages at all.
+ */
+export function buildPushMessages(jobs: PushJob[]): string[] {
+  const messages: string[] = [];
+  for (let start = 0; start < jobs.length; start += JOBS_PER_MESSAGE) {
+    const blocks = jobs
+      .slice(start, start + JOBS_PER_MESSAGE)
+      .map((job, i) => jobBlock(job, `${start + i + 1}. `));
+    messages.push(`<b>[New Job Posts]</b>\n\n${blocks.join("\n\n")}`);
+  }
+  return messages;
 }
 
 /**
  * Build the message for a job you have just told the extension you applied to:
  *
- *     [Applied] {jobTitle} at {companyName}
+ *     [Applied]
  *
- *     {notes}
+ *     {jobTitle}
+ *     Company: {companyName}
+ *     Location: {location}
+ *     Notes: {notes}
  *
- * The title carries the posting's link, so the message doubles as the way back to
- * the job from a phone — that link is the whole reason it is worth pushing rather
- * than only writing down. Both halves degrade independently (PRD §12): a job whose
- * company never parsed drops the " at …" instead of trailing off mid-sentence, and
- * an empty note drops its blank line instead of padding the message with one.
+ * The same {@link jobBlock} as a new job, unnumbered — it is one posting, not a
+ * list — plus whatever was typed alongside the answer. An empty note drops its
+ * line instead of leaving a bare `Notes:` label.
  */
 export function buildAppliedMessage(job: AppliedJob, notes: string): string {
-  const title = escapeHtml(job.title.trim() || UNTITLED);
-  const link = job.url ? `<a href="${job.url}">${title}</a>` : title;
-  const company = job.company.trim();
-  const at = company ? ` at ${escapeHtml(company)}` : "";
   const note = notes.trim();
-  return `<b>[Applied]</b> ${link}${at}` + (note ? `\n\n${escapeHtml(note)}` : "");
+  return (
+    `<b>[Applied]</b>\n\n${jobBlock(job)}` + (note ? `\nNotes: ${escapeHtml(note)}` : "")
+  );
 }
 
 /** Is push configured enough to attempt a send at all (PRD §8)? Shared by both
@@ -215,15 +263,31 @@ async function postMessage(
   }
 }
 
-/** Send the new-jobs push (PRD §8). An empty batch sends nothing — a cycle that
- *  found nothing pushes nothing, the same rule the desktop notification follows. */
+/**
+ * Send the new-jobs push (PRD §8). An empty batch sends nothing — a cycle that
+ * found nothing pushes nothing, the same rule the desktop notification follows.
+ *
+ * A batch over {@link JOBS_PER_MESSAGE} goes out as several messages, one after
+ * another with {@link MESSAGE_GAP_MS} between them so Telegram doesn't throttle
+ * the tail of a big catch-up batch away. A refused message does not abandon the
+ * ones after it — a transient 4xx on part 3 must not cost parts 4-10 — but it
+ * does make the whole call return `false`, so the §16.7 failure counter still
+ * sees a batch that didn't fully land. `sleepImpl` is injectable for the same
+ * reason `fetchImpl` is: so the tests don't wait out the real gap.
+ */
 export async function sendPush(
   jobs: PushJob[],
   cfg: PushConfig,
   fetchImpl: typeof fetch = fetch,
+  sleepImpl: (ms: number) => Promise<void> = sleep,
 ): Promise<boolean> {
   if (!canPush(cfg) || jobs.length === 0) return false;
-  return postMessage(buildPushMessage(jobs), cfg, fetchImpl);
+  let allSent = true;
+  for (const [i, text] of buildPushMessages(jobs).entries()) {
+    if (i > 0) await sleepImpl(MESSAGE_GAP_MS);
+    if (!(await postMessage(text, cfg, fetchImpl))) allSent = false;
+  }
+  return allSent;
 }
 
 /** Send the `[Applied]` push for one job. Same credential, same swallowed
