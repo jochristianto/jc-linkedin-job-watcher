@@ -26,7 +26,7 @@ import { useNow } from "@/hooks/use-now.ts";
 import { cn } from "@/lib/utils";
 import { isCompanyBlocked } from "@/filter.ts";
 import { focusOrOpenJobsTab } from "@/jobs-tab.ts";
-import { badgeFor, type ScanNowRequest } from "@/scan.ts";
+import { badgeFor, type ScanNowRequest, type ScanNowResponse } from "@/scan.ts";
 import * as storage from "@/storage.ts";
 import {
   markAllRead,
@@ -68,6 +68,17 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
   // in view.ts. It is what lets the button say "Scanning…" from the click rather
   // than from the reply.
   const [pendingScan, setPendingScan] = useState(false);
+
+  // A short-lived line explaining a click that started no *new* scan — the worker
+  // was unreachable, or a cycle was already running. Without it those replies are
+  // silent and the button just blinks (the background answers, but nothing here
+  // reads the answer). Cleared on the next click and after a few seconds.
+  const [scanNotice, setScanNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!scanNotice) return;
+    const t = setTimeout(() => setScanNotice(null), 4000);
+    return () => clearTimeout(t);
+  }, [scanNotice]);
 
   const persistUi = useCallback(
     (next: { activeWatchId: string | null; mode: ListMode }) => storage.set("ui", next),
@@ -137,10 +148,30 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
    */
   const onScan = useCallback(async () => {
     if (pendingScan) return;
+    setScanNotice(null);
     setPendingScan(true);
     try {
-      const request: ScanNowRequest = { type: "LJW_SCAN_NOW" };
-      await chrome.runtime.sendMessage(request).catch(() => {});
+      // `null` = the message reached no listener. Right after a reload the MV3
+      // worker can be torn down and miss the first wake, so retry once before
+      // blaming it. A `started: false` reply is the worker answering that it did
+      // not begin a *new* cycle — most often because one is already running,
+      // which is not an error (the scan the click asked for is under way).
+      const send = () =>
+        chrome.runtime
+          .sendMessage({ type: "LJW_SCAN_NOW" } as ScanNowRequest)
+          .then((r) => r as ScanNowResponse, () => null);
+      let res = await send();
+      if (res == null) res = await send();
+
+      if (res == null) {
+        setScanNotice("Couldn't reach the scanner — reload the extension and try again.");
+      } else if (!res.started) {
+        setScanNotice(
+          res.reason === "already-scanning"
+            ? "A scan is already running — hang tight."
+            : "Couldn't start the scan — try again in a moment.",
+        );
+      }
     } finally {
       setPendingScan(false);
       await reload();
@@ -292,6 +323,10 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
             {view.banners.map((b) => (
               <HealthBanner key={b.message} message={b.message} severity={b.severity} />
             ))}
+
+            {/* A transient heads-up for a click that started no new scan. Amber,
+                the softest banner tier — neither case is an error. */}
+            {scanNotice && <HealthBanner message={scanNotice} severity="warn" />}
 
             {/* The list scrolls; the header above and the status bar below stay put. */}
             <div className="flex flex-1 flex-col overflow-y-auto px-2 pb-2">
