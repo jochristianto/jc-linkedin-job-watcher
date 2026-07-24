@@ -8,23 +8,27 @@
 // empty-state choice with plain values. The side-effect wrapper that reads
 // storage, sets innerHTML and opens tabs lives in mount.ts (§14, untested).
 
-import type { Job, Watch, HealthState, BlockedCompany } from "./types.ts";
+import type { Job, Watch, HealthState, BlockedCompany, QuietHours } from "./types.ts";
 import type { JobsMap } from "./storage.ts";
 import { PUSH_FAILING_MESSAGE } from "./health.ts";
+import { isWithinQuietHours, minutesOfDay } from "./schedule.ts";
 // `makeBlockedCompany` is the write-side normalizer the Options blocklist field
 // uses too, so a company blocked from a row and one typed into Options end up in
 // the identical shape.
 import { isCompanyBlocked, normalizeCompany, makeBlockedCompany } from "./filter.ts";
+import { icon } from "./icons.ts";
 import {
   esc,
   renderList,
   renderEmptyState,
   renderScanButton,
+  renderScanStatus,
   renderToolbar,
   type JobView,
   type ListMode,
   type EmptyKind,
   type ScanButtonState,
+  type ScanStatus,
 } from "./render.ts";
 
 /** Map a stored `Job` to the flat `JobView` the markup functions consume. The
@@ -117,7 +121,7 @@ export function markAllRead(jobs: JobsMap, now: number): JobsMap {
 }
 
 /**
- * Toggle a company on the blocklist — the row's ⊘ button, in both directions.
+ * Toggle a company on the blocklist — the row's ban button, in both directions.
  *
  * Blocking appends the same `{display, normalized}` pair the Options field
  * writes. Unblocking removes **every entry that matches this company**, not just
@@ -159,7 +163,7 @@ export type ViewContext = {
    *  counts unread across every watch. */
   activeWatchId?: string | null;
   /** `settings.blockedCompanies`, already-normalized fragments. Greys the rows
-   *  whose company matches and flips their ⊘ button to Unblock; those rows stay
+   *  whose company matches and flips their ban button to Unblock; those rows stay
    *  on screen, they just stop counting towards the badge. */
   blockedCompanies?: string[];
   /** A scan cycle is holding the lock right now (`scanState.isScanning`). Only
@@ -179,6 +183,19 @@ export type ViewContext = {
    *  renders as its own amber banner, alongside any health banner. Never a desktop
    *  notification. */
   pushWarn?: boolean;
+  /** When the armed one-shot alarm is due to fire (`chrome.alarms.get(...)
+   *  .scheduledTime`), or null/undefined when no alarm exists. The footer counts
+   *  down to it. Read from the alarm rather than recomputed here: jitter, back-off
+   *  and the quiet-hours jump were already decided when it was armed, so anything
+   *  this view computed for itself would be a *different* draw from the same dice. */
+  nextScanAt?: number | null;
+  /** `settings.quietHours` — only used to explain a countdown that is hours long
+   *  instead of minutes (PRD §15, decision 4). Nothing is suppressed by it; the
+   *  alarm already accounts for the window. */
+  quietHours?: QuietHours;
+  /** The clock, injected so the countdown is a pure function of its inputs
+   *  (PRD §14). Defaults to `Date.now()` for callers that render no countdown. */
+  now?: number;
 };
 
 /** Choose the empty/degraded message when nothing is visible. A broken scan
@@ -205,11 +222,49 @@ export function scanButtonState(ctx: ViewContext): ScanButtonState {
 }
 
 /**
+ * What the footer status bar says — the answer to "is this thing still running?".
+ *
+ * The order is the priority order. A live cycle wins over everything: while the
+ * lock is held the extension *is* fetching, whatever the schedule or the health
+ * record say. A halted loop comes next, because there is genuinely nothing armed
+ * to count down to (§16.2 waits for a manual resume). With no enabled search
+ * there is nothing to fetch either, so the bar goes away entirely rather than
+ * promise a scan that would find nothing. Only then is it a countdown — and a
+ * `nextScanAt` already in the past means the alarm has fired but its cycle hasn't
+ * reached storage yet, which is `due`, not a negative number.
+ *
+ * A `paused` (logged-out) loop deliberately gets a normal countdown: §16.1 keeps
+ * scanning so a later `ok` scan can auto-resume it, so the next scan really is
+ * coming. The health banner above already explains the situation.
+ */
+export function scanStatus(ctx: ViewContext): ScanStatus {
+  if (ctx.scanning) return { kind: "scanning" };
+  if (ctx.scanMode === "halted") return { kind: "halted" };
+  if (!ctx.watches.some((w) => w.enabled)) return { kind: "off" };
+  if (ctx.nextScanAt == null) return { kind: "unscheduled" };
+
+  const now = ctx.now ?? Date.now();
+  const remainingMs = ctx.nextScanAt - now;
+  if (remainingMs <= 0) return { kind: "due" };
+
+  // Quiet hours are a local-clock window (§15), hence the Date round-trip.
+  const quiet = ctx.quietHours
+    ? isWithinQuietHours(minutesOfDay(new Date(now)), ctx.quietHours)
+    : false;
+  return { kind: "waiting", remainingMs, quiet };
+}
+
+/**
  * The whole view as one markup string: header (title + unopened badge + Scan
- * now + Options button) over the list. `renderList` filters opened jobs out of "new" mode; if
+ * now + Options button) over the list, with the scan status bar as the footer.
+ * `renderList` filters opened jobs out of "new" mode; if
  * that leaves nothing to show, a distinct empty state takes the list's place.
  * The popup and the tab call this identically — they differ only by the
  * `.view-popup` / `.view-tab` class on the mount root, never by branch here.
+ *
+ * The footer is rendered as a slot: mount.ts rewrites `#statusbar`'s contents
+ * once a second to tick the countdown, and repainting the whole page that often
+ * would throw away the user's scroll position.
  */
 export function renderPage(ctx: ViewContext): string {
   const blockedCompanies = ctx.blockedCompanies ?? [];
@@ -251,10 +306,11 @@ export function renderPage(ctx: ViewContext): string {
       ${badge > 0 ? `<span class="badge">${badge}</span>` : ""}
       ${renderScanButton(scanButtonState(ctx))}
       <button class="hdr-btn" id="mark-all-read" title="Mark all as read">Mark all read</button>
-      <button class="hdr-btn" id="open-options" title="Options" aria-label="Options">⚙</button>
+      <button class="hdr-btn icon-only" id="open-options" title="Options" aria-label="Options">${icon("settings")}</button>
     </header>
     ${toolbar}
     ${healthBanner}
     ${pushBanner}
-    <div class="list">${body}</div>`.trim();
+    <div class="list">${body}</div>
+    <footer class="statusbar" id="statusbar">${renderScanStatus(scanStatus(ctx))}</footer>`.trim();
 }

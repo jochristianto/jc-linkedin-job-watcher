@@ -8,8 +8,8 @@
 // DOM, so it is not unit-tested; every decision it makes lives tested in view.ts.
 //
 // Three separate row actions, because they mean three different things: opening
-// the posting (click the row), dismissing it (the ✓ button), and never wanting
-// that company again (the ⊘ button). Only the second one empties the list.
+// the posting (click the row), dismissing it (the tick button), and never wanting
+// that company again (the ban button). Only the second one empties the list.
 
 import * as storage from "./storage.ts";
 import {
@@ -17,10 +17,13 @@ import {
   markJobOpened,
   markAllRead,
   setJobRead,
+  scanStatus,
   toggleBlockedCompany,
   unreadCount,
+  type ViewContext,
 } from "./view.ts";
-import type { ListMode } from "./render.ts";
+import { renderScanStatus, type ListMode } from "./render.ts";
+import { SCAN_ALARM_NAME } from "./schedule.ts";
 import { badgeFor, type ScanNowRequest } from "./scan.ts";
 import { isCompanyBlocked } from "./filter.ts";
 
@@ -29,6 +32,11 @@ import { isCompanyBlocked } from "./filter.ts";
  *  an open popup/tab, so "Scanning…" turns back into the list on its own. `ui`
  *  is excluded on purpose: this view writes it, and would only re-render itself. */
 const RENDERED_KEYS = ["jobs", "settings", "health", "pushHealth", "scanState"] as const;
+
+/** How often the footer's countdown repaints. The default interval is five
+ *  minutes, so a coarser tick would visibly stall on the seconds; only the
+ *  footer's contents are rewritten, never the list. */
+const COUNTDOWN_TICK_MS = 1000;
 
 /**
  * Mount the list view into `root`, defaulting to `defaultMode` ("new" for the
@@ -48,6 +56,12 @@ export async function mountListView(
   let activeWatchId: string | null = ui.activeWatchId;
   let mode: ListMode = ui.mode ?? defaultMode;
 
+  // When the armed alarm fires, and the context the last render was built from —
+  // both cached so the once-a-second tick below is a string swap rather than a
+  // round trip to storage.
+  let nextScanAt: number | null = null;
+  let lastCtx: ViewContext | null = null;
+
   await render();
 
   // One delegated handler for the whole list — clicks and middle-clicks alike.
@@ -59,19 +73,28 @@ export async function mountListView(
     if (RENDERED_KEYS.some((key) => key in changes)) void render();
   });
 
+  // The countdown is the one thing on the page that changes without anything
+  // happening, so it needs its own clock. It dies with the page — the popup is
+  // disposable, and an open jobs tab is one timer.
+  setInterval(tick, COUNTDOWN_TICK_MS);
+
   async function persistUi(): Promise<void> {
     await storage.set("ui", { activeWatchId, mode });
   }
 
   async function render(): Promise<void> {
-    const [jobs, settings, health, pushHealth, scanState] = await Promise.all([
+    const [jobs, settings, health, pushHealth, scanState, alarm] = await Promise.all([
       storage.get("jobs"),
       storage.get("settings"),
       storage.get("health"),
       storage.get("pushHealth"),
       storage.get("scanState"),
+      // The armed alarm is the schedule — no storage key mirrors it, so this is
+      // where "next scan" comes from (PRD §15 decision 3 / schedule.ts).
+      chrome.alarms.get(SCAN_ALARM_NAME),
     ]);
-    root.innerHTML = renderPage({
+    nextScanAt = alarm?.scheduledTime ?? null;
+    lastCtx = {
       jobs: Object.values(jobs),
       watches: settings.watches,
       mode,
@@ -83,7 +106,45 @@ export async function mountListView(
       severity: health.severity,
       message: health.message,
       pushWarn: pushHealth.warn,
-    });
+      quietHours: settings.quietHours,
+      nextScanAt,
+      now: Date.now(),
+    };
+    root.innerHTML = renderPage(lastCtx);
+  }
+
+  /**
+   * Repaint ONLY the footer's status line, from the last render's context plus a
+   * fresh clock. Everything above it is left exactly as it was: this runs every
+   * second, and re-rendering the page that often would fight the user's scroll
+   * position and drop focus mid-click.
+   */
+  function paintStatus(): void {
+    const slot = root.querySelector("#statusbar");
+    if (!lastCtx || !slot) return;
+    slot.innerHTML = renderScanStatus(scanStatus({ ...lastCtx, nextScanAt, now: Date.now() }));
+  }
+
+  /**
+   * One tick of the countdown.
+   *
+   * A cycle that has just finished writes `scanState` and only *then* arms the
+   * next alarm, so the re-render that storage change triggered read a time that
+   * had already passed. Rather than racing that, the tick re-reads the alarm
+   * whenever the countdown has run out and lets the footer heal itself within a
+   * second. While a cycle is in flight there is nothing to re-read — the alarm
+   * stays in the past for the whole 60–90s — so it stays a plain repaint.
+   */
+  function tick(): void {
+    const expired = nextScanAt === null || nextScanAt <= Date.now();
+    if (expired && !lastCtx?.scanning) {
+      void chrome.alarms.get(SCAN_ALARM_NAME).then((alarm) => {
+        nextScanAt = alarm?.scheduledTime ?? null;
+        paintStatus();
+      });
+      return;
+    }
+    paintStatus();
   }
 
   /**
@@ -168,7 +229,7 @@ export async function mountListView(
 
     const action = target.closest<HTMLElement>(".job-btn")?.dataset.action;
 
-    // ✓ / ↺ — dismiss this one job, or bring it back. The only thing that drops
+    // Tick / undo — dismiss this one job, or bring it back. The only thing that drops
     // a row out of New, which is the whole point of it being its own button.
     if (action === "read") {
       e.preventDefault();
@@ -180,7 +241,7 @@ export async function mountListView(
       return;
     }
 
-    // ⊘ — blocklist this job's company straight from the row, no trip to
+    // Ban — blocklist this job's company straight from the row, no trip to
     // Options. Existing rows stay on screen greyed; it's future scans that stop
     // surfacing the company (PRD §6). Pressing it again unblocks.
     if (action === "block") {

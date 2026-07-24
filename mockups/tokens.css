@@ -79,6 +79,22 @@ body {
   flex-direction: column;
 }
 
+/* ---- Icons (Lucide, inlined by src/icons.ts) ---- */
+/* Every icon is stroked in `currentColor`, so it simply inherits whatever the
+ * control around it is doing — hover, pressed, disabled, dark mode — instead of
+ * needing a second asset per state.
+ *
+ * `pointer-events: none` is load-bearing, not polish: mount.ts and options.ts
+ * delegate clicks and resolve them with `e.target.closest(...)`. Letting the
+ * <svg> (or one of its <path>s) become the event target would still work through
+ * closest(), but only by accident of the DOM shape — this keeps the button
+ * itself the thing that was clicked, always. */
+.lucide {
+  flex: 0 0 auto;
+  vertical-align: middle;
+  pointer-events: none;
+}
+
 /* ---- Header ---- */
 .hdr {
   display: flex;
@@ -113,6 +129,9 @@ body {
   text-align: center;
 }
 .hdr-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
   border: none;
   background: transparent;
   color: var(--muted);
@@ -120,6 +139,11 @@ body {
   padding: var(--s-1) var(--s-2);
   border-radius: var(--r-sm);
   font-size: 13px;
+}
+/* The gear has no label to pad around, so it gets a square hit area instead of
+ * the wider one a text control needs. */
+.hdr-btn.icon-only {
+  padding: var(--s-1);
 }
 .hdr-btn:hover {
   background: var(--surface-2);
@@ -297,19 +321,19 @@ body {
   min-width: 0;
 }
 
-/* ---- Row actions: ✓ dismiss, ⊘ block the company ---- */
+/* ---- Row actions: tick = dismiss, ban = block the company ---- */
 .job-actions {
   display: flex;
   gap: var(--s-1);
   flex: 0 0 auto;
 }
 .job-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 26px;
   height: 26px;
   padding: 0;
-  font-family: inherit;
-  font-size: 13px;
-  line-height: 1;
   color: var(--muted);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -320,8 +344,8 @@ body {
   color: var(--accent);
   border-color: var(--accent);
 }
-/* Pressed = the state is already on, and the button is now the undo: ↺ puts a
- * read job back, ⊘ unblocks the company. */
+/* Pressed = the state is already on, and the button is now the undo: the undo
+ * arrow puts a read job back, the ban icon unblocks the company. */
 .job-btn[aria-pressed="true"] {
   color: var(--accent);
   border-color: var(--accent);
@@ -379,9 +403,17 @@ body {
   color: var(--muted);
   max-width: 300px;
 }
+/* The artwork, not a control: faint by default so it frames the message rather
+ * than competing with it. `line-height: 0` keeps the inline <svg> from dragging
+ * a text baseline's worth of space under itself. */
 .empty-icon {
-  font-size: 32px;
+  line-height: 0;
+  color: var(--faint);
   margin-bottom: var(--s-2);
+}
+/* The one empty state that is a failure, not a lull — it gets to look like one. */
+.empty[data-kind="scan-error"] .empty-icon {
+  color: var(--danger);
 }
 .empty-title {
   font-weight: 700;
@@ -496,6 +528,14 @@ input[type="password"] {
 .btn.sm {
   padding: 3px 10px;
   font-size: 12px;
+}
+/* The ✕ on a blocklist tag: no label to pad around, and no border either — a
+ * pill inside a pill reads as two controls. */
+.btn.icon-only {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-color: transparent;
 }
 .switch {
   font-size: 12px;

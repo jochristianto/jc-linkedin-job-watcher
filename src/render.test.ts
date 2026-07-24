@@ -12,6 +12,7 @@ import {
   renderToolbar,
   type JobView,
   type ChipWatch,
+  type EmptyKind,
 } from "./render.ts";
 
 function job(overrides: Partial<JobView> = {}): JobView {
@@ -83,6 +84,15 @@ test("renderJobRow's block button names the company and flips to Unblock", () =>
   assert.match(renderJobRow(job({ blocked: false })), /title="Block Acme Corp"/);
   assert.match(renderJobRow(job({ blocked: true })), /title="Unblock Acme Corp"/);
   assert.match(renderJobRow(job({ blocked: true })), /data-action="block" aria-pressed="true"/);
+});
+
+test("renderJobRow's row actions are Lucide icons, and the read one flips", () => {
+  assert.match(renderJobRow(job({ read: false })), /lucide-check/);
+  assert.match(renderJobRow(job({ read: true })), /lucide-rotate-ccw/);
+  assert.match(renderJobRow(job()), /lucide-ban/);
+  // The icon is decorative; the button's own aria-label is what gets announced.
+  const html = renderJobRow(job());
+  assert.match(html, /aria-label="Mark as read"[^>]*><svg[^>]*aria-hidden="true"/);
 });
 
 test("renderJobRow escapes the company inside the block button's label", () => {
@@ -251,6 +261,38 @@ test("renderEmptyState gives a distinct, actionable message per situation", () =
   assert.match(renderEmptyState("no-watches"), /Options|Add a search/i);
   assert.match(renderEmptyState("no-new"), /caught up|no new/i);
   assert.match(renderEmptyState("scan-error"), /failed|broke|selector/i);
+});
+
+test("each empty state gets its own Lucide icon, sized as artwork not a button", () => {
+  const icons: Record<string, RegExp> = {
+    "no-watches": /lucide-search/,
+    "no-jobs-yet": /lucide-sprout/,
+    "no-new": /lucide-circle-check/,
+    scanning: /lucide-refresh-cw/,
+    "scan-error": /lucide-triangle-alert/,
+  };
+  for (const [kind, pattern] of Object.entries(icons)) {
+    const html = renderEmptyState(kind as EmptyKind);
+    assert.match(html, pattern, kind);
+    assert.match(html, /width="28" height="28"/, kind);
+  }
+});
+
+test("nothing in the rendered markup falls back to an emoji or a bare glyph", () => {
+  // Emoji ignore the theme and the ✓ / ⊘ / ↺ family tofu-boxes on some systems;
+  // that is what src/icons.ts exists to prevent, so guard against a regression.
+  const markup = [
+    renderJobRow(job()),
+    renderJobRow(job({ read: true, blocked: true })),
+    ...(["no-watches", "no-jobs-yet", "no-new", "scanning", "scan-error"] as const).map(
+      renderEmptyState,
+    ),
+  ].join("");
+  // Arrows (↺), math operators (⊘), misc symbols (⚙), dingbats (✓ ✕), emoji.
+  assert.doesNotMatch(
+    markup,
+    /[\u{2190}-\u{21FF}\u{2200}-\u{22FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{1F300}-\u{1FAFF}]/u,
+  );
 });
 
 // ── renderScanButton: the manual scan control ────────────────────────────────

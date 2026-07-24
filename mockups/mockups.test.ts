@@ -118,6 +118,31 @@ test("options page has every settings section including the Telegram test button
   assert.match(html, /Send test message/);
 });
 
+test("every mockup draws its icons as inline Lucide SVG, never a font glyph", () => {
+  // The mockups are hand-authored copies of what render.ts emits (see the
+  // fidelity note in README.md), so they are the one place an emoji could creep
+  // back in unnoticed — the production markup is guarded in render.test.ts.
+  const glyphs = /[\u{2190}-\u{21FF}\u{2200}-\u{22FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{1F300}-\u{1FAFF}]/u;
+  for (const name of ["./popup.html", "./jobs.html", "./states.html", "./options.html"]) {
+    const html = read(name);
+    assert.match(html, /class="lucide lucide-/, `${name} has Lucide icons`);
+    assert.doesNotMatch(html, glyphs, `${name} has no leftover glyph or emoji`);
+  }
+});
+
+test("the mockups' icons match what render.ts emits, icon for icon", () => {
+  const rows = read("./popup.html") + read("./jobs.html");
+  assert.match(rows, /data-action="read"[^>]*>\s*<svg[^>]*lucide-check/);
+  assert.match(rows, /data-action="read"[^>]*>\s*<svg[^>]*lucide-rotate-ccw/);
+  assert.match(rows, /data-action="block"[^>]*>\s*<svg[^>]*lucide-ban/);
+  assert.match(rows, /lucide-settings/);
+
+  const states = read("./states.html");
+  for (const name of ["search", "sprout", "circle-check", "refresh-cw", "triangle-alert"]) {
+    assert.match(states, new RegExp(`lucide-${name}`), name);
+  }
+});
+
 test("styling ships both light and dark via prefers-color-scheme, no framework", () => {
   const css = read("./tokens.css");
   assert.match(css, /:root\s*{/);

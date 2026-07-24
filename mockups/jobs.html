@@ -17,7 +17,7 @@
         <span class="badge">4</span>
         <button class="hdr-btn" data-scan-state="idle" title="Scan every enabled search right now">Scan now</button>
         <button class="hdr-btn" title="Mark all as read">Mark all read</button>
-        <button class="hdr-btn" title="Options">⚙ Options</button>
+        <button class="hdr-btn" title="Options"><svg class="lucide lucide-settings" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></svg> Options</button>
       </header>
 
       <div class="toolbar">
@@ -33,7 +33,7 @@
       </div>
 
       <!-- Non-blocking scan status: the list stays visible underneath. -->
-      <div class="banner">🔄 Scanning Japan… last run 3 min ago.</div>
+      <div class="banner"><svg class="lucide lucide-refresh-cw" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg> Scanning Japan… last run 3 min ago.</div>
 
       <!-- All four row states, top to bottom: untouched, opened, read, blocked. -->
       <div class="list">
@@ -47,8 +47,8 @@
             </span>
           </a>
           <span class="job-actions">
-            <button class="job-btn" data-action="read" aria-pressed="false" title="Mark as read" aria-label="Mark as read">✓</button>
-            <button class="job-btn" data-action="block" aria-pressed="false" title="Block Acme Corp" aria-label="Block Acme Corp">⊘</button>
+            <button class="job-btn" data-action="read" aria-pressed="false" title="Mark as read" aria-label="Mark as read"><svg class="lucide lucide-check" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></button>
+            <button class="job-btn" data-action="block" aria-pressed="false" title="Block Acme Corp" aria-label="Block Acme Corp"><svg class="lucide lucide-ban" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M4.929 4.929 19.07 19.071"/></svg></button>
           </span>
         </div>
 
@@ -64,13 +64,14 @@
             </span>
           </a>
           <span class="job-actions">
-            <button class="job-btn" data-action="read" aria-pressed="false" title="Mark as read" aria-label="Mark as read">✓</button>
-            <button class="job-btn" data-action="block" aria-pressed="false" title="Block PT Data Nusantara" aria-label="Block PT Data Nusantara">⊘</button>
+            <button class="job-btn" data-action="read" aria-pressed="false" title="Mark as read" aria-label="Mark as read"><svg class="lucide lucide-check" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></button>
+            <button class="job-btn" data-action="block" aria-pressed="false" title="Block PT Data Nusantara" aria-label="Block PT Data Nusantara"><svg class="lucide lucide-ban" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M4.929 4.929 19.07 19.071"/></svg></button>
           </span>
         </div>
 
         <!-- Read jobs stay on screen in "All" mode: dimmed, no dot, un-bold. The
-             ✓ is pressed and flips to ↺, so a mis-tick is one click back. -->
+             the tick is pressed and flips to an undo arrow, so a mis-tick is one
+             click back. -->
         <div class="job" data-job-id="3810" data-read="true" data-opened="true" data-blocked="false">
           <a class="job-main" href="#">
             <span class="job-dot" aria-hidden="true"></span>
@@ -81,8 +82,8 @@
             </span>
           </a>
           <span class="job-actions">
-            <button class="job-btn" data-action="read" aria-pressed="true" title="Mark as unread" aria-label="Mark as unread">↺</button>
-            <button class="job-btn" data-action="block" aria-pressed="false" title="Block Rakuten" aria-label="Block Rakuten">⊘</button>
+            <button class="job-btn" data-action="read" aria-pressed="true" title="Mark as unread" aria-label="Mark as unread"><svg class="lucide lucide-rotate-ccw" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+            <button class="job-btn" data-action="block" aria-pressed="false" title="Block Rakuten" aria-label="Block Rakuten"><svg class="lucide lucide-ban" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M4.929 4.929 19.07 19.071"/></svg></button>
           </span>
         </div>
 
@@ -98,8 +99,8 @@
             </span>
           </a>
           <span class="job-actions">
-            <button class="job-btn" data-action="read" aria-pressed="false" title="Mark as read" aria-label="Mark as read">✓</button>
-            <button class="job-btn" data-action="block" aria-pressed="true" title="Unblock Mercari" aria-label="Unblock Mercari">⊘</button>
+            <button class="job-btn" data-action="read" aria-pressed="false" title="Mark as read" aria-label="Mark as read"><svg class="lucide lucide-check" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></button>
+            <button class="job-btn" data-action="block" aria-pressed="true" title="Unblock Mercari" aria-label="Unblock Mercari"><svg class="lucide lucide-ban" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M4.929 4.929 19.07 19.071"/></svg></button>
           </span>
         </div>
       </div>

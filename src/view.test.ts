@@ -175,7 +175,7 @@ test("toggleBlockedCompany no-ops when the company is already covered", () => {
 });
 
 test("toggleBlockedCompany unblocks by removing every entry that matched", () => {
-  // A leftover fragment would keep the company blocked and make ⊘ look broken.
+  // A leftover fragment would keep the company blocked and make the button look broken.
   const blocked = blocklist("acme", "globex");
   assert.deepEqual(toggleBlockedCompany(blocked, "Acme Corp", false), blocklist("globex"));
 });
@@ -243,6 +243,14 @@ test("renderPage badge counts unread across all watches, ignoring the chip filte
     activeWatchId: "w-id",
   });
   assert.match(html, /<span class="badge">2<\/span>/);
+});
+
+test("renderPage's Options control is a labelled gear icon, not a glyph", () => {
+  const html = renderPage({ jobs: [], watches, mode: "new", title: "New" });
+  // Icon-only, so the label lives on the button — the <svg> is aria-hidden.
+  assert.match(html, /id="open-options"[^>]*aria-label="Options"/);
+  assert.match(html, /lucide-settings/);
+  assert.doesNotMatch(html, /⚙/);
 });
 
 test("renderPage shows the scanning empty state while a first scan is in flight", () => {

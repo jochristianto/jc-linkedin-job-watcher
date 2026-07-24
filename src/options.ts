@@ -12,6 +12,7 @@
 import "./tokens.css";
 import * as storage from "./storage.ts";
 import { esc } from "./render.ts";
+import { icon } from "./icons.ts";
 import { PUSH_FAILING_MESSAGE, OK_PUSH_HEALTH } from "./health.ts";
 import { sendPush, type PushJob } from "./push.ts";
 import type { Settings, Watch } from "./types.ts";
@@ -107,7 +108,9 @@ async function mount(root: HTMLElement): Promise<void> {
     host.innerHTML = labels
       .map(
         (label, i) =>
-          `<span class="tag">${esc(label)} <button class="btn ghost sm" data-act="del-${kind}" data-idx="${i}">✕</button></span>`,
+          // The label already names what this removes, so the button itself only
+          // needs the cross — aria-label carries the meaning for a screen reader.
+          `<span class="tag">${esc(label)} <button class="btn ghost sm icon-only" data-act="del-${kind}" data-idx="${i}" title="Remove ${esc(label)}" aria-label="Remove ${esc(label)}">${icon("x", 14)}</button></span>`,
       )
       .join("");
   }

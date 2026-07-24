@@ -60,7 +60,7 @@ Pin the extension to your toolbar so you can see the badge.
 1. On LinkedIn, run a job search with all your filters applied.
 2. **Sort by "Most recent"** — this matters. The defaults scan only page 1, which assumes newest-first ordering. Sorting by date puts `sortBy=DD` in the URL.
 3. Copy the full URL from the address bar.
-4. Right-click the extension icon → **Options** (or click ⚙ in the popup).
+4. Right-click the extension icon → **Options** (or click the gear in the popup).
 5. Under **Searches**, give it a nickname (e.g. "Indonesia") and paste the URL → **Add**.
 6. Click **Save settings** at the bottom. *Nothing is stored until you save.*
 
@@ -84,8 +84,8 @@ The first scan fires on the next alarm tick — or immediately, if you open the 
 In both views:
 
 - **Click a job** → opens the posting in a new tab and **highlights the row**, which stays in the list. Nothing disappears because you looked at it. Cmd/Ctrl/middle-click opens it in the background.
-- **✓ on a row** → marks that one job read: the row greys out, drops out of **New**, and the badge falls by one. This is the only thing that clears a job. Press it again (**↺**) to bring the job back.
-- **⊘ on a row** → adds that job's company to your blocklist, without a trip to Options. Future scans stop surfacing it. Jobs from that company already in your list stay on screen, greyed and tagged **Blocked**, and stop counting towards the badge. Press it again to unblock.
+- **The tick on a row** → marks that one job read: the row greys out, drops out of **New**, and the badge falls by one. This is the only thing that clears a job. Press it again (it flips to an undo arrow) to bring the job back.
+- **The ban icon on a row** → adds that job's company to your blocklist, without a trip to Options. Future scans stop surfacing it. Jobs from that company already in your list stay on screen, greyed and tagged **Blocked**, and stop counting towards the badge. Press it again to unblock.
 - **Scan now** runs a cycle immediately, ignoring the interval and quiet hours. It reads *Scanning…* (greyed out) while a cycle is in flight, and the list repaints on its own when that cycle finishes. After a manual scan the next automatic one is a full interval away, not stacked minutes behind. When a verification challenge has halted scanning, the same button turns red and reads **Resume** — that is how you clear the halt.
 - **Watch chips** filter the list to one search. The badge still counts across all of them.
 - **New ⇄ All** toggles between unread-only and everything.
@@ -102,7 +102,7 @@ A row therefore has three looks: plain (untouched), highlighted with a blue bar 
 Add, edit, remove, and individually enable/disable saved searches. Enabled searches all run on the same cycle, strictly one after another — never in parallel.
 
 ### Filters
-- **Blocked companies** — matched case-insensitively; normalised once when saved. The **⊘** button on any job row adds and removes entries here too
+- **Blocked companies** — matched case-insensitively; normalised once when saved. The ban button on any job row adds and removes entries here too
 - **Blocked title keywords** — e.g. "Intern", "Senior"
 - **Hide reposted** — drop anything LinkedIn marks as "Reposted"
 

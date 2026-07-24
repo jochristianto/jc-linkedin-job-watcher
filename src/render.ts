@@ -13,6 +13,8 @@
 // and empty state is unit-testable without a DOM or chrome.* — which is exactly
 // what the static mockups embed and what production reuses.
 
+import { icon, type IconName } from "./icons.ts";
+
 export type JobView = {
   id: string;
   title: string;
@@ -87,15 +89,17 @@ export function renderJobRow(job: JobView): string {
   // Both actions are toggles, so every one of them is undoable from the row it
   // was pressed on. That matters most for Block: the only other way back is
   // hunting the company down in Options.
+  // The icon carries the direction: a tick to dismiss, an undo arrow to bring it
+  // back. The label is what a screen reader gets — the icon is aria-hidden.
   const readLabel = job.read ? "Mark as unread" : "Mark as read";
-  const readBtn = `<button class="job-btn" data-action="read" aria-pressed="${job.read}" title="${readLabel}" aria-label="${readLabel}">${job.read ? "↺" : "✓"}</button>`;
+  const readBtn = `<button class="job-btn" data-action="read" aria-pressed="${job.read}" title="${readLabel}" aria-label="${readLabel}">${icon(job.read ? "rotate-ccw" : "check")}</button>`;
 
   // A card with no company parsed has nothing to block, so it gets no button
   // rather than one that would blocklist the empty string (§12 again).
   const company = job.company.trim();
   const blockLabel = job.blocked ? `Unblock ${company}` : `Block ${company}`;
   const blockBtn = company
-    ? `<button class="job-btn" data-action="block" aria-pressed="${job.blocked}" title="${esc(blockLabel)}" aria-label="${esc(blockLabel)}">⊘</button>`
+    ? `<button class="job-btn" data-action="block" aria-pressed="${job.blocked}" title="${esc(blockLabel)}" aria-label="${esc(blockLabel)}">${icon("ban")}</button>`
     : "";
 
   return `
@@ -214,29 +218,117 @@ export function renderScanButton(state: ScanButtonState): string {
   return `<button class="hdr-btn" id="scan-now" data-scan-state="${state}" title="${esc(title)}"${disabled}>${label}</button>`;
 }
 
-const EMPTY_STATES: Record<EmptyKind, { icon: string; title: string; body: string }> = {
+/**
+ * What the footer status bar is saying about the scan loop:
+ *
+ * - `scanning`    — a cycle is fetching right now (`scanState.isScanning`).
+ * - `waiting`     — the next scan is armed; `remainingMs` counts down to it, and
+ *                   `quiet` means we are inside the quiet-hours window (PRD §15,
+ *                   decision 4), which is why that number is hours and not minutes.
+ * - `due`         — the armed time has passed but the cycle hasn't shown up in
+ *                   storage yet: the seconds between the alarm firing and the lock
+ *                   being taken, and the moment after a cycle ends but before the
+ *                   next alarm is armed.
+ * - `halted`      — a verification challenge stopped the loop (§16.2). Nothing is
+ *                   scheduled; the header's Resume button is the only way on.
+ * - `unscheduled` — no alarm exists at all. Shouldn't happen (§17 decision 5 keeps
+ *                   one armed), so it says so rather than showing a fake countdown.
+ * - `off`         — no enabled search, so there is nothing to fetch and a countdown
+ *                   would be a promise the loop can't keep. Renders nothing.
+ */
+export type ScanStatus =
+  | { kind: "scanning" }
+  | { kind: "waiting"; remainingMs: number; quiet: boolean }
+  | { kind: "due" }
+  | { kind: "halted" }
+  | { kind: "unscheduled" }
+  | { kind: "off" };
+
+/**
+ * A duration as the coarsest two units that still read as a countdown: `45s`,
+ * `4m 12s`, `7h 12m`. Seconds are dropped past an hour — a quiet-hours wait
+ * measured to the second is noise — and rounded UP so a wait that is still on
+ * never reads "0s" (it counts down to 1s, then the state flips to `due`).
+ */
+export function formatCountdown(ms: number): string {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
+/** The icon and sentence for each status. Split out from the markup so the copy
+ *  is one table to read, the same way SCAN_BUTTON and EMPTY_STATES are. */
+function statusFace(status: ScanStatus): { icon: IconName; text: string } {
+  switch (status.kind) {
+    case "scanning":
+      return { icon: "refresh-cw", text: "Fetching new jobs…" };
+    case "waiting":
+      return status.quiet
+        ? { icon: "moon", text: `Quiet hours · next scan in ${formatCountdown(status.remainingMs)}` }
+        : { icon: "clock", text: `Next scan in ${formatCountdown(status.remainingMs)}` };
+    case "due":
+      return { icon: "clock", text: "Next scan due any moment" };
+    case "halted":
+      return { icon: "triangle-alert", text: "Scanning stopped — press Resume" };
+    case "unscheduled":
+      return { icon: "clock", text: "No scan scheduled — press Scan now" };
+    case "off":
+      return { icon: "clock", text: "" };
+  }
+}
+
+/**
+ * The footer status bar: what the scan loop is doing, and how long until it does
+ * it again. It answers the question the rest of the view can't — a list that
+ * hasn't changed in ten minutes looks identical whether the loop is healthy,
+ * asleep for quiet hours, or dead.
+ *
+ * Returns the empty string for `off`, which leaves the footer element childless
+ * so `.statusbar:empty` can collapse it — no bar rather than a bar saying nothing.
+ *
+ * `role="status"` is set ONLY while scanning: that text lands once and is worth
+ * announcing, whereas a live region wrapped around a ticking countdown would read
+ * the whole sentence out loud every second.
+ */
+export function renderScanStatus(status: ScanStatus): string {
+  if (status.kind === "off") return "";
+  const { icon: name, text } = statusFace(status);
+  const live = status.kind === "scanning" ? ` role="status"` : "";
+  return `<div class="scan-status" data-kind="${status.kind}"${live}>${icon(name, 13)}<span class="scan-status-text">${esc(text)}</span></div>`;
+}
+
+/** The empty-state artwork, at the 28px the `.empty-icon` block reserves for it.
+ *  Bigger than a button icon and thinner-looking as a result, which is the point:
+ *  it reads as an illustration, not a control you can press. */
+const EMPTY_ICON_SIZE = 28;
+
+const EMPTY_STATES: Record<EmptyKind, { icon: IconName; title: string; body: string }> = {
   "no-watches": {
-    icon: "🔍",
+    icon: "search",
     title: "No searches yet",
     body: "Add a LinkedIn job search in Options to start watching.",
   },
   "no-jobs-yet": {
-    icon: "🌱",
+    icon: "sprout",
     title: "Nothing scanned yet",
     body: "The first scan hasn't finished. New jobs will show up here.",
   },
   "no-new": {
-    icon: "✅",
+    icon: "circle-check",
     title: "All caught up",
     body: "No new jobs. Switch to All to see everything found.",
   },
   scanning: {
-    icon: "🔄",
+    icon: "refresh-cw",
     title: "Scanning…",
     body: "Checking your searches. This list updates when it's done.",
   },
   "scan-error": {
-    icon: "⚠️",
+    icon: "triangle-alert",
     title: "Last scan failed",
     body: "LinkedIn's page may have changed — selectors returned nothing. See Options.",
   },
@@ -248,7 +340,7 @@ export function renderEmptyState(kind: EmptyKind): string {
   const s = EMPTY_STATES[kind];
   return `
     <div class="empty" data-kind="${kind}">
-      <div class="empty-icon" aria-hidden="true">${s.icon}</div>
+      <div class="empty-icon">${icon(s.icon, EMPTY_ICON_SIZE)}</div>
       <div class="empty-title">${s.title}</div>
       <div class="empty-body">${s.body}</div>
     </div>`.trim();
