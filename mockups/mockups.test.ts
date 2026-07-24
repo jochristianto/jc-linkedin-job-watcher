@@ -32,10 +32,90 @@ test("both popup and tab carry the watch chips and the New/All toggle", () => {
   }
 });
 
+test("both popup and tab carry the manual Scan now control in the header", () => {
+  for (const name of ["./popup.html", "./jobs.html"]) {
+    const html = read(name);
+    assert.match(html, /data-scan-state="idle"/, `${name} scan state`);
+    assert.match(html, />Scan now</, `${name} label`);
+  }
+});
+
+test("both views carry the scan status bar, showing its two everyday states", () => {
+  // The bar is the only thing on the page that says the loop is alive, so both
+  // sides of it are worth seeing: mid-scan in the tab, counting down in the
+  // popup. It is a footer under the scrolling list in both.
+  assert.match(read("./popup.html"), /<footer class="statusbar">.*Next scan in \d+m \d+s/s);
+  assert.match(read("./jobs.html"), /<footer class="statusbar">.*Scanning for new jobs…/s);
+});
+
 test("the tab shows read jobs staying on screen in All mode", () => {
   const html = read("./jobs.html");
   assert.match(html, /data-read="true"/);
   assert.match(html, /data-read="false"/);
+});
+
+test("both views show an opened job staying on screen, highlighted rather than gone", () => {
+  for (const name of ["./popup.html", "./jobs.html"]) {
+    const html = read(name);
+    // data-opened + data-read="false" on the same row is the whole point: you
+    // clicked through to it and it is still in the list.
+    assert.match(html, /data-read="false" data-opened="true"/, name);
+  }
+});
+
+test("every row carries its own read and block buttons", () => {
+  for (const name of ["./popup.html", "./jobs.html"]) {
+    const html = read(name);
+    assert.match(html, /data-action="read"/, `${name} read`);
+    assert.match(html, /data-action="block"/, `${name} block`);
+
+    // The buttons sit outside the anchor — a <button> inside <a> is invalid
+    // HTML. Check each anchor's own body, not the file as a whole, or the match
+    // runs past </a> into the next row's buttons.
+    for (const [, body] of html.matchAll(/<a class="job-main"[^>]*>([\s\S]*?)<\/a>/g)) {
+      assert.doesNotMatch(body!, /<button/, `${name} button inside anchor`);
+    }
+  }
+});
+
+test("both views show a blocked company greyed and tagged, still on screen", () => {
+  for (const name of ["./popup.html", "./jobs.html"]) {
+    const html = read(name);
+    assert.match(html, /data-blocked="true"/, `${name} state`);
+    assert.match(html, /class="job-tag">Blocked</, `${name} tag`);
+    // Blocking is undoable from the row it was pressed on, and the button says
+    // so in words rather than leaving it to a tooltip.
+    assert.match(html, /data-action="block"[^>]*aria-pressed="true"/, `${name} unblock`);
+    assert.match(html, /class="job-btn-label">Unblock</, `${name} unblock label`);
+  }
+});
+
+test("both views spell the block action out, before the row's tick", () => {
+  for (const name of ["./popup.html", "./jobs.html"]) {
+    const html = read(name);
+    assert.match(html, /class="job-btn-label">Block</, `${name} label`);
+    // Block first, tick out at the edge — same order renderJobRow emits.
+    const actions = /<span class="job-actions">([\s\S]*?)<\/span>\s*<\/div>/.exec(html)?.[1];
+    assert.ok(actions, `${name} has a job-actions block`);
+    assert.ok(
+      actions!.indexOf('data-action="block"') < actions!.indexOf('data-action="read"'),
+      `${name} block button before read button`,
+    );
+  }
+});
+
+test("the tab shows a Block button mid-question, waiting for the second press", () => {
+  // Blocking hides every future job from a company, so it asks first; the
+  // mockup carries that state because it is the one you can't discover by
+  // looking at a resting row.
+  const html = read("./jobs.html");
+  assert.match(html, /data-armed="true"[^>]*title="Block [^"]* — press again to confirm"/);
+  assert.match(html, /class="job-btn-label">Sure\?</);
+});
+
+test("the tab shows the read toggle flipped to its undo state", () => {
+  const html = read("./jobs.html");
+  assert.match(html, /data-action="read" aria-pressed="true"[^>]*title="Mark as unread"/);
 });
 
 test("a job row degrades when a field is missing (no dangling separator)", () => {
@@ -69,6 +149,31 @@ test("options page has every settings section including the Telegram test button
     assert.match(html, new RegExp(`<h2>${heading}</h2>`), heading);
   }
   assert.match(html, /Send test message/);
+});
+
+test("every mockup draws its icons as inline Lucide SVG, never a font glyph", () => {
+  // The mockups are hand-authored copies of what render.ts emits (see the
+  // fidelity note in README.md), so they are the one place an emoji could creep
+  // back in unnoticed — the production markup is guarded in render.test.ts.
+  const glyphs = /[\u{2190}-\u{21FF}\u{2200}-\u{22FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{1F300}-\u{1FAFF}]/u;
+  for (const name of ["./popup.html", "./jobs.html", "./states.html", "./options.html"]) {
+    const html = read(name);
+    assert.match(html, /class="lucide lucide-/, `${name} has Lucide icons`);
+    assert.doesNotMatch(html, glyphs, `${name} has no leftover glyph or emoji`);
+  }
+});
+
+test("the mockups' icons match what render.ts emits, icon for icon", () => {
+  const rows = read("./popup.html") + read("./jobs.html");
+  assert.match(rows, /data-action="read"[^>]*>\s*<svg[^>]*lucide-check/);
+  assert.match(rows, /data-action="read"[^>]*>\s*<svg[^>]*lucide-rotate-ccw/);
+  assert.match(rows, /data-action="block"[^>]*>\s*<svg[^>]*lucide-ban/);
+  assert.match(rows, /lucide-settings/);
+
+  const states = read("./states.html");
+  for (const name of ["search", "sprout", "circle-check", "refresh-cw", "triangle-alert"]) {
+    assert.match(states, new RegExp(`lucide-${name}`), name);
+  }
 });
 
 test("styling ships both light and dark via prefers-color-scheme, no framework", () => {

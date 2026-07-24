@@ -2,7 +2,7 @@
 // §15 / §17). This ticket (04, issue #15) turns the prefactor entry into the
 // first real scan: an alarm fires, an invisible tab opens on one watch's URL, the
 // content script scroll-settles and parses the page, the tab closes, the new jobs
-// land in storage and the badge shows the unopened count.
+// land in storage and the badge shows the unread count.
 //
 // Per PRD §14 this file holds NO decision logic — every choice lives in a pure,
 // tested module and this only orchestrates `chrome.*`:
@@ -15,7 +15,7 @@
 import { get, set } from "./storage.ts";
 import { dedupe } from "./dedupe.ts";
 import type { FilterRules } from "./filter.ts";
-import { nextScanDelayMs, randomPauseMs } from "./schedule.ts";
+import { nextScanDelayMs, randomPauseMs, SCAN_ALARM_NAME } from "./schedule.ts";
 import {
   KEEPALIVE_PING_MS,
   beginScan,
@@ -24,6 +24,7 @@ import {
   requestCatchUp,
   trackTab,
   untrackTab,
+  type ScanLifecycleState,
 } from "./lifecycle.ts";
 import {
   badgeFor,
@@ -31,12 +32,15 @@ import {
   mergeJobs,
   scanPageUrl,
   stampJobs,
-  unopenedCount,
+  unreadCount,
   withScanToken,
+  type ScanNowRequest,
+  type ScanNowResponse,
   type ScanRequest,
   type ScanResponse,
 } from "./scan.ts";
 import {
+  OK_HEALTH,
   aggregateOutcome,
   classifyPage,
   fieldMissingAcrossAll,
@@ -51,9 +55,10 @@ import { sendPush } from "./push.ts";
 import { buildScanNotification, jobsTabToFocus, SCAN_NOTIFICATION_ID } from "./notify.ts";
 import type { HealthState, Job, Settings } from "./types.ts";
 
-/** The single re-armed one-shot alarm (PRD §15 decision 3). One name, re-created
- *  with a fresh `{ when }` at the end of every cycle. */
-const ALARM_NAME = "ljw-scan";
+/** The single re-armed one-shot alarm (PRD §15 decision 3): one name, re-created
+ *  with a fresh `{ when }` at the end of every cycle. The name is `schedule.ts`'s
+ *  because the list view reads the same alarm to count down to the next scan. */
+const ALARM_NAME = SCAN_ALARM_NAME;
 
 /** The fixed id for the hard-failure health notification (PRD §16.8). Fixed so a
  *  new transition replaces the prior alert rather than stacking one per cycle. */
@@ -69,12 +74,15 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 // ── Badge ────────────────────────────────────────────────────────────────────
 
-/** Reflect the unopened count AND health severity onto the toolbar badge (PRD §7/
+/** Reflect the unread count AND health severity onto the toolbar badge (PRD §7/
  *  §16.8): the number in slate when healthy, amber on a soft warning, a red `!` on
- *  a hard failure. `badgeFor` decides text+colour; this only calls the browser API. */
+ *  a hard failure. `badgeFor` decides text+colour; this only calls the browser API.
+ *  Settings come along for the blocklist — a blocked company's jobs stay on screen
+ *  greyed out, but they no longer count towards the badge. */
 async function updateBadge(severity: Severity): Promise<void> {
-  const jobs = await get("jobs");
-  const { text, color } = badgeFor(unopenedCount(jobs), severity);
+  const [jobs, settings] = await Promise.all([get("jobs"), get("settings")]);
+  const blocked = settings.blockedCompanies.map((b) => b.normalized);
+  const { text, color } = badgeFor(unreadCount(jobs, blocked), severity);
   await chrome.action.setBadgeText({ text });
   await chrome.action.setBadgeBackgroundColor({ color });
 }
@@ -352,6 +360,63 @@ async function ensureAlarmExists(settings: Settings): Promise<void> {
   if (!existing) await armNextAlarm(settings);
 }
 
+/** Take the scan lock and persist it, returning this cycle's page depth (PRD §17
+ *  decisions 4+5 — `beginScan` consumes the catch-up flag). Split from
+ *  {@link runLockedCycle} so the manual "Scan now" can reply to the popup the
+ *  moment the lock is *visible in storage*, while the cycle itself runs on. The
+ *  caller must already have recovered a stale lock and confirmed nothing holds it. */
+async function takeScanLock(settings: Settings, state: ScanLifecycleState): Promise<number> {
+  const { pages, state: locked } = beginScan(
+    state,
+    Date.now(),
+    settings.catchUpPages,
+    settings.pagesPerScan,
+  );
+  await set("scanState", locked);
+  return pages;
+}
+
+/** Run the cycle the lock was taken for, then always release the lock and re-arm
+ *  the cadence — so a manual scan resets the next automatic one to a full
+ *  interval from now, rather than leaving two scans stacked minutes apart. */
+async function runLockedCycle(settings: Settings, pages: number): Promise<void> {
+  try {
+    await runCycle(settings, pages);
+  } finally {
+    await set("scanState", endScan(await get("scanState")));
+    await armNextAlarm(settings);
+  }
+}
+
+/**
+ * The header's "Scan now" button (PRD §9): run a cycle immediately instead of
+ * waiting out the interval, jitter and quiet hours the alarm honours.
+ *
+ * It also doubles as the manual resume §16.2 waits for. A `halted` health state
+ * only clears on an `ok` scan, but `shouldRunScan` stops every scan while halted
+ * — so nothing else can break that deadlock. The halt is cleared *before* the
+ * cycle, not after, so `reduceScanHealth` simply halts it again if the challenge
+ * is still there.
+ */
+async function runScanNow(): Promise<ScanNowResponse> {
+  const settings = await get("settings");
+
+  // Same first step as an alarm tick: a lock a torn-down cycle left stuck must
+  // not make the button silently do nothing (§16.6/§17.2).
+  const recovered = recoverStaleLock(await get("scanState"), Date.now(), settings.staleLockMs);
+  await Promise.all(recovered.tabIdsToClose.map((id) => chrome.tabs.remove(id).catch(() => {})));
+  if (recovered.state.isScanning) return { started: false, reason: "already-scanning" };
+
+  if ((await get("health")).mode === "halted") await set("health", { ...OK_HEALTH });
+
+  const pages = await takeScanLock(settings, recovered.state);
+  // Deliberately not awaited: the reply goes back now so the popup repaints as
+  // "Scanning…" instead of hanging for the 60–90s the cycle takes. The keepalive
+  // inside runCycle (§17 decision 1) is what keeps the worker alive meanwhile.
+  void runLockedCycle(settings, pages);
+  return { started: true };
+}
+
 /** The alarm handler — the whole cadence in one place (PRD §9). */
 async function onAlarm(): Promise<void> {
   const settings = await get("settings");
@@ -377,25 +442,23 @@ async function onAlarm(): Promise<void> {
     return;
   }
 
-  const { pages, state } = beginScan(
-    recovered.state,
-    Date.now(),
-    settings.catchUpPages,
-    settings.pagesPerScan,
-  );
-  await set("scanState", state);
-  try {
-    await runCycle(settings, pages);
-  } finally {
-    await set("scanState", endScan(await get("scanState")));
-    await armNextAlarm(settings);
-  }
+  await runLockedCycle(settings, await takeScanLock(settings, recovered.state));
 }
 
 // ── Wiring ─────────────────────────────────────────────────────────────────────
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM_NAME) void onAlarm();
+});
+
+/** The popup / jobs tab asking for a scan right now. Returning `true` keeps the
+ *  message channel open for the async reply; the reply lands as soon as the lock
+ *  is resolved, not when the cycle ends. Other message types are ignored (the
+ *  content script is messaged the other way round, via `chrome.tabs.sendMessage`). */
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if ((message as ScanNowRequest | undefined)?.type !== "LJW_SCAN_NOW") return;
+  void runScanNow().then(sendResponse);
+  return true;
 });
 
 /** Notification click (PRD §3/§9): open our own list, never LinkedIn, and clear

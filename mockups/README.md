@@ -12,7 +12,7 @@ files directly in a browser (`file://…`):
 | File | What it shows |
 | --- | --- |
 | [`popup.html`](./popup.html) | The list view as the **popup** — ~380px, New mode, unread rows, a field-missing row |
-| [`jobs.html`](./jobs.html) | The **same** component as the full **tab** — wider, All mode, read rows on screen, scanning banner |
+| [`jobs.html`](./jobs.html) | The **same** component as the full **tab** — wider, All mode, read rows on screen, mid-scan status bar |
 | [`states.html`](./states.html) | All five **empty / degraded** states side by side |
 | [`options.html`](./options.html) | The **options** page — one long scroll, sectioned |
 | [`tokens.css`](./tokens.css) | Design tokens + component styles, light **and** dark |
@@ -67,6 +67,16 @@ dimmed, no dot, un-bold. The badge count decrements either way.
 **7. Styling — plain CSS with one design-token file, light and dark.** Tokens
 live in `:root` and are redefined under `@media (prefers-color-scheme: dark)`, so
 the extension follows the OS with zero JS. Both themes ship. No CSS framework.
+
+Icons are **[Lucide](https://lucide.dev), inlined as SVG** by
+[`src/icons.ts`](../src/icons.ts) — one `icon(name)` call per glyph, no npm
+dependency and no build step, so `node --test` and these `file://` mockups both
+keep working. They replaced the literal characters (`✓ ↺ ⊘ ⚙ ✕`) and the
+empty-state emoji, which rendered at a different weight on every platform and —
+emoji especially — arrived pre-coloured, ignoring the theme entirely. Every icon
+is stroked in `currentColor`, so one asset covers hover, pressed, disabled and
+dark mode, and every icon is `aria-hidden`: the control around it carries the
+label.
 
 **8. Options page — one long plain page, labelled section cards, no tabs.** It's
 rarely opened, so it leans plain (per the issue). Sections: **Searches**

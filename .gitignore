@@ -2,6 +2,12 @@ node_modules/
 dist/
 .DS_Store
 
+# Local credentials for scripts/send-test-message.ts (see .env.example).
+# Dev-script only — the extension itself reads NO env vars; the Telegram token
+# it uses at runtime is entered in the Options page and lives in chrome.storage.
+.env
+.env.local
+
 # Wayfinder maps, tickets, research notes and captured page fixtures.
 # Fixtures are saved from a logged-in LinkedIn session and must never be committed.
 .scratch/

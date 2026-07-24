@@ -32,8 +32,9 @@
       <header class="hdr">
         <span class="hdr-title">New jobs</span>
         <span class="badge">4</span>
+        <button class="hdr-btn" data-scan-state="idle" title="Scan every enabled search right now">Scan now</button>
         <button class="hdr-btn" title="Mark all as read">Mark all read</button>
-        <button class="hdr-btn" title="Options">⚙</button>
+        <button class="hdr-btn icon-only" title="Options" aria-label="Options"><svg class="lucide lucide-settings" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></svg></button>
       </header>
 
       <div class="toolbar">
@@ -48,52 +49,85 @@
         </div>
       </div>
 
+      <!-- Every row carries its two actions: Block puts the company on the
+           blocklist (and asks first — see jobs.html), the tick dismisses just
+           that job. Clicking the row itself opens the posting and leaves the row
+           here, highlighted. -->
       <div class="list">
         <!-- Unread: filled dot, bold title -->
-        <a
-          class="job"
-          href="#"
-          data-job-id="3901"
-          data-read="false"
-        >
-          <span class="job-dot" aria-hidden="true"></span>
-          <span class="job-body">
-            <span class="job-title">Senior Software Engineer</span>
-            <span class="job-meta">Acme Corp · Jakarta, Indonesia</span>
-            <span class="job-foot">2 hours ago · Indonesia</span>
+        <div class="job" data-job-id="3901" data-read="false" data-opened="false" data-blocked="false">
+          <a class="job-main" href="#">
+            <span class="job-dot" aria-hidden="true"></span>
+            <span class="job-body">
+              <span class="job-title">Senior Software Engineer</span>
+              <span class="job-meta">Acme Corp · Jakarta, Indonesia</span>
+              <span class="job-foot">2 hours ago · Indonesia</span>
+            </span>
+          </a>
+          <span class="job-actions">
+            <button class="job-btn job-btn-block" data-action="block" data-armed="false" aria-pressed="false" title="Block Acme Corp" aria-label="Block Acme Corp"><svg class="lucide lucide-ban" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M4.929 4.929 19.07 19.071"/></svg><span class="job-btn-label">Block</span></button>
+            <button class="job-btn" data-action="read" aria-pressed="false" title="Mark as read" aria-label="Mark as read"><svg class="lucide lucide-check" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></button>
           </span>
-        </a>
+        </div>
 
-        <a class="job" href="#" data-job-id="3902" data-read="false">
-          <span class="job-dot" aria-hidden="true"></span>
-          <span class="job-body">
-            <span class="job-title">Backend Engineer (Go)</span>
-            <span class="job-meta">PT Data Nusantara · Remote</span>
-            <span class="job-foot">40 minutes ago · Indonesia</span>
+        <!-- Opened: you clicked through to this one. Tinted with an accent bar,
+             still unread, still here — only the tick removes it from New. -->
+        <div class="job" data-job-id="3902" data-read="false" data-opened="true" data-blocked="false">
+          <a class="job-main" href="#">
+            <span class="job-dot" aria-hidden="true"></span>
+            <span class="job-body">
+              <span class="job-title">Backend Engineer (Go)</span>
+              <span class="job-meta">PT Data Nusantara · Remote</span>
+              <span class="job-foot">40 minutes ago · Indonesia</span>
+            </span>
+          </a>
+          <span class="job-actions">
+            <button class="job-btn job-btn-block" data-action="block" data-armed="false" aria-pressed="false" title="Block PT Data Nusantara" aria-label="Block PT Data Nusantara"><svg class="lucide lucide-ban" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M4.929 4.929 19.07 19.071"/></svg><span class="job-btn-label">Block</span></button>
+            <button class="job-btn" data-action="read" aria-pressed="false" title="Mark as read" aria-label="Mark as read"><svg class="lucide lucide-check" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></button>
           </span>
-        </a>
+        </div>
 
         <!-- Missing location: the meta line degrades to just the company,
              no dangling separator (see #9 / render.ts metaLine). -->
-        <a class="job" href="#" data-job-id="3903" data-read="false">
-          <span class="job-dot" aria-hidden="true"></span>
-          <span class="job-body">
-            <span class="job-title">Platform Engineer, Payments</span>
-            <span class="job-meta">Momo Financial</span>
-            <span class="job-foot">1 hour ago · Japan</span>
+        <div class="job" data-job-id="3903" data-read="false" data-opened="false" data-blocked="false">
+          <a class="job-main" href="#">
+            <span class="job-dot" aria-hidden="true"></span>
+            <span class="job-body">
+              <span class="job-title">Platform Engineer, Payments</span>
+              <span class="job-meta">Momo Financial</span>
+              <span class="job-foot">1 hour ago · Japan</span>
+            </span>
+          </a>
+          <span class="job-actions">
+            <button class="job-btn job-btn-block" data-action="block" data-armed="false" aria-pressed="false" title="Block Momo Financial" aria-label="Block Momo Financial"><svg class="lucide lucide-ban" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M4.929 4.929 19.07 19.071"/></svg><span class="job-btn-label">Block</span></button>
+            <button class="job-btn" data-action="read" aria-pressed="false" title="Mark as read" aria-label="Mark as read"><svg class="lucide lucide-check" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></button>
           </span>
-        </a>
+        </div>
 
-        <!-- Missing posted time: the foot line falls back to just the watch. -->
-        <a class="job" href="#" data-job-id="3904" data-read="false">
-          <span class="job-dot" aria-hidden="true"></span>
-          <span class="job-body">
-            <span class="job-title">Staff Frontend Engineer</span>
-            <span class="job-meta">Rakuten · Tokyo, Japan</span>
-            <span class="job-foot">Japan</span>
+        <!-- Blocked company: greyed and tagged, but still on screen — blocking
+             stops FUTURE scans surfacing it, it doesn't delete what's here. The
+             Block button is pressed, so it now reads "Unblock". Also shows the
+             missing posted time degrading to just the watch name. -->
+        <div class="job" data-job-id="3904" data-read="false" data-opened="false" data-blocked="true">
+          <a class="job-main" href="#">
+            <span class="job-dot" aria-hidden="true"></span>
+            <span class="job-body">
+              <span class="job-title">Staff Frontend Engineer</span>
+              <span class="job-meta">Rakuten · Tokyo, Japan</span>
+              <span class="job-foot">Japan<span class="job-tag">Blocked</span></span>
+            </span>
+          </a>
+          <span class="job-actions">
+            <button class="job-btn job-btn-block" data-action="block" data-armed="false" aria-pressed="true" title="Unblock Rakuten" aria-label="Unblock Rakuten"><svg class="lucide lucide-ban" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M4.929 4.929 19.07 19.071"/></svg><span class="job-btn-label">Unblock</span></button>
+            <button class="job-btn" data-action="read" aria-pressed="false" title="Mark as read" aria-label="Mark as read"><svg class="lucide lucide-check" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></button>
           </span>
-        </a>
+        </div>
       </div>
+
+      <!-- The status bar in its everyday state: nothing is happening, and this
+           is the only thing on screen that says so. The countdown ticks once a
+           second (mount.ts rewrites just this footer, never the list). -->
+      <footer class="statusbar"><div class="scan-status" data-kind="waiting"><svg class="lucide lucide-clock" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 6v6l4 2"/><circle cx="12" cy="12" r="10"/></svg><span class="scan-status-text">Next scan in 4m 12s</span></div></footer>
     </div>
   </body>
 </html>

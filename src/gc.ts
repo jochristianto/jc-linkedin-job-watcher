@@ -30,7 +30,7 @@ export type GcResult = {
 
 /**
  * Prune on two lifetimes (§7). A full `jobs` record lives `openedJobDays` once
- * opened, `unopenedJobDays` otherwise — measured from `foundAt`. A `seen` id
+ * opened or read, `unopenedJobDays` otherwise — measured from `foundAt`. A `seen` id
  * lives `seenDays`, measured from when it was first seen. The two are
  * independent: dropping a job's full record **keeps** its `seen` entry (§6), so
  * a role whose record has aged out is still never re-alerted.
@@ -45,10 +45,13 @@ export type GcResult = {
 export function collectGarbage(state: GcState, now: number): GcResult {
   const { seen, jobs, retention: r } = state;
 
-  // Full records: shorter life once opened.
+  // Full records: shorter life once you've dealt with the job — whether that was
+  // opening it or dismissing it with the row's tick. Either way the title and
+  // company are dead weight sooner than for one you never touched.
   const keptJobs: JobsMap = {};
   for (const [id, job] of Object.entries(jobs)) {
-    const limit = (job.opened ? r.openedJobDays : r.unopenedJobDays) * DAY;
+    const handled = job.opened || job.read;
+    const limit = (handled ? r.openedJobDays : r.unopenedJobDays) * DAY;
     if (now - job.foundAt < limit) keptJobs[id] = job;
   }
 

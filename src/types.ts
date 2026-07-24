@@ -26,8 +26,16 @@ export type Job = {
   url: string;
   foundAt: number;
   watchId: string; // which saved search surfaced it
+  // `opened` and `read` are two different things, and keeping them apart is the
+  // whole point of the row's two states. Opening a job is *looking* at it: the
+  // row stays in the list, highlighted, because clicking a title you then want
+  // to come back to should not make it vanish. Marking it read is *dismissing*
+  // it: only that drops it out of "New" and off the badge, and only the row's
+  // own tick button does it.
   opened: boolean;
   openedAt: number | null;
+  read: boolean;
+  readAt: number | null;
 };
 
 export type Watch = {

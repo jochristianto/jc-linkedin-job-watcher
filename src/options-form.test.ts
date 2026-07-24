@@ -7,6 +7,7 @@ import {
   parseWatchInput,
   parseSettingsForm,
   settingsToForm,
+  applyPushPrefill,
   type OptionsFormValues,
 } from "./options-form.ts";
 import { DEFAULT_SETTINGS, type Settings } from "./types.ts";
@@ -179,4 +180,53 @@ test("settingsToForm then parseSettingsForm reproduces the settings", () => {
   const r = parseSettingsForm(form, DEFAULT_SETTINGS);
   assert.ok(r.ok);
   assert.deepEqual(r.settings, DEFAULT_SETTINGS);
+});
+
+// ── applyPushPrefill: the build:dev .env seed (defaults, never an override) ───
+
+test("applyPushPrefill is a no-op for a normal build, where the prefill is null", () => {
+  const form = validForm({ pushBotToken: "", pushChatId: "" });
+  assert.equal(applyPushPrefill(form, null), form); // same reference
+});
+
+test("applyPushPrefill fills blank credentials from .env", () => {
+  const form = validForm({ pushBotToken: "", pushChatId: "" });
+  const out = applyPushPrefill(form, { botToken: "123:ABC", chatId: "999" });
+  assert.equal(out.pushBotToken, "123:ABC");
+  assert.equal(out.pushChatId, "999");
+});
+
+test("applyPushPrefill never clobbers a credential the user already saved", () => {
+  const form = validForm({ pushBotToken: "mine", pushChatId: "my-chat" });
+  const out = applyPushPrefill(form, { botToken: "from-env", chatId: "env-chat" });
+  assert.equal(out.pushBotToken, "mine");
+  assert.equal(out.pushChatId, "my-chat");
+  assert.equal(out, form); // nothing changed, so the same reference comes back
+});
+
+test("applyPushPrefill fills only the blank half when one is already set", () => {
+  const form = validForm({ pushBotToken: "mine", pushChatId: "" });
+  const out = applyPushPrefill(form, { botToken: "from-env", chatId: "env-chat" });
+  assert.equal(out.pushBotToken, "mine");
+  assert.equal(out.pushChatId, "env-chat");
+});
+
+test("applyPushPrefill leaves the rest of the form untouched", () => {
+  const form = validForm({ pushBotToken: "", pushChatId: "" });
+  const out = applyPushPrefill(form, { botToken: "123:ABC", chatId: "999" });
+  assert.deepEqual(
+    { ...out, pushBotToken: "", pushChatId: "" },
+    form,
+  );
+});
+
+test("a prefilled form still round-trips into Settings", () => {
+  const form = applyPushPrefill(
+    validForm({ pushBotToken: "", pushChatId: "" }),
+    { botToken: "123:ABC", chatId: "999" },
+  );
+  const r = parseSettingsForm(form, DEFAULT_SETTINGS);
+  assert.ok(r.ok);
+  assert.equal(r.settings.push.botToken, "123:ABC");
+  assert.equal(r.settings.push.chatId, "999");
 });

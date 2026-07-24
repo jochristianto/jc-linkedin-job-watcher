@@ -18,6 +18,8 @@ function job(overrides: Partial<Job> & { id: string }): Job {
     watchId: "w1",
     opened: false,
     openedAt: null,
+    read: false,
+    readAt: null,
     ...overrides,
   };
 }

@@ -2,29 +2,41 @@
 //
 // The pure bridge between stored `Job` records and the tested markup functions
 // in render.ts. It resolves a job's watch name, orders the list newest-first,
-// counts the unopened badge, marks a job opened, and assembles the whole page
+// counts the unread badge, applies the row actions (open / read / block), and assembles the whole page
 // (header + badge + list-or-empty-state) as one string. No chrome.*, no DOM,
 // no clock — `now` is injected — so `node --test` proves the badge count and
 // empty-state choice with plain values. The side-effect wrapper that reads
 // storage, sets innerHTML and opens tabs lives in mount.ts (§14, untested).
 
-import type { Job, Watch, HealthState } from "./types.ts";
+import type { Job, Watch, HealthState, BlockedCompany, QuietHours } from "./types.ts";
 import type { JobsMap } from "./storage.ts";
 import { PUSH_FAILING_MESSAGE } from "./health.ts";
+import { isWithinQuietHours, minutesOfDay } from "./schedule.ts";
+// `makeBlockedCompany` is the write-side normalizer the Options blocklist field
+// uses too, so a company blocked from a row and one typed into Options end up in
+// the identical shape.
+import { isCompanyBlocked, normalizeCompany, makeBlockedCompany } from "./filter.ts";
+import { icon } from "./icons.ts";
 import {
   esc,
   renderList,
   renderEmptyState,
+  renderScanButton,
+  renderScanStatus,
   renderToolbar,
   type JobView,
   type ListMode,
   type EmptyKind,
+  type ScanButtonState,
+  type ScanStatus,
 } from "./render.ts";
 
 /** Map a stored `Job` to the flat `JobView` the markup functions consume. The
  *  watch name is looked up from settings; an unknown/removed watchId degrades
- *  to a blank name rather than dropping the row (PRD §12, fields fail alone). */
-function toJobView(job: Job, watches: Watch[]): JobView {
+ *  to a blank name rather than dropping the row (PRD §12, fields fail alone).
+ *  `blocked` is derived, never stored: the blocklist is the single source of
+ *  truth, so unblocking a company un-greys its rows with no per-job fixup. */
+function toJobView(job: Job, watches: Watch[], blockedNormalized: string[]): JobView {
   const watch = watches.find((w) => w.id === job.watchId);
   return {
     id: job.id,
@@ -35,52 +47,108 @@ function toJobView(job: Job, watches: Watch[]): JobView {
     watchName: watch?.name ?? "",
     url: job.url,
     opened: job.opened,
+    read: job.read,
+    blocked: isCompanyBlocked(job.company, blockedNormalized),
   };
 }
 
 /** All jobs as views, ordered newest-first by `foundAt` (PRD §5). */
-export function toJobViews(jobs: Job[], watches: Watch[]): JobView[] {
+export function toJobViews(
+  jobs: Job[],
+  watches: Watch[],
+  blockedNormalized: string[] = [],
+): JobView[] {
   return [...jobs]
     .sort((a, b) => b.foundAt - a.foundAt)
-    .map((j) => toJobView(j, watches));
+    .map((j) => toJobView(j, watches, blockedNormalized));
 }
 
-/** The badge number: how many jobs are still unopened (PRD §5). */
-export function unopenedCount(jobs: Job[]): number {
-  return jobs.filter((j) => !j.opened).length;
+/** The badge number: how many jobs are still unread and not blocked — the same
+ *  rule the toolbar badge uses (see `unreadCount` in scan.ts). Opening a job
+ *  doesn't move this; only the row's tick does. */
+export function unreadCount(jobs: Job[], blockedNormalized: string[] = []): number {
+  return jobs.filter((j) => !j.read && !isCompanyBlocked(j.company, blockedNormalized)).length;
 }
 
 /**
- * Mark one job opened at `now`, immutably. Returns a new map with just that
- * entry replaced; the original is untouched and an unknown id is a no-op (the
- * same reference comes back). The storage write that persists this happens in
- * mount.ts **before** the tab opens (PRD §9).
+ * Mark one job opened at `now`, immutably — the trace of "you clicked this and
+ * we opened the posting". It highlights the row and nothing else: the job stays
+ * in the list, stays unread, stays on the badge. Returns a new map with just
+ * that entry replaced; the original is untouched and an unknown id is a no-op
+ * (the same reference comes back). The storage write that persists this happens
+ * in mount.ts **before** the tab opens (PRD §9). Re-opening a job keeps the
+ * first `openedAt` — it records when you first looked, not most recently.
  */
 export function markJobOpened(jobs: JobsMap, id: string, now: number): JobsMap {
   const job = jobs[id];
   if (!job) return jobs;
+  if (job.opened) return jobs;
   return { ...jobs, [id]: { ...job, opened: true, openedAt: now } };
 }
 
 /**
- * Mark every unopened job opened at `now`, immutably (the "Mark all as read"
- * action, mockups decision 4). Already-opened jobs keep their original
- * `openedAt`; only the unopened ones flip. Returns the same reference when there
- * was nothing to open, so mount.ts can skip a redundant storage write. mount.ts
- * persists this and clears the toolbar badge in one action.
+ * Set one job's read flag, immutably — the row's tick button, which is now the
+ * *only* thing that dismisses a job. `read: false` puts it back (the same button
+ * toggles), clearing `readAt` so an un-dismissed job is indistinguishable from
+ * one never read. Returns the same reference when the flag already matched or
+ * the id is unknown, so mount.ts can skip a redundant storage write.
  */
-export function markAllOpened(jobs: JobsMap, now: number): JobsMap {
+export function setJobRead(jobs: JobsMap, id: string, read: boolean, now: number): JobsMap {
+  const job = jobs[id];
+  if (!job || job.read === read) return jobs;
+  return { ...jobs, [id]: { ...job, read, readAt: read ? now : null } };
+}
+
+/**
+ * Mark every unread job read at `now`, immutably (the "Mark all as read" action,
+ * mockups decision 4). Already-read jobs keep their original `readAt`; only the
+ * unread ones flip. Returns the same reference when there was nothing to mark,
+ * so mount.ts can skip a redundant storage write. mount.ts persists this and
+ * clears the toolbar badge in one action.
+ */
+export function markAllRead(jobs: JobsMap, now: number): JobsMap {
   let changed = false;
   const next: JobsMap = {};
   for (const [id, job] of Object.entries(jobs)) {
-    if (job.opened) {
+    if (job.read) {
       next[id] = job;
     } else {
-      next[id] = { ...job, opened: true, openedAt: now };
+      next[id] = { ...job, read: true, readAt: now };
       changed = true;
     }
   }
   return changed ? next : jobs;
+}
+
+/**
+ * Toggle a company on the blocklist — the row's ban button, in both directions.
+ *
+ * Blocking appends the same `{display, normalized}` pair the Options field
+ * writes. Unblocking removes **every entry that matches this company**, not just
+ * an exact-name one: entries match as substrings (PRD §6, so one "acme" catches
+ * "PT Acme Indonesia"), and leaving a fragment behind that still blocks the
+ * company would make the button look broken. The cost is that unblocking via a
+ * row can widen further than that one company — which is inherent to a substring
+ * blocklist, and visible in Options.
+ *
+ * Returns the same reference when nothing changed (a blank company, or a block
+ * of something already blocked), so the caller can skip the settings write.
+ */
+export function toggleBlockedCompany(
+  blocked: BlockedCompany[],
+  company: string,
+  block: boolean,
+): BlockedCompany[] {
+  const normalized = normalizeCompany(company);
+  if (!normalized) return blocked;
+
+  if (block) {
+    if (isCompanyBlocked(company, blocked.map((b) => b.normalized))) return blocked;
+    return [...blocked, makeBlockedCompany(company.trim())];
+  }
+
+  const kept = blocked.filter((b) => !normalized.includes(b.normalized));
+  return kept.length === blocked.length ? blocked : kept;
 }
 
 /** Everything the page needs to render itself — assembled by the caller from
@@ -92,12 +160,24 @@ export type ViewContext = {
   title: string;
   /** The watch chip currently filtering the list (mockups decision 4), or
    *  null/undefined for "All watches". Filters the *list*; the badge still
-   *  counts unopened across every watch. */
+   *  counts unread across every watch. */
   activeWatchId?: string | null;
+  /** `settings.blockedCompanies`, already-normalized fragments. Greys the rows
+   *  whose company matches and flips their Block button to Unblock; those rows
+   *  stay on screen, they just stop counting towards the badge. */
+  blockedCompanies?: string[];
+  /** The row whose Block button was pressed once and is now asking "Sure?".
+   *  Blocking a company is the one row action that changes what future scans
+   *  surface, so it takes two presses; mount.ts owns this id and clears it on
+   *  the next click or after `BLOCK_CONFIRM_MS`. */
+  armedBlockId?: string | null;
   /** A scan cycle is holding the lock right now (`scanState.isScanning`). Only
    *  changes the empty state: with nothing yet to show it reads "Scanning…"
    *  instead of "Nothing scanned yet" (mockups decision 5). */
   scanning?: boolean;
+  /** The persisted scan mode (`health.mode`). Only the manual scan control reads
+   *  it: a `halted` cycle (§16.2) turns "Scan now" into "Resume scanning". */
+  scanMode?: HealthState["mode"];
   severity?: HealthState["severity"];
   /** The health banner text (PRD §16.8), or null/undefined when healthy. Shown as
    *  a one-line banner above the list, tinted by `severity`. */
@@ -108,6 +188,19 @@ export type ViewContext = {
    *  renders as its own amber banner, alongside any health banner. Never a desktop
    *  notification. */
   pushWarn?: boolean;
+  /** When the armed one-shot alarm is due to fire (`chrome.alarms.get(...)
+   *  .scheduledTime`), or null/undefined when no alarm exists. The footer counts
+   *  down to it. Read from the alarm rather than recomputed here: jitter, back-off
+   *  and the quiet-hours jump were already decided when it was armed, so anything
+   *  this view computed for itself would be a *different* draw from the same dice. */
+  nextScanAt?: number | null;
+  /** `settings.quietHours` — only used to explain a countdown that is hours long
+   *  instead of minutes (PRD §15, decision 4). Nothing is suppressed by it; the
+   *  alarm already accounts for the window. */
+  quietHours?: QuietHours;
+  /** The clock, injected so the countdown is a pure function of its inputs
+   *  (PRD §14). Defaults to `Date.now()` for callers that render no countdown. */
+  now?: number;
 };
 
 /** Choose the empty/degraded message when nothing is visible. A broken scan
@@ -122,24 +215,76 @@ function pickEmptyKind(ctx: ViewContext, total: number): EmptyKind {
 }
 
 /**
- * The whole view as one markup string: header (title + unopened badge + Options
- * button) over the list. `renderList` filters opened jobs out of "new" mode; if
+ * Which state the header's manual scan control renders in. An in-flight cycle
+ * wins over everything — while the lock is held there is nothing to start, even
+ * if health is halted — otherwise a halted cycle labels the control as the
+ * manual resume it is (§16.2). Everything else is the plain idle button.
+ */
+export function scanButtonState(ctx: ViewContext): ScanButtonState {
+  if (ctx.scanning) return "scanning";
+  if (ctx.scanMode === "halted") return "halted";
+  return "idle";
+}
+
+/**
+ * What the footer status bar says — the answer to "is this thing still running?".
+ *
+ * The order is the priority order. A live cycle wins over everything: while the
+ * lock is held the extension *is* scanning, whatever the schedule or the health
+ * record say. A halted loop comes next, because there is genuinely nothing armed
+ * to count down to (§16.2 waits for a manual resume). With no enabled search
+ * there is nothing to scan either, so the bar goes away entirely rather than
+ * promise a scan that would find nothing. Only then is it a countdown — and a
+ * `nextScanAt` already in the past means the alarm has fired but its cycle hasn't
+ * reached storage yet, which is `due`, not a negative number.
+ *
+ * A `paused` (logged-out) loop deliberately gets a normal countdown: §16.1 keeps
+ * scanning so a later `ok` scan can auto-resume it, so the next scan really is
+ * coming. The health banner above already explains the situation.
+ */
+export function scanStatus(ctx: ViewContext): ScanStatus {
+  if (ctx.scanning) return { kind: "scanning" };
+  if (ctx.scanMode === "halted") return { kind: "halted" };
+  if (!ctx.watches.some((w) => w.enabled)) return { kind: "off" };
+  if (ctx.nextScanAt == null) return { kind: "unscheduled" };
+
+  const now = ctx.now ?? Date.now();
+  const remainingMs = ctx.nextScanAt - now;
+  if (remainingMs <= 0) return { kind: "due" };
+
+  // Quiet hours are a local-clock window (§15), hence the Date round-trip.
+  const quiet = ctx.quietHours
+    ? isWithinQuietHours(minutesOfDay(new Date(now)), ctx.quietHours)
+    : false;
+  return { kind: "waiting", remainingMs, quiet };
+}
+
+/**
+ * The whole view as one markup string: header (title + unopened badge + Scan
+ * now + Options button) over the list, with the scan status bar as the footer.
+ * `renderList` filters opened jobs out of "new" mode; if
  * that leaves nothing to show, a distinct empty state takes the list's place.
  * The popup and the tab call this identically — they differ only by the
  * `.view-popup` / `.view-tab` class on the mount root, never by branch here.
+ *
+ * The footer is rendered as a slot: mount.ts rewrites `#statusbar`'s contents
+ * once a second to tick the countdown, and repainting the whole page that often
+ * would throw away the user's scroll position.
  */
 export function renderPage(ctx: ViewContext): string {
-  // The badge always counts unopened across every watch — it mirrors the toolbar
+  const blockedCompanies = ctx.blockedCompanies ?? [];
+
+  // The badge always counts unread across every watch — it mirrors the toolbar
   // action badge, which the chip filter must not change (mockups decision 4).
-  const badge = unopenedCount(ctx.jobs);
+  const badge = unreadCount(ctx.jobs, blockedCompanies);
 
   // The chip filters the *list*: an active watch drops jobs from other watches.
   const activeWatchId = ctx.activeWatchId || null;
   const listJobs = activeWatchId
     ? ctx.jobs.filter((j) => j.watchId === activeWatchId)
     : ctx.jobs;
-  const views = toJobViews(listJobs, ctx.watches);
-  const visible = ctx.mode === "new" ? views.filter((v) => !v.opened) : views;
+  const views = toJobViews(listJobs, ctx.watches, blockedCompanies);
+  const visible = ctx.mode === "new" ? views.filter((v) => !v.read) : views;
 
   const toolbar = renderToolbar(
     ctx.watches.map((w) => ({ id: w.id, name: w.name })),
@@ -148,7 +293,7 @@ export function renderPage(ctx: ViewContext): string {
   );
 
   const body = visible.length
-    ? renderList(views, ctx.mode)
+    ? renderList(views, ctx.mode, ctx.armedBlockId ?? null)
     : renderEmptyState(pickEmptyKind(ctx, views.length));
 
   const healthBanner = ctx.message
@@ -164,11 +309,13 @@ export function renderPage(ctx: ViewContext): string {
     <header class="hdr">
       <span class="hdr-title">${esc(ctx.title)}</span>
       ${badge > 0 ? `<span class="badge">${badge}</span>` : ""}
+      ${renderScanButton(scanButtonState(ctx))}
       <button class="hdr-btn" id="mark-all-read" title="Mark all as read">Mark all read</button>
-      <button class="hdr-btn" id="open-options" title="Options" aria-label="Options">⚙</button>
+      <button class="hdr-btn icon-only" id="open-options" title="Options" aria-label="Options">${icon("settings")}</button>
     </header>
     ${toolbar}
     ${healthBanner}
     ${pushBanner}
-    <div class="list">${body}</div>`.trim();
+    <div class="list">${body}</div>
+    <footer class="statusbar" id="statusbar">${renderScanStatus(scanStatus(ctx))}</footer>`.trim();
 }

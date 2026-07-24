@@ -8,9 +8,13 @@ import {
   renderEmptyState,
   renderChips,
   renderModeToggle,
+  renderScanButton,
+  renderScanStatus,
+  formatCountdown,
   renderToolbar,
   type JobView,
   type ChipWatch,
+  type EmptyKind,
 } from "./render.ts";
 
 function job(overrides: Partial<JobView> = {}): JobView {
@@ -23,6 +27,8 @@ function job(overrides: Partial<JobView> = {}): JobView {
     watchName: "Indonesia",
     url: "https://www.linkedin.com/jobs/view/3901/",
     opened: false,
+    read: false,
+    blocked: false,
     ...overrides,
   };
 }
@@ -51,9 +57,111 @@ test("renderJobRow shows the title and a company/location meta line", () => {
   assert.match(html, /Indonesia/);
 });
 
-test("renderJobRow marks unopened jobs unread and opened jobs read", () => {
-  assert.match(renderJobRow(job({ opened: false })), /data-read="false"/);
-  assert.match(renderJobRow(job({ opened: true })), /data-read="true"/);
+test("renderJobRow marks read jobs read — and opening one does NOT read it", () => {
+  assert.match(renderJobRow(job({ read: false })), /data-read="false"/);
+  assert.match(renderJobRow(job({ read: true })), /data-read="true"/);
+  // The bug this whole split exists to fix: clicking a row used to dismiss it.
+  assert.match(renderJobRow(job({ opened: true })), /data-read="false"/);
+});
+
+test("renderJobRow flags an opened job so its row can be highlighted, not hidden", () => {
+  assert.match(renderJobRow(job({ opened: false })), /data-opened="false"/);
+  assert.match(renderJobRow(job({ opened: true })), /data-opened="true"/);
+});
+
+test("renderJobRow gives every row its own read and block buttons", () => {
+  const html = renderJobRow(job());
+  assert.match(html, /data-action="read"/);
+  assert.match(html, /data-action="block"/);
+});
+
+test("renderJobRow's read button is a toggle: mark as read, then back to unread", () => {
+  assert.match(renderJobRow(job({ read: false })), /data-action="read" aria-pressed="false"/);
+  assert.match(renderJobRow(job({ read: false })), /title="Mark as read"/);
+  assert.match(renderJobRow(job({ read: true })), /data-action="read" aria-pressed="true"/);
+  assert.match(renderJobRow(job({ read: true })), /title="Mark as unread"/);
+});
+
+test("renderJobRow's block button names the company and flips to Unblock", () => {
+  assert.match(renderJobRow(job({ blocked: false })), /title="Block Acme Corp"/);
+  assert.match(renderJobRow(job({ blocked: true })), /title="Unblock Acme Corp"/);
+  assert.match(renderJobRow(job({ blocked: true })), /data-action="block"[^>]*aria-pressed="true"/);
+});
+
+test("renderJobRow spells the block action out — the button says Block or Unblock", () => {
+  // The word, not just the tooltip: a lone ban icon reads as "not allowed"
+  // rather than as a control, and block vs unblock was invisible until hover.
+  assert.match(renderJobRow(job({ blocked: false })), /class="job-btn-label">Block</);
+  assert.match(renderJobRow(job({ blocked: true })), /class="job-btn-label">Unblock</);
+});
+
+test("renderJobRow puts Block before the tick, so the tick sits at the row's edge", () => {
+  const html = renderJobRow(job());
+  assert.ok(
+    html.indexOf('data-action="block"') < html.indexOf('data-action="read"'),
+    "block button should render before the read button",
+  );
+});
+
+test("renderJobRow's armed block button asks instead of blocking", () => {
+  const armed = renderJobRow(job(), true);
+  assert.match(armed, /data-armed="true"/);
+  assert.match(armed, /class="job-btn-label">Sure\?</);
+  // The label has to say what the second press does — "Sure?" alone tells a
+  // screen reader nothing about which company is about to be blocked.
+  assert.match(armed, /aria-label="Block Acme Corp — press again to confirm"/);
+});
+
+test("renderJobRow leaves the block button unarmed by default", () => {
+  assert.match(renderJobRow(job()), /data-armed="false"/);
+  assert.doesNotMatch(renderJobRow(job()), /Sure\?/);
+});
+
+test("renderJobRow escapes the company inside an armed button's label too", () => {
+  const html = renderJobRow(job({ company: 'A&B <"x">' }), true);
+  assert.match(html, /title="Block A&amp;B &lt;&quot;x&quot;&gt; — press again to confirm"/);
+  assert.doesNotMatch(html, /<"x">/);
+});
+
+test("renderJobRow's row actions are Lucide icons, and the read one flips", () => {
+  assert.match(renderJobRow(job({ read: false })), /lucide-check/);
+  assert.match(renderJobRow(job({ read: true })), /lucide-rotate-ccw/);
+  assert.match(renderJobRow(job()), /lucide-ban/);
+  // The icon is decorative; the button's own aria-label is what gets announced.
+  const html = renderJobRow(job());
+  assert.match(html, /aria-label="Mark as read"[^>]*><svg[^>]*aria-hidden="true"/);
+});
+
+test("renderJobRow escapes the company inside the block button's label", () => {
+  const html = renderJobRow(job({ company: 'A&B <"x">' }));
+  assert.match(html, /title="Block A&amp;B &lt;&quot;x&quot;&gt;"/);
+  assert.doesNotMatch(html, /<"x">/);
+});
+
+test("renderJobRow drops the block button when no company was parsed", () => {
+  // Nothing to blocklist — better no button than one that blocklists "" and
+  // silently matches every job (PRD §12: fields fail independently).
+  const html = renderJobRow(job({ company: "   " }));
+  assert.doesNotMatch(html, /data-action="block"/);
+  assert.match(html, /data-action="read"/);
+});
+
+test("renderJobRow marks a blocked job and says why it is greyed", () => {
+  const html = renderJobRow(job({ blocked: true }));
+  assert.match(html, /data-blocked="true"/);
+  assert.match(html, /class="job-tag">Blocked</);
+  assert.doesNotMatch(renderJobRow(job({ blocked: false })), /job-tag/);
+});
+
+test("renderJobRow shows the Blocked tag even when the foot line is empty", () => {
+  const html = renderJobRow(job({ postedText: "", watchName: "", blocked: true }));
+  assert.match(html, /class="job-tag">Blocked</);
+});
+
+test("renderJobRow keeps the buttons out of the anchor (a button inside <a> is invalid)", () => {
+  const html = renderJobRow(job());
+  const anchor = html.slice(html.indexOf("<a class=\"job-main\""), html.indexOf("</a>"));
+  assert.doesNotMatch(anchor, /<button/);
 });
 
 test("renderJobRow carries the job id and url for click handling", () => {
@@ -88,25 +196,54 @@ test("renderJobRow escapes every field so scraped text cannot break markup", () 
   assert.doesNotMatch(html, /<lead>/);
 });
 
-test("renderList in 'new' mode hides jobs already opened", () => {
+test("renderList in 'new' mode hides jobs already read", () => {
   const jobs = [
-    job({ id: "1", opened: false }),
-    job({ id: "2", opened: true }),
+    job({ id: "1", read: false }),
+    job({ id: "2", read: true }),
   ];
   const html = renderList(jobs, "new");
   assert.match(html, /data-job-id="1"/);
   assert.doesNotMatch(html, /data-job-id="2"/);
 });
 
-test("renderList in 'all' mode keeps opened jobs (they stay on screen, read)", () => {
+test("renderList in 'new' mode KEEPS a job you merely opened", () => {
+  // The reported bug: clicking a row made it vanish from New for good. Opening
+  // now only highlights it — it stays until you tick it read.
+  const html = renderList([job({ id: "1", opened: true, read: false })], "new");
+  assert.match(html, /data-job-id="1"/);
+  assert.match(html, /data-opened="true"/);
+});
+
+test("renderList in 'all' mode keeps read jobs (they stay on screen, greyed)", () => {
   const jobs = [
-    job({ id: "1", opened: false }),
-    job({ id: "2", opened: true }),
+    job({ id: "1", read: false }),
+    job({ id: "2", read: true }),
   ];
   const html = renderList(jobs, "all");
   assert.match(html, /data-job-id="1"/);
   assert.match(html, /data-job-id="2"/);
   assert.match(html, /data-read="true"/);
+});
+
+test("renderList keeps blocked jobs in both modes — blocking is not deleting", () => {
+  const jobs = [job({ id: "1", blocked: true, read: false })];
+  for (const mode of ["new", "all"] as const) {
+    assert.match(renderList(jobs, mode), /data-job-id="1"/, mode);
+    assert.match(renderList(jobs, mode), /data-blocked="true"/, mode);
+  }
+});
+
+test("renderList arms the Block button on exactly the row that was pressed", () => {
+  const jobs = [job({ id: "1" }), job({ id: "2" })];
+  const html = renderList(jobs, "all", "2");
+  const rows = html.split('<div class="job"');
+  assert.doesNotMatch(rows.find((r) => r.includes('data-job-id="1"'))!, /Sure\?/);
+  assert.match(rows.find((r) => r.includes('data-job-id="2"'))!, /Sure\?/);
+});
+
+test("renderList arms nothing when no row is mid-question", () => {
+  assert.doesNotMatch(renderList([job({ id: "1" })], "all"), /Sure\?/);
+  assert.doesNotMatch(renderList([job({ id: "1" })], "all", null), /Sure\?/);
 });
 
 const chipWatches: ChipWatch[] = [
@@ -174,4 +311,118 @@ test("renderEmptyState gives a distinct, actionable message per situation", () =
   assert.match(renderEmptyState("no-watches"), /Options|Add a search/i);
   assert.match(renderEmptyState("no-new"), /caught up|no new/i);
   assert.match(renderEmptyState("scan-error"), /failed|broke|selector/i);
+});
+
+test("each empty state gets its own Lucide icon, sized as artwork not a button", () => {
+  const icons: Record<string, RegExp> = {
+    "no-watches": /lucide-search/,
+    "no-jobs-yet": /lucide-sprout/,
+    "no-new": /lucide-circle-check/,
+    scanning: /lucide-refresh-cw/,
+    "scan-error": /lucide-triangle-alert/,
+  };
+  for (const [kind, pattern] of Object.entries(icons)) {
+    const html = renderEmptyState(kind as EmptyKind);
+    assert.match(html, pattern, kind);
+    assert.match(html, /width="28" height="28"/, kind);
+  }
+});
+
+test("nothing in the rendered markup falls back to an emoji or a bare glyph", () => {
+  // Emoji ignore the theme and the ✓ / ⊘ / ↺ family tofu-boxes on some systems;
+  // that is what src/icons.ts exists to prevent, so guard against a regression.
+  const markup = [
+    renderJobRow(job()),
+    renderJobRow(job({ read: true, blocked: true })),
+    ...(["no-watches", "no-jobs-yet", "no-new", "scanning", "scan-error"] as const).map(
+      renderEmptyState,
+    ),
+  ].join("");
+  // Arrows (↺), math operators (⊘), misc symbols (⚙), dingbats (✓ ✕), emoji.
+  assert.doesNotMatch(
+    markup,
+    /[\u{2190}-\u{21FF}\u{2200}-\u{22FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{1F300}-\u{1FAFF}]/u,
+  );
+});
+
+// ── renderScanButton: the manual scan control ────────────────────────────────
+
+test("renderScanButton renders a clickable Scan now control when idle", () => {
+  const html = renderScanButton("idle");
+  assert.match(html, /id="scan-now"/);
+  assert.match(html, /data-scan-state="idle"/);
+  assert.match(html, />Scan now</);
+  assert.doesNotMatch(html, /disabled/);
+});
+
+test("renderScanButton is disabled while a cycle already holds the lock", () => {
+  const html = renderScanButton("scanning");
+  assert.match(html, /disabled/);
+  assert.match(html, /Scanning…/);
+});
+
+test("renderScanButton labels itself as the manual resume when scanning is halted", () => {
+  const html = renderScanButton("halted");
+  assert.match(html, /data-scan-state="halted"/);
+  assert.match(html, />Resume</);
+  // A halted extension can only recover through this button, so it must stay live.
+  assert.doesNotMatch(html, /disabled/);
+});
+
+// ── formatCountdown / renderScanStatus: the footer status bar ────────────────
+
+test("formatCountdown shows the coarsest two units", () => {
+  assert.equal(formatCountdown(45_000), "45s");
+  assert.equal(formatCountdown(252_000), "4m 12s");
+  assert.equal(formatCountdown(300_000), "5m 0s");
+  // Past an hour the seconds are noise, so they go.
+  assert.equal(formatCountdown(26_100_000), "7h 15m");
+});
+
+test("formatCountdown never reads 0s while there is still time on the clock", () => {
+  assert.equal(formatCountdown(1), "1s");
+  assert.equal(formatCountdown(999), "1s");
+  assert.equal(formatCountdown(0), "0s");
+  // A time already past is the `due` state, never a negative countdown.
+  assert.equal(formatCountdown(-5_000), "0s");
+});
+
+test("renderScanStatus says it is scanning while a cycle is in flight", () => {
+  const html = renderScanStatus({ kind: "scanning" });
+  assert.match(html, /data-kind="scanning"/);
+  // The same word the header button and the empty state use — one name for one
+  // thing, or the two controls read as two different mechanisms.
+  assert.match(html, /Scanning for new jobs…/);
+  // This text lands once and stays, so it is safe to announce.
+  assert.match(html, /role="status"/);
+});
+
+test("renderScanStatus counts down to the next scan", () => {
+  const html = renderScanStatus({ kind: "waiting", remainingMs: 252_000, quiet: false });
+  assert.match(html, /data-kind="waiting"/);
+  assert.match(html, /Next scan in 4m 12s/);
+  // The countdown must NOT be a live region: it would be announced every second.
+  assert.doesNotMatch(html, /role="status"/);
+});
+
+test("renderScanStatus explains an hours-long countdown as quiet hours", () => {
+  const html = renderScanStatus({ kind: "waiting", remainingMs: 26_100_000, quiet: true });
+  assert.match(html, /Quiet hours · next scan in 7h 15m/);
+  assert.match(html, /lucide-moon/);
+});
+
+test("renderScanStatus covers the gap between an alarm firing and its cycle", () => {
+  assert.match(renderScanStatus({ kind: "due" }), /any moment/);
+});
+
+test("renderScanStatus points a halted loop at the button that revives it", () => {
+  const html = renderScanStatus({ kind: "halted" });
+  assert.match(html, /data-kind="halted"/);
+  assert.match(html, /Resume/);
+});
+
+test("renderScanStatus emits nothing at all when there is nothing to scan", () => {
+  // Not "no scans scheduled" — an empty string, so the footer collapses entirely
+  // (`.statusbar:empty` in tokens.css).
+  assert.equal(renderScanStatus({ kind: "off" }), "");
 });

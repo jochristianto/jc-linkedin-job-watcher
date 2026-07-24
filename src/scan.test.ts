@@ -5,7 +5,7 @@ import {
   scanPageUrl,
   stampJobs,
   mergeJobs,
-  unopenedCount,
+  unreadCount,
   badgeText,
   withScanToken,
   readScanToken,
@@ -37,6 +37,8 @@ function job(overrides: Partial<Job> & { id: string }): Job {
     watchId: "",
     opened: false,
     openedAt: null,
+    read: false,
+    readAt: null,
     ...overrides,
   };
 }
@@ -102,13 +104,30 @@ test("mergeJobs preserves an existing job's opened state rather than resetting i
   assert.equal(merged["1"]!.openedAt, 500);
 });
 
-test("unopenedCount counts only jobs not yet opened", () => {
+test("mergeJobs preserves an existing job's read state too — a re-scan can't un-dismiss it", () => {
+  const existing: JobsMap = { "1": job({ id: "1", read: true, readAt: 500 }) };
+  const merged = mergeJobs(existing, [job({ id: "1", read: false, readAt: null })]);
+  assert.equal(merged["1"]!.read, true);
+  assert.equal(merged["1"]!.readAt, 500);
+});
+
+test("unreadCount counts jobs not yet marked read — opening one doesn't count", () => {
   const jobs: JobsMap = {
-    "1": job({ id: "1", opened: false }),
-    "2": job({ id: "2", opened: true }),
-    "3": job({ id: "3", opened: false }),
+    "1": job({ id: "1", read: false }),
+    "2": job({ id: "2", read: true }),
+    // Opened but never dismissed: still sitting in the list, still counted.
+    "3": job({ id: "3", opened: true, read: false }),
   };
-  assert.equal(unopenedCount(jobs), 2);
+  assert.equal(unreadCount(jobs), 2);
+});
+
+test("unreadCount skips blocked companies so blocking a row quiets the badge", () => {
+  const jobs: JobsMap = {
+    "1": job({ id: "1", company: "Acme Corp" }),
+    "2": job({ id: "2", company: "Globex" }),
+  };
+  assert.equal(unreadCount(jobs, []), 2);
+  assert.equal(unreadCount(jobs, ["acme"]), 1);
 });
 
 test("badgeText is empty for zero, the number below 100, and 99+ above", () => {

@@ -55,13 +55,43 @@ const DEFAULTS: StorageShape = {
 };
 
 /**
+ * Bring `jobs` records written by an older build up to the current `Job` shape.
+ *
+ * `read`/`readAt` were added when opening a job and dismissing it became two
+ * separate actions. Records written before that have neither field, and TypeScript
+ * can't know it — the store is whatever the last version left there. A missing
+ * `read` is filled in from `opened`, because back then clicking a job *was*
+ * dismissing it: that keeps the list looking exactly as the user left it instead
+ * of resurrecting every job they already dealt with back into "New".
+ *
+ * In-memory only, and idempotent — the migrated shape lands in storage the next
+ * time anything writes the key.
+ */
+export function migrateJobs(jobs: JobsMap): JobsMap {
+  let changed = false;
+  const next: JobsMap = {};
+  for (const [id, job] of Object.entries(jobs)) {
+    if (typeof job.read === "boolean") {
+      next[id] = job;
+    } else {
+      next[id] = { ...job, read: job.opened, readAt: job.openedAt };
+      changed = true;
+    }
+  }
+  return changed ? next : jobs;
+}
+
+/**
  * Read one key. Returns a fresh copy of the documented default when the key has
  * never been written, so callers never accidentally mutate the shared default.
  */
 export async function get<K extends keyof StorageShape>(key: K): Promise<StorageShape[K]> {
   const stored = await chrome.storage.local.get(key);
   const value = stored[key] as StorageShape[K] | undefined;
-  return value ?? structuredClone(DEFAULTS[key]);
+  if (value === undefined) return structuredClone(DEFAULTS[key]);
+  // The one shape that has outlived a field change; every other key is read as-is.
+  if (key === "jobs") return migrateJobs(value as JobsMap) as StorageShape[K];
+  return value;
 }
 
 /** Write one key. Only this key's slot is rewritten (§6 "separate top-level keys"). */
