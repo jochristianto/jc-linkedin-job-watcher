@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { ApplyPrompt } from "@/components/apply-prompt.tsx";
 import { EmptyState } from "@/components/empty-state.tsx";
 import { HealthBanner } from "@/components/health-banner.tsx";
 import { JobList } from "@/components/job-list.tsx";
@@ -34,7 +35,14 @@ import {
 } from "@/scan.ts";
 import * as storage from "@/storage.ts";
 import {
+  appliedPushNotice,
+  type AppliedPushRequest,
+  type AppliedPushResponse,
+} from "@/push.ts";
+import {
+  clearJobApplied,
   markAllRead,
+  markJobApplied,
   markJobOpened,
   selectView,
   setJobRead,
@@ -42,6 +50,11 @@ import {
   unreadCount,
 } from "@/view.ts";
 import type { ListMode, ViewVariant } from "@/view-model.ts";
+
+/** How long to wait before re-sending a message no listener took. Long enough for a
+ *  cold MV3 worker to evaluate its script and register its handlers, short enough
+ *  that a user waiting on the answer doesn't notice it. */
+const WAKE_RETRY_MS = 250;
 
 export type ListViewProps = {
   variant: ViewVariant;
@@ -62,10 +75,15 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
   // this view's own default stands.
   const [activeWatchId, setActiveWatchId] = useState<string | null>(null);
   const [mode, setMode] = useState<ListMode>(defaultMode);
+  // The job whose "Did you apply for this job?" question is still open. Hydrated
+  // from storage because the click that queued it also closed the popup — see
+  // `UiState.pendingApplyId`.
+  const [pendingApplyId, setPendingApplyId] = useState<string | null>(null);
   useEffect(() => {
     void storage.get("ui").then((ui) => {
       setActiveWatchId(ui.activeWatchId);
       setMode(ui.mode ?? defaultMode);
+      setPendingApplyId(ui.pendingApplyId ?? null);
     });
   }, [defaultMode]);
 
@@ -74,21 +92,25 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
   // than from the reply.
   const [pendingScan, setPendingScan] = useState(false);
 
-  // A short-lived line explaining a click that started no *new* scan — the worker
-  // was unreachable, or a cycle was already running. Without it those replies are
-  // silent and the button just blinks (the background answers, but nothing here
-  // reads the answer). Cleared on the next click and after a few seconds.
-  const [scanNotice, setScanNotice] = useState<string | null>(null);
+  // A short-lived line explaining something the background answered but nothing
+  // else would show: a click that started no *new* scan (the worker was
+  // unreachable, or a cycle was already running), or an applied record that saved
+  // but never reached Telegram. Without it those replies are silent and the button
+  // just blinks. Cleared on the next action and after a few seconds.
+  const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => {
-    if (!scanNotice) return;
-    const t = setTimeout(() => setScanNotice(null), 4000);
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 4000);
     return () => clearTimeout(t);
-  }, [scanNotice]);
+  }, [notice]);
 
-  const persistUi = useCallback(
-    (next: { activeWatchId: string | null; mode: ListMode }) => storage.set("ui", next),
-    [],
-  );
+  /** Merge a patch into the persisted view state. A patch rather than the whole
+   *  record because three separate things write it now — the chip, the mode, and
+   *  the pending apply question — and each knows only its own field. */
+  const persistUi = useCallback(async (patch: Partial<storage.UiState>) => {
+    const ui = await storage.get("ui");
+    await storage.set("ui", { ...ui, ...patch });
+  }, []);
 
   /** Repaint the toolbar badge from storage. The background sets it after every
    *  scan, but marking a row read (or blocking its company) changes the count
@@ -155,7 +177,7 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
    */
   const onScan = useCallback(async () => {
     if (pendingScan) return;
-    setScanNotice(null);
+    setNotice(null);
     setPendingScan(true);
     try {
       // `null` = the message reached no listener. Right after a reload the MV3
@@ -171,9 +193,9 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
       if (res == null) res = await send();
 
       if (res == null) {
-        setScanNotice("Couldn't reach the scanner — reload the extension and try again.");
+        setNotice("Couldn't reach the scanner — reload the extension and try again.");
       } else if (!res.started) {
-        setScanNotice(
+        setNotice(
           res.reason === "already-scanning"
             ? "A scan is already running — hang tight."
             : "Couldn't start the scan — try again in a moment.",
@@ -229,13 +251,105 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
       if (!job) return;
       const next = markJobOpened(jobs, id, Date.now());
       if (next !== jobs) await storage.set("jobs", next);
+      // Queue "Did you apply for this job?" for this posting, unless it is already
+      // answered. Written to storage for the same reason the line above is: the tab
+      // opened below takes focus, and a popup that loses focus is destroyed — so a
+      // question kept in component state would never be asked at all.
+      if (job.applied !== true) {
+        setPendingApplyId(id);
+        await persistUi({ pendingApplyId: id });
+      }
       await reload();
       // A background click already opened the tab natively; only the foreground
       // click needs us to open it.
       if (!background) chrome.tabs.create({ url: job.url, active: true });
     },
+    [disarm, persistUi, reload],
+  );
+
+  /**
+   * The answer to "Did you apply for this job?".
+   *
+   * Only Yes writes anything, and it writes the record *before* asking the worker
+   * to push: a Telegram outage, a wrong chat id or a popup that closes mid-send can
+   * then only cost the message, never the fact that you applied. The message is the
+   * part allowed to fail — and a failure is said out loud rather than swallowed,
+   * naming which of the four things went wrong (`appliedPushNotice`), because a
+   * silent non-delivery is exactly the failure §16.7 exists to stop and "it didn't
+   * send" on its own sends you looking in the wrong place.
+   *
+   * No records nothing at all (you may apply tomorrow); either answer closes the
+   * question, and clicking the row again re-queues it.
+   */
+  const onAnswerApply = useCallback(
+    async (applied: boolean, notes: string) => {
+      const id = pendingApplyId;
+      if (!id) return;
+      setPendingApplyId(null);
+      setNotice(null);
+      await persistUi({ pendingApplyId: null });
+      if (!applied) return;
+
+      const jobs = await storage.get("jobs");
+      const next = markJobApplied(jobs, id, notes, Date.now());
+      if (next !== jobs) await storage.set("jobs", next);
+      await reload();
+
+      // Retried once for the same reason "Scan now" is: the message may have to wake
+      // an MV3 worker Chrome tore down, and the first one can miss it. Unlike "Scan
+      // now" the retry waits a moment first — a cold worker has to evaluate its
+      // script before any listener exists, and a retry fired in the same tick races
+      // exactly the gap it is meant to cover.
+      const send = () =>
+        chrome.runtime
+          .sendMessage({ type: "LJW_APPLIED", jobId: id } as AppliedPushRequest)
+          .then((r) => r as AppliedPushResponse, () => null);
+      let res = await send();
+      if (res == null) {
+        await new Promise((r) => setTimeout(r, WAKE_RETRY_MS));
+        res = await send();
+      }
+      // Which failure it was decides what the user has to do about it, so the reason
+      // comes back with the reply and `appliedPushNotice` turns it into the sentence.
+      const line = appliedPushNotice(res);
+      if (line) setNotice(line);
+    },
+    [pendingApplyId, persistUi, reload],
+  );
+
+  /** The row's "Applied" tag, tapped: throw the record away — flag, timestamp and
+   *  note — and let the question be asked again next time the row is opened. No
+   *  message goes out: Telegram already has the `[Applied]` one, and a correction
+   *  chasing it to the phone is noise. Nothing is confirmed first, which is the
+   *  deal with a one-tap undo; the note is the thing that cannot come back. */
+  const onUnapply = useCallback(
+    async (id: string) => {
+      disarm();
+      const jobs = await storage.get("jobs");
+      const next = clearJobApplied(jobs, id);
+      if (next !== jobs) await storage.set("jobs", next);
+      await reload();
+    },
     [disarm, reload],
   );
+
+  /** Escape, the backdrop, or "Not now": the question goes without an answer and
+   *  nothing is recorded. It does not come back on its own — being asked again on
+   *  every reopen would make the popup unusable — but clicking the row re-queues it. */
+  const onDismissApply = useCallback(async () => {
+    setPendingApplyId(null);
+    await persistUi({ pendingApplyId: null });
+  }, [persistUi]);
+
+  /** The job the open question is about, read from the raw `jobs` map rather than
+   *  the rendered list: the question outlives a chip switch, a mode switch and the
+   *  popup itself, so the row it came from may well not be on screen. A job that has
+   *  since been garbage-collected (PRD §7) leaves nothing to ask about, and the
+   *  prompt simply doesn't render. */
+  const pendingApplyJob = useMemo(() => {
+    const job = pendingApplyId ? state?.jobs[pendingApplyId] : undefined;
+    return job ? { id: job.id, title: job.title, company: job.company } : null;
+  }, [state, pendingApplyId]);
 
   const onToggleRead = useCallback(
     async (id: string) => {
@@ -363,9 +477,10 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
                   <HealthBanner key={b.message} message={b.message} severity={b.severity} />
                 ))}
 
-                {/* A transient heads-up for a click that started no new scan. Amber,
-                    the softest banner tier — neither case is an error. */}
-                {scanNotice && <HealthBanner message={scanNotice} severity="warn" />}
+                {/* A transient heads-up for a click that started no new scan, or an
+                    applied record whose message never left. Amber, the softest
+                    banner tier — none of those cases is an error. */}
+                {notice && <HealthBanner message={notice} severity="warn" />}
 
                 {/* The list scrolls; the header above and the status bar below stay put. */}
                 <div className="flex flex-1 flex-col overflow-y-auto px-2 pb-2">
@@ -379,6 +494,7 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
                       onOpen={onOpen}
                       onToggleRead={onToggleRead}
                       onBlock={onBlock}
+                      onUnapply={onUnapply}
                     />
                   )}
                 </div>
@@ -389,6 +505,20 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
               <div className="flex flex-1 flex-col">
                 <EmptyState kind="paused" />
               </div>
+            )}
+
+            {/* Last, and outside the paused branch: the question is about a job you
+                already opened, so pausing the loop is no reason to drop it. A fixed
+                overlay, so where it sits in the markup only decides stacking. */}
+            {pendingApplyJob && (
+              <ApplyPrompt
+                // Keyed by the job: a question about a different posting starts
+                // from unanswered, never with the previous one's typed note.
+                key={pendingApplyJob.id}
+                job={pendingApplyJob}
+                onAnswer={onAnswerApply}
+                onDismiss={onDismissApply}
+              />
             )}
           </>
         )}

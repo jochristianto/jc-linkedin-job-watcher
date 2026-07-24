@@ -44,6 +44,8 @@ function toJobView(job: Job, watches: Watch[], blockedNormalized: string[]): Job
     opened: job.opened,
     read: job.read,
     blocked: isCompanyBlocked(job.company, blockedNormalized),
+    // Absent on records written before applying was tracked, which reads as "no".
+    applied: job.applied === true,
   };
 }
 
@@ -92,6 +94,53 @@ export function setJobRead(jobs: JobsMap, id: string, read: boolean, now: number
   const job = jobs[id];
   if (!job || job.read === read) return jobs;
   return { ...jobs, [id]: { ...job, read, readAt: read ? now : null } };
+}
+
+/**
+ * Record that you applied to a job, immutably — the "Yes" answer to the prompt a
+ * row click queues, plus whatever note came with it.
+ *
+ * Only Yes is ever written. A "No" leaves the record untouched (you may well
+ * apply tomorrow, and a stored no would quietly go stale), so this has no
+ * `applied: false` direction. `notes` is trimmed and may be empty — the note is
+ * optional, the answer is not.
+ *
+ * An unknown id is a no-op returning the same reference, so the caller can skip
+ * the storage write. A job answered twice keeps its first `appliedAt`, for the
+ * same reason `markJobOpened` does — it records when you applied, not when you
+ * last confirmed it — while the note is overwritten, because a second answer is
+ * you correcting the note.
+ */
+export function markJobApplied(jobs: JobsMap, id: string, notes: string, now: number): JobsMap {
+  const job = jobs[id];
+  if (!job) return jobs;
+  return {
+    ...jobs,
+    [id]: { ...job, applied: true, appliedAt: job.appliedAt ?? now, applyNotes: notes.trim() },
+  };
+}
+
+/**
+ * Undo an applied record, immutably — the row's own "Applied" tag, tapped.
+ *
+ * The three fields are *deleted* rather than set to false, so the job comes back
+ * to the exact shape it had before it was ever answered: nothing left over to
+ * distinguish "I un-applied this" from "never applied", and the question becomes
+ * askable again the next time the row is opened. That does discard the note, which
+ * is the price of a one-tap undo.
+ *
+ * Returns the same reference when there was nothing to undo (an unknown id, or a
+ * job with no applied record), so the caller can skip the storage write.
+ */
+export function clearJobApplied(jobs: JobsMap, id: string): JobsMap {
+  const job = jobs[id];
+  if (!job || job.applied !== true) return jobs;
+  // A copy first, then drop the fields from it — the stored record is untouched.
+  const cleared = { ...job };
+  delete cleared.applied;
+  delete cleared.appliedAt;
+  delete cleared.applyNotes;
+  return { ...jobs, [id]: cleared };
 }
 
 /**

@@ -14,6 +14,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import { ApplyPrompt } from "./apply-prompt.tsx";
 import { EmptyState } from "./empty-state.tsx";
 import { HowItWorks } from "./how-it-works.tsx";
 import { JobList } from "./job-list.tsx";
@@ -43,6 +44,7 @@ function job(overrides: Partial<JobView> = {}): JobView {
     opened: false,
     read: false,
     blocked: false,
+    applied: false,
     ...overrides,
   };
 }
@@ -51,7 +53,16 @@ const noop = () => {};
 
 /** A row on its own, with its three callbacks stubbed. */
 const row = (j: JobView, armed = false): string =>
-  html(<JobRow job={j} armed={armed} onOpen={noop} onToggleRead={noop} onBlock={noop} />);
+  html(
+    <JobRow
+      job={j}
+      armed={armed}
+      onOpen={noop}
+      onToggleRead={noop}
+      onBlock={noop}
+      onUnapply={noop}
+    />,
+  );
 
 const list = (jobs: JobView[], mode: "new" | "all", armedBlockId: string | null = null): string =>
   html(
@@ -62,6 +73,7 @@ const list = (jobs: JobView[], mode: "new" | "all", armedBlockId: string | null 
       onOpen={noop}
       onToggleRead={noop}
       onBlock={noop}
+      onUnapply={noop}
     />,
   );
 
@@ -149,6 +161,42 @@ test("JobRow drops the block button when no company was parsed", () => {
   const h = row(job({ company: "   " }));
   assert.doesNotMatch(h, /data-action="block"/);
   assert.match(h, /data-action="read"/);
+});
+
+test("JobRow tags a job you applied to, so the list is also the record", () => {
+  assert.match(row(job({ applied: true })), />Applied</);
+  assert.match(row(job({ applied: true })), /data-applied="true"/);
+  assert.doesNotMatch(row(job({ applied: false })), />Applied</);
+  assert.match(row(job({ applied: false })), /data-applied="false"/);
+  // ...and it survives a row with nothing else in its footer.
+  assert.match(row(job({ postedText: "", watchName: "", applied: true })), />Applied</);
+});
+
+test("JobRow's Applied tag is the undo, and its label admits what it costs", () => {
+  const h = row(job({ applied: true }));
+  assert.match(h, /data-action="unapply"/);
+  // "Applied" alone reads as a label, not a control — the accessible name has to
+  // say that pressing it drops the record, note and all.
+  assert.match(h, /aria-label="Applied — undo, and forget the note"/);
+  assert.match(h, /lucide-badge-check/);
+  // Not the read tick's icon: two different actions must not wear one glyph.
+  const button = h.split("<button").find((c) => c.includes('data-action="unapply"'))!;
+  assert.doesNotMatch(button, /lucide-check\b/);
+});
+
+test("JobRow keeps the Applied undo out of the anchor, where it would be unclickable", () => {
+  const h = row(job({ applied: true }));
+  const anchor = h.slice(h.indexOf("<a "), h.indexOf("</a>"));
+  assert.doesNotMatch(anchor, /Applied/);
+  // Left of Block, so the two rightmost buttons stay where the hand expects them.
+  assert.ok(
+    h.indexOf('data-action="unapply"') < h.indexOf('data-action="block"'),
+    "the Applied undo should render before the block button",
+  );
+});
+
+test("JobRow offers no undo on a job that was never applied to", () => {
+  assert.doesNotMatch(row(job({ applied: false })), /data-action="unapply"/);
 });
 
 test("JobRow marks a blocked job and says why it is greyed", () => {
@@ -244,6 +292,78 @@ test("JobList arms the Block button on exactly the row that was pressed", () => 
 test("JobList arms nothing when no row is mid-question", () => {
   assert.doesNotMatch(list([job({ id: "1" })], "all"), /Sure\?/);
   assert.doesNotMatch(list([job({ id: "1" })], "all", null), /Sure\?/);
+});
+
+// ── ApplyPrompt: "Did you apply for this job?" ───────────────────────────────
+//
+// A static render only ever shows the unanswered state — there is no click here
+// to pick Yes with. That is deliberate: the three states of the notes box and the
+// commit button are `applyPromptState`'s, proved with plain values in
+// view-model.test.ts, and what is asserted below is that this component renders
+// what that function returns.
+
+const prompt = (over: Partial<React.ComponentProps<typeof ApplyPrompt>> = {}): string =>
+  html(
+    <ApplyPrompt
+      job={{ id: "3901", title: "Senior Software Engineer", company: "Acme Corp" }}
+      onAnswer={noop}
+      onDismiss={noop}
+      {...over}
+    />,
+  );
+
+test("ApplyPrompt asks the question and names the job it is asking about", () => {
+  const h = prompt();
+  assert.match(h, /Did you apply for this job\?/);
+  // Asked minutes later, in a popup you reopened — without the job it is asking
+  // about nothing in particular.
+  assert.match(h, /Senior Software Engineer · Acme Corp/);
+  assert.match(h, /data-job-id="3901"/);
+});
+
+test("ApplyPrompt is a labelled modal dialog", () => {
+  const h = prompt();
+  assert.match(h, /role="dialog"/);
+  assert.match(h, /aria-modal="true"/);
+  assert.match(h, /aria-labelledby="apply-prompt-title"/);
+  assert.match(h, /id="apply-prompt-title"/);
+});
+
+test("ApplyPrompt offers exactly Yes and No", () => {
+  const h = prompt();
+  assert.match(buttonWith(h, 'data-answer="yes"'), />Yes</);
+  assert.match(buttonWith(h, 'data-answer="no"'), />No</);
+  // Neither is picked for you: the answer starts unanswered.
+  assert.match(buttonWith(h, 'data-answer="yes"'), /data-state="off"/);
+  assert.match(buttonWith(h, 'data-answer="no"'), /data-state="off"/);
+});
+
+test("ApplyPrompt's notes box starts disabled, and says what opens it", () => {
+  const h = prompt();
+  assert.match(h, /<textarea[^>]*\sdisabled=""/);
+  assert.match(h, /placeholder="Answer Yes to add a note"/);
+  // Labelled, not placeholder-only — the placeholder disappears the moment you type.
+  assert.match(h, /for="apply-notes"/);
+  assert.match(h, /id="apply-notes"/);
+});
+
+test("ApplyPrompt cannot be committed before the question is answered", () => {
+  const h = prompt();
+  assert.match(buttonWith(h, 'data-action="apply-submit"'), DISABLED_ATTR);
+  // The way out that records nothing is always live.
+  assert.doesNotMatch(buttonWith(h, 'data-action="apply-dismiss"'), DISABLED_ATTR);
+  assert.match(h, />Not now</);
+});
+
+test("ApplyPrompt falls back to a placeholder when the title never parsed", () => {
+  assert.match(prompt({ job: { id: "7", title: "  ", company: "Acme Corp" } }), /Untitled role/);
+});
+
+test("ApplyPrompt escapes the job it names", () => {
+  const h = prompt({ job: { id: "a&b", title: "R&D <lead>", company: 'A<"B">' } });
+  assert.match(h, /R&amp;D &lt;lead&gt;/);
+  assert.match(h, /data-job-id="a&amp;b"/);
+  assert.doesNotMatch(h, /<lead>/);
 });
 
 // ── Toolbar: the watch chips and the New⇄All toggle ──────────────────────────

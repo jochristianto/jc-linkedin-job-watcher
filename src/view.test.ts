@@ -1,8 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  clearJobApplied,
   toJobViews,
   unreadCount,
+  markJobApplied,
   markJobOpened,
   markAllRead,
   setJobRead,
@@ -48,6 +50,11 @@ test("toJobViews maps a Job to a JobView and resolves the watch name", () => {
   assert.equal(v!.watchName, "Indonesia");
   assert.equal(v!.url, "https://www.linkedin.com/jobs/view/3901/");
   assert.equal(v!.opened, false);
+});
+
+test("toJobViews carries the applied flag, absent on older records reading as no", () => {
+  assert.equal(toJobViews([job()], watches)[0]!.applied, false);
+  assert.equal(toJobViews([job({ applied: true })], watches)[0]!.applied, true);
 });
 
 test("toJobViews orders jobs newest-first by foundAt", () => {
@@ -139,6 +146,84 @@ test("setJobRead no-ops (same reference) on an unknown id or an unchanged flag",
   const jobs: JobsMap = { a: job({ id: "a", read: true, readAt: 5 }) };
   assert.equal(setJobRead(jobs, "missing", true, 1), jobs);
   assert.equal(setJobRead(jobs, "a", true, 999), jobs);
+});
+
+test("markJobApplied records the answer and its note without mutating the input", () => {
+  const jobs: JobsMap = { "3901": job() };
+  const next = markJobApplied(jobs, "3901", "  Referred by Dita  ", 1234);
+  assert.equal(next["3901"]!.applied, true);
+  assert.equal(next["3901"]!.appliedAt, 1234);
+  // Trimmed: the box is free text, and " " is not a note.
+  assert.equal(next["3901"]!.applyNotes, "Referred by Dita");
+  assert.equal(jobs["3901"]!.applied, undefined);
+});
+
+test("markJobApplied accepts an empty note — the answer is what matters", () => {
+  const next = markJobApplied({ a: job({ id: "a" }) }, "a", "", 7);
+  assert.equal(next["a"]!.applied, true);
+  assert.equal(next["a"]!.applyNotes, "");
+});
+
+test("markJobApplied does not read or dismiss the row — applying is its own state", () => {
+  const next = markJobApplied({ a: job({ id: "a" }) }, "a", "", 7);
+  assert.equal(next["a"]!.read, false);
+  assert.equal(next["a"]!.opened, false);
+});
+
+test("markJobApplied keeps the first appliedAt but takes the newer note", () => {
+  const jobs: JobsMap = { a: job({ id: "a", applied: true, appliedAt: 5, applyNotes: "old" }) };
+  const next = markJobApplied(jobs, "a", "corrected", 999);
+  assert.equal(next["a"]!.appliedAt, 5);
+  assert.equal(next["a"]!.applyNotes, "corrected");
+});
+
+test("markJobApplied leaves other jobs alone and no-ops on an unknown id", () => {
+  const jobs: JobsMap = { a: job({ id: "a" }), b: job({ id: "b" }) };
+  assert.equal(markJobApplied(jobs, "a", "", 5)["b"]!.applied, undefined);
+  assert.equal(markJobApplied(jobs, "missing", "", 5), jobs);
+});
+
+test("clearJobApplied puts the job back to never-applied, note and all", () => {
+  const jobs: JobsMap = {
+    a: job({ id: "a", applied: true, appliedAt: 5, applyNotes: "Referred by Dita" }),
+  };
+  const next = clearJobApplied(jobs, "a");
+  // Deleted, not falsified: nothing left to tell "undone" from "never answered",
+  // which is what makes the question askable again.
+  assert.equal("applied" in next["a"]!, false);
+  assert.equal("appliedAt" in next["a"]!, false);
+  assert.equal("applyNotes" in next["a"]!, false);
+  // input untouched
+  assert.equal(jobs["a"]!.applied, true);
+  assert.equal(jobs["a"]!.applyNotes, "Referred by Dita");
+});
+
+test("clearJobApplied leaves the rest of the job exactly as it was", () => {
+  const jobs: JobsMap = {
+    a: job({ id: "a", applied: true, appliedAt: 5, opened: true, openedAt: 3, read: true, readAt: 4 }),
+  };
+  const cleared = clearJobApplied(jobs, "a")["a"]!;
+  assert.equal(cleared.opened, true);
+  assert.equal(cleared.openedAt, 3);
+  assert.equal(cleared.read, true);
+  assert.equal(cleared.readAt, 4);
+  assert.equal(cleared.title, jobs["a"]!.title);
+});
+
+test("clearJobApplied no-ops (same reference) with nothing to undo", () => {
+  const jobs: JobsMap = { a: job({ id: "a" }), b: job({ id: "b", applied: true, appliedAt: 1 }) };
+  assert.equal(clearJobApplied(jobs, "a"), jobs); // never applied
+  assert.equal(clearJobApplied(jobs, "missing"), jobs); // unknown id
+  // ...and undoing one leaves the other's record alone.
+  assert.equal(clearJobApplied(jobs, "b")["a"]!.applied, undefined);
+});
+
+test("markJobApplied and clearJobApplied round-trip through toJobViews", () => {
+  // What the row actually reads: the tag appears, the undo removes it.
+  const applied = markJobApplied({ a: job({ id: "a" }) }, "a", "note", 5);
+  assert.equal(toJobViews(Object.values(applied), watches)[0]!.applied, true);
+  const undone = clearJobApplied(applied, "a");
+  assert.equal(toJobViews(Object.values(undone), watches)[0]!.applied, false);
 });
 
 test("markAllRead reads every unread job without mutating the input", () => {

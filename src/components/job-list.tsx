@@ -11,6 +11,7 @@ export type JobListProps = {
   onOpen: (id: string, background: boolean) => void;
   onToggleRead: (id: string) => void;
   onBlock: (id: string) => void;
+  onUnapply: (id: string) => void;
 };
 
 /**
@@ -30,6 +31,7 @@ export function JobList({
   onOpen,
   onToggleRead,
   onBlock,
+  onUnapply,
 }: JobListProps) {
   const visible = mode === "new" ? jobs.filter((j) => !j.read) : jobs;
   return (
@@ -42,6 +44,7 @@ export function JobList({
           onOpen={(background) => onOpen(job.id, background)}
           onToggleRead={() => onToggleRead(job.id)}
           onBlock={() => onBlock(job.id)}
+          onUnapply={() => onUnapply(job.id)}
         />
       ))}
     </div>

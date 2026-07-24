@@ -30,7 +30,43 @@ export type JobView = {
    *  greyed; it stays on screen (the blocklist only stops *future* scans from
    *  surfacing it) and the Block button flips to Unblock. */
   blocked: boolean;
+  /** You answered Yes to "Did you apply for this job?" after opening it. Tags the
+   *  row so the list is also a record of what you have applied to, and stops the
+   *  question being asked about this job a second time. */
+  applied: boolean;
 };
+
+/** The answer to "Did you apply for this job?". `null` is a real third state, not
+ *  a missing value: until one of the two is picked the notes box is dead and there
+ *  is nothing to commit. */
+export type ApplyAnswer = "yes" | "no" | null;
+
+/** What the apply prompt's notes box and commit button do for a given answer. */
+export type ApplyPromptState = {
+  /** The notes box only comes alive on Yes. There is nothing to note about a job
+   *  you did not apply to, and a box you can type into before answering invites
+   *  writing something that is then thrown away. */
+  notesEnabled: boolean;
+  /** Nothing to commit until the question has actually been answered. */
+  submitEnabled: boolean;
+  /** Yes records the application and sends it to your phone; No only closes the
+   *  question. The button says which, so it can never push a message you did not
+   *  ask for. */
+  submitLabel: string;
+};
+
+/**
+ * The apply prompt's three states, as plain data — the "the box is only enabled
+ * on Yes" rule, provable with plain values. The component holds the answer in
+ * `useState` and renders what this returns; nothing about the rule lives in JSX.
+ */
+export function applyPromptState(answer: ApplyAnswer): ApplyPromptState {
+  return {
+    notesEnabled: answer === "yes",
+    submitEnabled: answer !== null,
+    submitLabel: answer === "yes" ? "Save & send" : "Done",
+  };
+}
 
 /** How long an armed Block button waits for its second press before going back
  *  to "Block" on its own. Long enough to read the question, short enough that a
