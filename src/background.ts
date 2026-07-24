@@ -52,7 +52,8 @@ import {
   type Severity,
 } from "./health.ts";
 import { sendPush } from "./push.ts";
-import { buildScanNotification, jobsTabToFocus, SCAN_NOTIFICATION_ID } from "./notify.ts";
+import { buildScanNotification, SCAN_NOTIFICATION_ID } from "./notify.ts";
+import { focusOrOpenJobsTab } from "./jobs-tab.ts";
 import type { HealthState, Job, Settings } from "./types.ts";
 
 /** The single re-armed one-shot alarm (PRD §15 decision 3): one name, re-created
@@ -139,22 +140,6 @@ async function firePush(settings: Settings, newJobs: Job[]): Promise<void> {
     "pushHealth",
     reducePushHealth(ok, prior.consecutivePushFailures, settings.pushFailWarnThreshold),
   );
-}
-
-/** Land the user in our own list (PRD §3/§9): focus an already-open jobs.html tab
- *  (raising its window) rather than duplicating it, else open a new one. Marks
- *  NOTHING as opened — it only gets you to the list. */
-async function openJobsList(): Promise<void> {
-  const url = chrome.runtime.getURL("jobs.html");
-  const existing = jobsTabToFocus(await chrome.tabs.query({ url }));
-  if (existing) {
-    await chrome.tabs.update(existing.id, { active: true });
-    if (existing.windowId !== undefined) {
-      await chrome.windows.update(existing.windowId, { focused: true });
-    }
-  } else {
-    await chrome.tabs.create({ url });
-  }
 }
 
 // ── Talking to the invisible tab ───────────────────────────────────────────────
@@ -468,7 +453,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 chrome.notifications.onClicked.addListener((id) => {
   if (id !== SCAN_NOTIFICATION_ID) return;
   void (async () => {
-    await openJobsList();
+    await focusOrOpenJobsTab();
     await chrome.notifications.clear(id);
   })();
 });

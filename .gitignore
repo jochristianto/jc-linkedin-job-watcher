@@ -11,3 +11,4 @@ dist/
 # Wayfinder maps, tickets, research notes and captured page fixtures.
 # Fixtures are saved from a logged-in LinkedIn session and must never be committed.
 .scratch/
+.gstack/

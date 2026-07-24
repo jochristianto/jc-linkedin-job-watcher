@@ -1,35 +1,30 @@
-// List-view assembly — PRD §4 "a shared component, mounted twice".
+// List-view state — PRD §4 "a shared component, mounted twice".
 //
-// The pure bridge between stored `Job` records and the tested markup functions
-// in render.ts. It resolves a job's watch name, orders the list newest-first,
-// counts the unread badge, applies the row actions (open / read / block), and assembles the whole page
-// (header + badge + list-or-empty-state) as one string. No chrome.*, no DOM,
-// no clock — `now` is injected — so `node --test` proves the badge count and
-// empty-state choice with plain values. The side-effect wrapper that reads
-// storage, sets innerHTML and opens tabs lives in mount.ts (§14, untested).
+// The pure bridge between stored `Job` records and the props the React
+// components in `components/` take. It resolves a job's watch name, orders the
+// list newest-first, counts the unread badge, applies the row actions (open /
+// read / block), and decides which of the header, footer and empty states the
+// view is in. No chrome.*, no DOM, no React, no clock — `now` is injected — so
+// `node --test` proves the badge count and empty-state choice with plain values.
+// The side-effect wrapper that reads storage and opens tabs is the `<ListView>`
+// component and its hooks (§14, untested).
 
 import type { Job, Watch, HealthState, BlockedCompany, QuietHours } from "./types.ts";
 import type { JobsMap } from "./storage.ts";
-import { PUSH_FAILING_MESSAGE } from "./health.ts";
 import { isWithinQuietHours, minutesOfDay } from "./schedule.ts";
 // `makeBlockedCompany` is the write-side normalizer the Options blocklist field
 // uses too, so a company blocked from a row and one typed into Options end up in
 // the identical shape.
 import { isCompanyBlocked, normalizeCompany, makeBlockedCompany } from "./filter.ts";
-import { icon } from "./icons.ts";
-import {
-  esc,
-  renderList,
-  renderEmptyState,
-  renderScanButton,
-  renderScanStatus,
-  renderToolbar,
-  type JobView,
-  type ListMode,
-  type EmptyKind,
-  type ScanButtonState,
-  type ScanStatus,
-} from "./render.ts";
+import { PUSH_FAILING_MESSAGE } from "./health.ts";
+import type {
+  JobView,
+  ListMode,
+  EmptyKind,
+  ScanButtonState,
+  ScanStatus,
+  ChipWatch,
+} from "./view-model.ts";
 
 /** Map a stored `Job` to the flat `JobView` the markup functions consume. The
  *  watch name is looked up from settings; an unknown/removed watchId degrades
@@ -175,6 +170,15 @@ export type ViewContext = {
    *  changes the empty state: with nothing yet to show it reads "Scanning…"
    *  instead of "Nothing scanned yet" (mockups decision 5). */
   scanning?: boolean;
+  /** A "Scan now" click whose cycle has not shown up in storage yet — the gap
+   *  between the click and `scanning` becoming true. It exists because that gap
+   *  is not instant: the click has to wake a sleeping MV3 service worker, which
+   *  is often a second or more, and until then every surface still reads "Scan
+   *  now / next scan in 3m 14s" — indistinguishable from a click that missed.
+   *  Treated exactly like `scanning` everywhere, so the button, the status bar
+   *  and the empty state all say so the moment the button is pressed; mount.ts
+   *  clears it when the background replies (or fails to). */
+  pendingScan?: boolean;
   /** The persisted scan mode (`health.mode`). Only the manual scan control reads
    *  it: a `halted` cycle (§16.2) turns "Scan now" into "Resume scanning". */
   scanMode?: HealthState["mode"];
@@ -203,13 +207,24 @@ export type ViewContext = {
   now?: number;
 };
 
+/**
+ * Is a scan under way as far as this view is concerned? Either the lock is
+ * genuinely held (`scanning`) or the user just pressed the button and we are
+ * waiting on the worker (`pendingScan`). The two are deliberately one answer:
+ * from the user's side "I asked for a scan" and "a scan is running" are the same
+ * situation, and showing them differently would only advertise the round trip.
+ */
+export function isScanning(ctx: ViewContext): boolean {
+  return ctx.scanning === true || ctx.pendingScan === true;
+}
+
 /** Choose the empty/degraded message when nothing is visible. A broken scan
  *  outranks everything (there may be stale jobs but the read is untrustworthy);
  *  otherwise: no watches → nothing scanned → (New mode) all caught up. */
-function pickEmptyKind(ctx: ViewContext, total: number): EmptyKind {
+export function pickEmptyKind(ctx: ViewContext, total: number): EmptyKind {
   if (ctx.severity === "error") return "scan-error";
   if (ctx.watches.length === 0) return "no-watches";
-  if (total === 0) return ctx.scanning ? "scanning" : "no-jobs-yet";
+  if (total === 0) return isScanning(ctx) ? "scanning" : "no-jobs-yet";
   if (ctx.mode === "new") return "no-new";
   return "no-jobs-yet";
 }
@@ -221,7 +236,7 @@ function pickEmptyKind(ctx: ViewContext, total: number): EmptyKind {
  * manual resume it is (§16.2). Everything else is the plain idle button.
  */
 export function scanButtonState(ctx: ViewContext): ScanButtonState {
-  if (ctx.scanning) return "scanning";
+  if (isScanning(ctx)) return "scanning";
   if (ctx.scanMode === "halted") return "halted";
   return "idle";
 }
@@ -231,7 +246,9 @@ export function scanButtonState(ctx: ViewContext): ScanButtonState {
  *
  * The order is the priority order. A live cycle wins over everything: while the
  * lock is held the extension *is* scanning, whatever the schedule or the health
- * record say. A halted loop comes next, because there is genuinely nothing armed
+ * record say — and a just-clicked "Scan now" counts as live from the click, not
+ * from the worker's reply (see `pendingScan`), so the countdown can never keep
+ * ticking under a button you already pressed. A halted loop comes next, because there is genuinely nothing armed
  * to count down to (§16.2 waits for a manual resume). With no enabled search
  * there is nothing to scan either, so the bar goes away entirely rather than
  * promise a scan that would find nothing. Only then is it a countdown — and a
@@ -243,7 +260,7 @@ export function scanButtonState(ctx: ViewContext): ScanButtonState {
  * coming. The health banner above already explains the situation.
  */
 export function scanStatus(ctx: ViewContext): ScanStatus {
-  if (ctx.scanning) return { kind: "scanning" };
+  if (isScanning(ctx)) return { kind: "scanning" };
   if (ctx.scanMode === "halted") return { kind: "halted" };
   if (!ctx.watches.some((w) => w.enabled)) return { kind: "off" };
   if (ctx.nextScanAt == null) return { kind: "unscheduled" };
@@ -259,19 +276,40 @@ export function scanStatus(ctx: ViewContext): ScanStatus {
   return { kind: "waiting", remainingMs, quiet };
 }
 
+/** Everything `<ListView>` puts on screen, already decided. See {@link selectView}. */
+export type ViewProps = {
+  title: string;
+  /** Unread across every watch, for the header badge. 0 = no badge. */
+  badge: number;
+  /** The watch chips and which one is pressed (null = "All watches"). */
+  chips: ChipWatch[];
+  activeWatchId: string | null;
+  mode: ListMode;
+  /** Every row the list could show, already ordered and mapped. `<JobList>`
+   *  applies the mode filter itself so an "all caught up" list still knows how
+   *  many rows it is hiding. */
+  jobs: JobView[];
+  /** Non-null when the list is empty and this message takes its place instead. */
+  emptyKind: EmptyKind | null;
+  scanButton: ScanButtonState;
+  status: ScanStatus;
+  /** The health banner and the §16.7 push warning, in the order they stack. Both
+   *  can be present at once — a broken read and a broken push are independent. */
+  banners: { message: string; severity: NonNullable<HealthState["severity"]> }[];
+  armedBlockId: string | null;
+};
+
 /**
- * The whole view as one markup string: header (title + unopened badge + Scan
- * now + Options button) over the list, with the scan status bar as the footer.
- * `renderList` filters opened jobs out of "new" mode; if
- * that leaves nothing to show, a distinct empty state takes the list's place.
- * The popup and the tab call this identically — they differ only by the
- * `.view-popup` / `.view-tab` class on the mount root, never by branch here.
+ * Every decision the page makes, as plain data — the pure half of what used to
+ * be `renderPage`. It resolves the badge, applies the chip filter, orders the
+ * rows, picks the empty state, and stacks the banners; `<ListView>` then does
+ * nothing but map the result to JSX.
  *
- * The footer is rendered as a slot: mount.ts rewrites `#statusbar`'s contents
- * once a second to tick the countdown, and repainting the whole page that often
- * would throw away the user's scroll position.
+ * The split is what keeps the page testable: `node --test` can assert that a
+ * blocked company is off the badge, or that an errored scan outranks an empty
+ * list, without rendering a single element.
  */
-export function renderPage(ctx: ViewContext): string {
+export function selectView(ctx: ViewContext): ViewProps {
   const blockedCompanies = ctx.blockedCompanies ?? [];
 
   // The badge always counts unread across every watch — it mirrors the toolbar
@@ -283,39 +321,26 @@ export function renderPage(ctx: ViewContext): string {
   const listJobs = activeWatchId
     ? ctx.jobs.filter((j) => j.watchId === activeWatchId)
     : ctx.jobs;
-  const views = toJobViews(listJobs, ctx.watches, blockedCompanies);
-  const visible = ctx.mode === "new" ? views.filter((v) => !v.read) : views;
+  const jobs = toJobViews(listJobs, ctx.watches, blockedCompanies);
+  const visible = ctx.mode === "new" ? jobs.filter((v) => !v.read) : jobs;
 
-  const toolbar = renderToolbar(
-    ctx.watches.map((w) => ({ id: w.id, name: w.name })),
-    activeWatchId,
-    ctx.mode,
-  );
-
-  const body = visible.length
-    ? renderList(views, ctx.mode, ctx.armedBlockId ?? null)
-    : renderEmptyState(pickEmptyKind(ctx, views.length));
-
-  const healthBanner = ctx.message
-    ? `<div class="banner banner-${ctx.severity ?? "warn"}">${esc(ctx.message)}</div>`
-    : "";
+  const banners: ViewProps["banners"] = [];
+  if (ctx.message) banners.push({ message: ctx.message, severity: ctx.severity ?? "warn" });
   // The push warning is a soft, config-level warning independent of scan health
   // (§16.7), so it stacks under any health banner rather than replacing it.
-  const pushBanner = ctx.pushWarn
-    ? `<div class="banner banner-warn">${esc(PUSH_FAILING_MESSAGE)}</div>`
-    : "";
+  if (ctx.pushWarn) banners.push({ message: PUSH_FAILING_MESSAGE, severity: "warn" });
 
-  return `
-    <header class="hdr">
-      <span class="hdr-title">${esc(ctx.title)}</span>
-      ${badge > 0 ? `<span class="badge">${badge}</span>` : ""}
-      ${renderScanButton(scanButtonState(ctx))}
-      <button class="hdr-btn" id="mark-all-read" title="Mark all as read">Mark all read</button>
-      <button class="hdr-btn icon-only" id="open-options" title="Options" aria-label="Options">${icon("settings")}</button>
-    </header>
-    ${toolbar}
-    ${healthBanner}
-    ${pushBanner}
-    <div class="list">${body}</div>
-    <footer class="statusbar" id="statusbar">${renderScanStatus(scanStatus(ctx))}</footer>`.trim();
+  return {
+    title: ctx.title,
+    badge,
+    chips: ctx.watches.map((w) => ({ id: w.id, name: w.name })),
+    activeWatchId,
+    mode: ctx.mode,
+    jobs,
+    emptyKind: visible.length ? null : pickEmptyKind(ctx, jobs.length),
+    scanButton: scanButtonState(ctx),
+    status: scanStatus(ctx),
+    banners,
+    armedBlockId: ctx.armedBlockId ?? null,
+  };
 }

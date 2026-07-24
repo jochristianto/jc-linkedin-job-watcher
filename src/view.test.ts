@@ -7,12 +7,13 @@ import {
   markAllRead,
   setJobRead,
   toggleBlockedCompany,
-  renderPage,
+  selectView,
   scanButtonState,
   scanStatus,
 } from "./view.ts";
 import { PUSH_FAILING_MESSAGE } from "./health.ts";
 import { minutesOfDay } from "./schedule.ts";
+import type { ViewContext } from "./view.ts";
 import type { Job, Watch, BlockedCompany, QuietHours } from "./types.ts";
 import type { JobsMap } from "./storage.ts";
 
@@ -194,237 +195,138 @@ test("toggleBlockedCompany round-trips: block then unblock is a no-op overall", 
   assert.deepEqual(toggleBlockedCompany(blocked, "Acme Corp", false), start);
 });
 
-test("renderPage renders the watch filter chips and the New/All toggle", () => {
-  const html = renderPage({
-    jobs: [job()],
-    watches,
-    mode: "new",
-    title: "New jobs",
-  });
-  assert.match(html, /class="toolbar"/);
-  assert.match(html, /data-watch-id=""[^>]*>All watches/);
-  assert.match(html, /data-watch-id="w-id"[^>]*>Indonesia/);
-  assert.match(html, /data-mode="new"\s+aria-pressed="true"/);
+// ── selectView: every decision the page makes, as data ──────────────────────
+//
+// These were `renderPage` tests when this layer emitted a markup string. The
+// page is a React component now, so the assembly decisions it makes are asserted
+// on the props `selectView` hands it — which is stricter than a regex over HTML
+// ever was: a badge of 2 is the number 2, not `/class="badge">2</`.
+
+/** A ViewContext with the boilerplate filled in. */
+function ctx(over: Partial<ViewContext> = {}): ViewContext {
+  return { jobs: [job()], watches, mode: "new", title: "New jobs", ...over };
+}
+
+test("selectView renders the watch filter chips and carries the mode", () => {
+  const v = selectView(ctx());
+  assert.deepEqual(v.chips, [{ id: "w-id", name: "Indonesia" }]);
+  assert.equal(v.activeWatchId, null);
+  assert.equal(v.mode, "new");
 });
 
-test("renderPage renders a Mark all as read control", () => {
-  const html = renderPage({ jobs: [job()], watches, mode: "new", title: "New" });
-  assert.match(html, /id="mark-all-read"/);
+test("selectView filters the list to the active watch chip", () => {
+  const jobs = [job({ id: "1", watchId: "w-id" }), job({ id: "2", watchId: "other" })];
+  const filtered = selectView(ctx({ jobs, mode: "all", activeWatchId: "w-id" }));
+  assert.deepEqual(filtered.jobs.map((j) => j.id), ["1"]);
+
+  const allWatches = selectView(ctx({ jobs, mode: "all" }));
+  assert.deepEqual(allWatches.jobs.map((j) => j.id).sort(), ["1", "2"]);
 });
 
-test("renderPage filters the list to the active watch chip", () => {
-  const jobs = [
-    job({ id: "1", watchId: "w-id" }),
-    job({ id: "2", watchId: "other" }),
-  ];
-  const filtered = renderPage({
-    jobs,
-    watches,
-    mode: "all",
-    title: "All",
-    activeWatchId: "w-id",
-  });
-  assert.match(filtered, /data-job-id="1"/);
-  assert.doesNotMatch(filtered, /data-job-id="2"/);
-
-  const allWatches = renderPage({ jobs, watches, mode: "all", title: "All" });
-  assert.match(allWatches, /data-job-id="1"/);
-  assert.match(allWatches, /data-job-id="2"/);
+test("selectView badge counts unread across all watches, ignoring the chip filter", () => {
+  const jobs = [job({ id: "1", watchId: "w-id" }), job({ id: "2", watchId: "other" })];
+  assert.equal(selectView(ctx({ jobs, mode: "all", activeWatchId: "w-id" })).badge, 2);
 });
 
-test("renderPage badge counts unread across all watches, ignoring the chip filter", () => {
-  const jobs = [
-    job({ id: "1", watchId: "w-id" }),
-    job({ id: "2", watchId: "other" }),
-  ];
-  const html = renderPage({
-    jobs,
-    watches,
-    mode: "all",
-    title: "All",
-    activeWatchId: "w-id",
-  });
-  assert.match(html, /<span class="badge">2<\/span>/);
+test("selectView shows the scanning empty state while a first scan is in flight", () => {
+  assert.equal(selectView(ctx({ jobs: [], scanning: true })).emptyKind, "scanning");
 });
 
-test("renderPage's Options control is a labelled gear icon, not a glyph", () => {
-  const html = renderPage({ jobs: [], watches, mode: "new", title: "New" });
-  // Icon-only, so the label lives on the button — the <svg> is aria-hidden.
-  assert.match(html, /id="open-options"[^>]*aria-label="Options"/);
-  assert.match(html, /lucide-settings/);
-  assert.doesNotMatch(html, /⚙/);
+test("selectView badges the unread count and drops it to zero when all are read", () => {
+  assert.equal(selectView(ctx({ jobs: [job({ id: "1" }), job({ id: "2" })] })).badge, 2);
+  assert.equal(selectView(ctx({ jobs: [job({ id: "1", read: true })], mode: "all" })).badge, 0);
 });
 
-test("renderPage shows the scanning empty state while a first scan is in flight", () => {
-  const html = renderPage({
-    jobs: [],
-    watches,
-    mode: "new",
-    title: "New",
-    scanning: true,
-  });
-  assert.match(html, /data-kind="scanning"/);
-});
-
-test("renderPage shows a badge with the unread count and drops it at zero", () => {
-  const two = renderPage({
-    jobs: [job({ id: "1" }), job({ id: "2" })],
-    watches,
-    mode: "new",
-    title: "New jobs",
-  });
-  assert.match(two, /<span class="badge">2<\/span>/);
-
-  const none = renderPage({
-    jobs: [job({ id: "1", read: true })],
-    watches,
-    mode: "all",
-    title: "All",
-  });
-  assert.doesNotMatch(none, /class="badge"/);
-});
-
-test("renderPage badge counts unread regardless of the view mode", () => {
+test("selectView badge counts unread regardless of the view mode", () => {
   // 'all' mode shows read jobs, but the badge still reflects unread only.
-  const html = renderPage({
-    jobs: [job({ id: "1" }), job({ id: "2", read: true })],
-    watches,
-    mode: "all",
-    title: "All",
-  });
-  assert.match(html, /<span class="badge">1<\/span>/);
-});
-
-test("renderPage badge ignores a job you merely opened — it is still waiting", () => {
-  const html = renderPage({
-    jobs: [job({ id: "1", opened: true, read: false })],
-    watches,
-    mode: "new",
-    title: "New",
-  });
-  assert.match(html, /<span class="badge">1<\/span>/);
-});
-
-test("renderPage greys a blocked company's rows and drops them off the badge", () => {
-  const html = renderPage({
-    jobs: [job({ id: "1", company: "Acme Corp" }), job({ id: "2", company: "Globex" })],
-    watches,
-    mode: "new",
-    title: "New",
-    blockedCompanies: ["acme"],
-  });
-  // Still on screen — blocking governs future scans, it doesn't delete rows.
-  assert.match(html, /data-job-id="1"[^>]*data-blocked="true"/);
-  assert.match(html, /data-job-id="2"[^>]*data-blocked="false"/);
-  assert.match(html, /<span class="badge">1<\/span>/);
-});
-
-test("renderPage escapes the title", () => {
-  const html = renderPage({ jobs: [], watches, mode: "new", title: "A & B" });
-  assert.match(html, /A &amp; B/);
-});
-
-test("renderPage new mode hides read jobs; all mode keeps them on screen", () => {
   const jobs = [job({ id: "1" }), job({ id: "2", read: true })];
-  const newHtml = renderPage({ jobs, watches, mode: "new", title: "New" });
-  assert.match(newHtml, /data-job-id="1"/);
-  assert.doesNotMatch(newHtml, /data-job-id="2"/);
-
-  const allHtml = renderPage({ jobs, watches, mode: "all", title: "All" });
-  assert.match(allHtml, /data-job-id="1"/);
-  assert.match(allHtml, /data-job-id="2"/);
+  assert.equal(selectView(ctx({ jobs, mode: "all" })).badge, 1);
 });
 
-test("renderPage new mode keeps a job you opened, highlighted — the reported bug", () => {
+test("selectView badge ignores a job you merely opened — it is still waiting", () => {
   const jobs = [job({ id: "1", opened: true, read: false })];
-  const html = renderPage({ jobs, watches, mode: "new", title: "New" });
-  assert.match(html, /data-job-id="1"/);
-  assert.match(html, /data-opened="true"/);
-  assert.doesNotMatch(html, /data-kind="no-new"/);
+  assert.equal(selectView(ctx({ jobs })).badge, 1);
 });
 
-test("renderPage shows the health message as a one-line banner (§16.8)", () => {
-  const html = renderPage({
-    jobs: [job({ id: "1" })],
-    watches,
-    mode: "all",
-    title: "All",
-    severity: "error",
-    message: "Signed out of LinkedIn — scanning paused.",
-  });
-  assert.match(html, /class="banner banner-error"/);
-  assert.match(html, /Signed out of LinkedIn — scanning paused\./);
+test("selectView flags a blocked company's rows and drops them off the badge", () => {
+  const v = selectView(
+    ctx({
+      jobs: [job({ id: "1", company: "Acme Corp" }), job({ id: "2", company: "Globex" })],
+      blockedCompanies: ["acme"],
+    }),
+  );
+  // Still in the list — blocking governs future scans, it doesn't delete rows.
+  assert.equal(v.jobs.find((j) => j.id === "1")!.blocked, true);
+  assert.equal(v.jobs.find((j) => j.id === "2")!.blocked, false);
+  assert.equal(v.badge, 1);
 });
 
-test("renderPage shows no banner when health is clear", () => {
-  const html = renderPage({ jobs: [job({ id: "1" })], watches, mode: "all", title: "All" });
-  assert.doesNotMatch(html, /class="banner/);
+test("selectView carries the title through untouched", () => {
+  // Escaping used to be this layer's job; React escapes its children now, so the
+  // title travels as the plain string it is. `components.test.tsx` proves the
+  // escaping still happens where it now belongs.
+  assert.equal(selectView(ctx({ jobs: [], title: "A & B" })).title, "A & B");
 });
 
-test("renderPage escapes the banner message", () => {
-  const html = renderPage({
-    jobs: [],
-    watches,
-    mode: "new",
-    title: "New",
-    severity: "warn",
-    message: "a < b & c",
-  });
-  assert.match(html, /a &lt; b &amp; c/);
+test("selectView keeps a job you opened out of the empty state — the reported bug", () => {
+  const v = selectView(ctx({ jobs: [job({ id: "1", opened: true, read: false })] }));
+  assert.equal(v.emptyKind, null);
+  assert.equal(v.jobs.find((j) => j.id === "1")!.opened, true);
 });
 
-test("renderPage shows the soft push-failing warning when pushWarn is set (§16.7)", () => {
-  const html = renderPage({
-    jobs: [job({ id: "1" })],
-    watches,
-    mode: "all",
-    title: "All",
-    pushWarn: true,
-  });
-  assert.match(html, /class="banner banner-warn"/);
-  assert.match(html, new RegExp(PUSH_FAILING_MESSAGE.replace(/[.*+?^${}()|[\]\\—]/g, "\\$&")));
+test("selectView surfaces the health message as a banner (§16.8)", () => {
+  const v = selectView(
+    ctx({
+      jobs: [job({ id: "1" })],
+      mode: "all",
+      severity: "error",
+      message: "Signed out of LinkedIn — scanning paused.",
+    }),
+  );
+  assert.deepEqual(v.banners, [
+    { message: "Signed out of LinkedIn — scanning paused.", severity: "error" },
+  ]);
 });
 
-test("renderPage shows no push warning when pushWarn is false", () => {
-  const html = renderPage({ jobs: [job({ id: "1" })], watches, mode: "all", title: "All" });
-  assert.doesNotMatch(html, new RegExp(PUSH_FAILING_MESSAGE.slice(0, 20)));
+test("selectView shows no banner when health is clear", () => {
+  assert.deepEqual(selectView(ctx({ jobs: [job({ id: "1" })], mode: "all" })).banners, []);
 });
 
-test("renderPage shows both the health banner and the push warning at once", () => {
-  const html = renderPage({
-    jobs: [job({ id: "1" })],
-    watches,
-    mode: "all",
-    title: "All",
-    severity: "error",
-    message: "Signed out of LinkedIn — scanning paused.",
-    pushWarn: true,
-  });
-  assert.match(html, /class="banner banner-error"/);
-  assert.match(html, /class="banner banner-warn"/);
+test("selectView shows the soft push-failing warning when pushWarn is set (§16.7)", () => {
+  const v = selectView(ctx({ jobs: [job({ id: "1" })], mode: "all", pushWarn: true }));
+  assert.deepEqual(v.banners, [{ message: PUSH_FAILING_MESSAGE, severity: "warn" }]);
 });
 
-test("renderPage picks the right empty state for each situation", () => {
+test("selectView shows no push warning when pushWarn is false", () => {
+  assert.deepEqual(selectView(ctx({ jobs: [job({ id: "1" })], mode: "all" })).banners, []);
+});
+
+test("selectView stacks the health banner and the push warning, health first", () => {
+  const v = selectView(
+    ctx({
+      jobs: [job({ id: "1" })],
+      mode: "all",
+      severity: "error",
+      message: "Signed out of LinkedIn — scanning paused.",
+      pushWarn: true,
+    }),
+  );
+  assert.equal(v.banners.length, 2);
+  assert.equal(v.banners[0]!.severity, "error");
+  assert.deepEqual(v.banners[1], { message: PUSH_FAILING_MESSAGE, severity: "warn" });
+});
+
+test("selectView picks the right empty state for each situation", () => {
   // no watches configured
-  assert.match(
-    renderPage({ jobs: [], watches: [], mode: "new", title: "New" }),
-    /data-kind="no-watches"/,
-  );
+  assert.equal(selectView(ctx({ jobs: [], watches: [] })).emptyKind, "no-watches");
   // watches exist but nothing scanned yet
-  assert.match(
-    renderPage({ jobs: [], watches, mode: "new", title: "New" }),
-    /data-kind="no-jobs-yet"/,
-  );
+  assert.equal(selectView(ctx({ jobs: [] })).emptyKind, "no-jobs-yet");
   // jobs exist but all read, in New mode → all caught up
-  assert.match(
-    renderPage({ jobs: [job({ read: true })], watches, mode: "new", title: "New" }),
-    /data-kind="no-new"/,
-  );
+  assert.equal(selectView(ctx({ jobs: [job({ read: true })] })).emptyKind, "no-new");
   // scan is broken → scan-error, whatever else is true
-  assert.match(
-    renderPage({ jobs: [], watches, mode: "new", title: "New", severity: "error" }),
-    /data-kind="scan-error"/,
-  );
+  assert.equal(selectView(ctx({ jobs: [], severity: "error" })).emptyKind, "scan-error");
+  // a list with something in it gets no empty state at all
+  assert.equal(selectView(ctx()).emptyKind, null);
 });
 
 // ── The manual scan control ─────────────────────────────────────────────────
@@ -469,6 +371,32 @@ test("scanButtonState stays idle for paused — that one resumes on its own (§1
   assert.equal(
     scanButtonState({ jobs: [], watches, mode: "new", title: "New", scanMode: "paused" }),
     "idle",
+  );
+});
+
+test("scanButtonState reports scanning from the click, before the lock exists", () => {
+  // The reported bug: waking the service worker takes long enough that a button
+  // still reading "Scan now" looks like a click that missed.
+  assert.equal(
+    scanButtonState({ jobs: [], watches, mode: "new", title: "New", pendingScan: true }),
+    "scanning",
+  );
+});
+
+test("scanButtonState: a pending click outranks a halted mode too", () => {
+  // "Scan now" is also the manual resume (§16.2), so the halted label must give
+  // way the moment it is pressed — otherwise the one control that clears a halt
+  // is the one that looks like it did nothing.
+  assert.equal(
+    scanButtonState({
+      jobs: [],
+      watches,
+      mode: "new",
+      title: "New",
+      pendingScan: true,
+      scanMode: "halted",
+    }),
+    "scanning",
   );
 });
 
@@ -524,6 +452,15 @@ test("scanStatus reports the scan in flight, whatever the schedule says", () => 
   );
 });
 
+test("scanStatus stops the countdown the moment Scan now is pressed", () => {
+  // Without this the footer keeps ticking "Next scan in 3m 14s" under a button
+  // the user has already pressed — the two surfaces contradicting each other.
+  assert.deepEqual(
+    scanStatus({ ...base, pendingScan: true, nextScanAt: NOW + 194_000, now: NOW }),
+    { kind: "scanning" },
+  );
+});
+
 test("scanStatus has nothing to count down to while halted (§16.2)", () => {
   // The alarm stays armed through a halt, but it will not scan when it fires —
   // counting down to it would be a lie the user acts on.
@@ -560,45 +497,38 @@ test("scanStatus says so when no alarm is armed at all", () => {
   assert.deepEqual(scanStatus({ ...base, nextScanAt: null, now: NOW }), { kind: "unscheduled" });
 });
 
-test("renderPage puts the status in a footer slot the countdown tick can repaint", () => {
-  const html = renderPage({ ...base, jobs: [job()], nextScanAt: NOW + 252_000, now: NOW });
-  assert.match(html, /<footer class="statusbar" id="statusbar"><div class="scan-status"/);
-  assert.match(html, /Next scan in 4m 12s/);
+test("selectView hands the footer a countdown to the next scan", () => {
+  const v = selectView({ ...base, jobs: [job()], nextScanAt: NOW + 252_000, now: NOW });
+  assert.deepEqual(v.status, { kind: "waiting", remainingMs: 252_000, quiet: false });
 });
 
-test("renderPage says it is scanning while a cycle holds the lock", () => {
-  const html = renderPage({ ...base, jobs: [job()], scanning: true, now: NOW });
-  assert.match(html, /Scanning for new jobs…/);
+test("selectView says it is scanning while a cycle holds the lock", () => {
+  const v = selectView({ ...base, jobs: [job()], scanning: true, now: NOW });
+  assert.deepEqual(v.status, { kind: "scanning" });
 });
 
-test("renderPage leaves the footer literally empty when there is nothing to scan", () => {
-  const html = renderPage({ ...base, watches: [], now: NOW });
-  // No whitespace inside the element, or `.statusbar:empty` will not match it
-  // and an empty bar sits at the bottom of the popup.
-  assert.match(html, /<footer class="statusbar" id="statusbar"><\/footer>/);
+test("selectView turns the status bar off entirely when there is nothing to scan", () => {
+  // `off` is what makes the bar render nothing at all, so the popup doesn't end
+  // in a strip promising a scan that no enabled search will ever produce.
+  const v = selectView({ ...base, watches: [], now: NOW });
+  assert.deepEqual(v.status, { kind: "off" });
 });
 
-test("renderPage puts the scan control in the header, in the right state", () => {
-  const idle = renderPage({ jobs: [job()], watches, mode: "new", title: "New" });
-  assert.match(idle, /id="scan-now"[^>]*data-scan-state="idle"/);
+test("selectView puts the scan control in the right state", () => {
+  assert.equal(selectView({ ...base, jobs: [job()] }).scanButton, "idle");
+  assert.equal(selectView({ ...base, jobs: [job()], scanning: true }).scanButton, "scanning");
+  assert.equal(
+    selectView({ ...base, jobs: [job()], scanMode: "halted", severity: "error" }).scanButton,
+    "halted",
+  );
+});
 
-  const scanning = renderPage({
-    jobs: [job()],
-    watches,
-    mode: "new",
-    title: "New",
-    scanning: true,
-  });
-  assert.match(scanning, /id="scan-now"[^>]*data-scan-state="scanning"[^>]*disabled/);
-
-  const halted = renderPage({
-    jobs: [job()],
-    watches,
-    mode: "new",
-    title: "New",
-    scanMode: "halted",
-    severity: "error",
-  });
-  assert.match(halted, /id="scan-now"[^>]*data-scan-state="halted"/);
-  assert.match(halted, />Resume</);
+test("selectView says Scanning… everywhere from the click, not from the reply", () => {
+  // One flag, three surfaces: the header button, the footer bar and — with an
+  // empty list — the empty state. A click that only moved one of them would read
+  // as the other two disagreeing with it.
+  const v = selectView({ ...base, pendingScan: true, nextScanAt: NOW + 194_000, now: NOW });
+  assert.equal(v.scanButton, "scanning");
+  assert.deepEqual(v.status, { kind: "scanning" });
+  assert.equal(v.emptyKind, "scanning");
 });

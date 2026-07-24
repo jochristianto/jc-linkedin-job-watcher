@@ -1,8 +1,14 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    // "Preserve"/"Bundler" rather than NodeNext, because the shadcn registry
+    // writes extension-less imports (`@/lib/utils`) and re-running its CLI would
+    // undo any hand-edit of those. Bundler resolution accepts BOTH those and the
+    // explicit `./foo.ts` specifiers the rest of this repo uses — and since the
+    // files that run under bare Node (scripts/, the service worker) all keep
+    // their extensions, runtime resolution is unaffected either way.
+    "module": "Preserve",
+    "moduleResolution": "Bundler",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": ["node", "chrome"],
     "strict": true,
@@ -10,7 +16,23 @@
     "noEmit": true,
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    // React 19's automatic runtime: no `import React` at the top of every file.
+    "jsx": "react-jsx",
+    // shadcn's convention. NodeNext still wants the extension on the specifier,
+    // so these read `@/lib/utils.ts` — which also matches the explicit-extension
+    // style every other import in this repo already uses.
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
-  "include": ["src/**/*.ts", "scripts/**/*.ts", "mockups/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "scripts/**/*.ts",
+    "scripts/**/*.tsx",
+    "mockups/**/*.ts",
+    "mockups/**/*.tsx"
+  ]
 }

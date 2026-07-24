@@ -6,7 +6,7 @@ static mockups make both concrete so an unattended agent doesn't invent them.
 
 ## Open them
 
-Static HTML with fake data — no extension, no storage, no build step. Open the
+Static HTML with fake data — no extension, no storage, nothing to run. Open the
 files directly in a browser (`file://…`):
 
 | File | What it shows |
@@ -15,29 +15,36 @@ files directly in a browser (`file://…`):
 | [`jobs.html`](./jobs.html) | The **same** component as the full **tab** — wider, All mode, read rows on screen, mid-scan status bar |
 | [`states.html`](./states.html) | All five **empty / degraded** states side by side |
 | [`options.html`](./options.html) | The **options** page — one long scroll, sectioned |
-| [`tokens.css`](./tokens.css) | Design tokens + component styles, light **and** dark |
-| [`render.ts`](../src/render.ts) | The shared component as tested plain-TS functions — **now the production source** |
+| [`../src/components/`](../src/components/) | The shared component itself — **the production source** |
 
-`render.ts` / `render.test.ts` were the reference implementation of the shared
-component; issue #16 moved them unchanged into `src/` (production), where the
-pages mount them via `src/view.ts` + `src/mount.ts`. The HTML files here still
-embed exactly the markup those functions emit. Run the tests with `npm test`.
+These four files are **generated**, not hand-written: `npm run build:mockups`
+renders the real components with fake data and inlines the real compiled
+stylesheet. Do not edit them by hand — regenerate. Run the tests with `npm test`;
+they check that the generated pages still cover every state worth seeing.
 
 ## Decisions (the 8 questions)
 
-**1. How it's built — plain TypeScript, string templates into `innerHTML`. No
-framework.** Issue #4 already settled the stack at plain Vite with the fewest
-moving parts an agent can get wrong; a framework runtime works against that and
-against the popup's cold-start feel. The list is a pure map from `Job[]` to
-markup (see `render.ts`) — the page does `container.innerHTML = renderList(...)`
-and delegates clicks off the container. Every field is escaped (`esc()`), same
-as `push.ts`, because scraped titles carry `&` and `<`.
+**1. How it's built — React 19 + Tailwind v4 + [shadcn/ui](https://ui.shadcn.com).**
+This reverses the original decision (plain TypeScript, string templates into
+`innerHTML`, no framework) and its rationale, which was issue #4's "fewest moving
+parts an agent can get wrong" plus the popup's cold-start feel. The cost is real
+and was accepted deliberately: the popup's JS went from ~13 kB to ~320 kB
+(~100 kB gzipped). What it buys is one consistent, accessible component set
+instead of hand-rolled controls — focus rings, keyboard behaviour and ARIA come
+from Radix rather than from remembering to add them.
 
-**2. Popup vs full tab — one component, one set of markup; they diverge only
-through a root class.** `.view-popup` is 380px, capped height, titles truncate
-to one line, defaults to **New**. `.view-tab` is a centered 720px column, titles
-wrap, defaults to **All** (you arrived from a notification to browse). No
-per-view markup branches — cheaper to keep correct.
+The registry components live unmodified in [`src/components/ui/`](../src/components/ui/)
+so `npx shadcn add` can be re-run over them; app-specific styling goes in the
+components that *use* them. Everything the view decides stays pure and tested in
+[`src/view.ts`](../src/view.ts) (`selectView`) — the components only map props to
+JSX.
+
+**2. Popup vs full tab — one component, one `variant` prop.** `popup` is 380px,
+capped height, titles truncate to one line, defaults to **New**. `tab` is a
+centered 720px column, defaults to **All** (you arrived from a notification to
+browse). This used to be a root CSS class because the two views shared a single
+markup string and could not branch; a component can, so "open as a full page"
+is simply not rendered in the tab rather than hidden by a `.view-tab` rule.
 
 **3. The job row.** Three stacked lines: **title** (bold), **company · location**
 (muted), **posted time · watch** (faint). An unread dot sits to the left.
@@ -64,19 +71,23 @@ marked opened first (PRD §9 "write before opening the tab"), then: in **New**
 mode it drops out of the list; in **All** mode it stays on screen but goes
 dimmed, no dot, un-bold. The badge count decrements either way.
 
-**7. Styling — plain CSS with one design-token file, light and dark.** Tokens
-live in `:root` and are redefined under `@media (prefers-color-scheme: dark)`, so
-the extension follows the OS with zero JS. Both themes ship. No CSS framework.
+**7. Styling — Tailwind v4 with shadcn's token names, light and dark.** Tokens
+live in [`src/tokens.css`](../src/tokens.css): the palette is this project's own
+(the warm grey page, LinkedIn blue) converted to OKLCH, under shadcn's semantic
+names (`--background`, `--primary`, `--muted-foreground`, …) so registry
+components drop in unchanged. Note `--primary` is the brand blue and `--accent`
+is shadcn's *subtle tint* role, not the brand.
 
-Icons are **[Lucide](https://lucide.dev), inlined as SVG** by
-[`src/icons.ts`](../src/icons.ts) — one `icon(name)` call per glyph, no npm
-dependency and no build step, so `node --test` and these `file://` mockups both
-keep working. They replaced the literal characters (`✓ ↺ ⊘ ⚙ ✕`) and the
-empty-state emoji, which rendered at a different weight on every platform and —
-emoji especially — arrived pre-coloured, ignoring the theme entirely. Every icon
-is stroked in `currentColor`, so one asset covers hover, pressed, disabled and
-dark mode, and every icon is `aria-hidden`: the control around it carries the
-label.
+Dark mode still follows the OS with zero JS: shadcn ships `dark:` as a `.dark`
+class variant that needs a toggle, so `@custom-variant dark` re-binds it to
+`@media (prefers-color-scheme: dark)` and the class is never needed.
+
+Icons are **[Lucide](https://lucide.dev)** via `lucide-react`, which is shadcn's
+own icon set — the same artwork the old hand-inlined `src/icons.ts` copied out of
+`lucide-static`. They replaced literal characters (`✓ ↺ ⊘ ⚙ ✕`) and empty-state
+emoji, which rendered at a different weight on every platform and — emoji
+especially — arrived pre-coloured, ignoring the theme. Every icon is stroked in
+`currentColor` and marked `aria-hidden`: the control around it carries the label.
 
 **8. Options page — one long plain page, labelled section cards, no tabs.** It's
 rarely opened, so it leans plain (per the issue). Sections: **Searches**
@@ -88,7 +99,15 @@ PRD §8). Save is explicit.
 
 ## Note on fidelity
 
-The HTML is hand-authored static markup mirroring `render.ts` — it is not the
-compiled component, because the issue asks for something openable with no build
-step. The row/empty-state shapes are the tested source of truth; the pages are
-the picture.
+The HTML *is* the compiled component now. It used to be hand-authored markup
+mirroring `render.ts`, which was affordable while the component was a string
+template — against React + Tailwind, where the classes come out of the components
+and the CSS out of the compiler, a hand-kept copy would be a guaranteed lie.
+
+`npm run build:mockups` renders the production components and inlines the
+production stylesheet, so the pages cannot drift. They stay committed and
+`file://`-openable, which is what the original decision was protecting.
+
+One exception: **`options.html`** is a live form over `chrome.storage` and cannot
+be rendered headlessly, so it shows only the two banners a healthy page never
+displays. Load the unpacked extension to see the real thing.
