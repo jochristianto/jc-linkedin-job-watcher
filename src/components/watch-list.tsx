@@ -58,7 +58,20 @@ export function WatchList({ watches, onChange }: WatchListProps) {
             />
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-medium">{w.name}</div>
-              <div className="truncate text-xs text-muted-foreground">{w.url}</div>
+              {/* The URL opens the search on LinkedIn in a new tab — the quickest
+                  way to check that a saved search still returns what you expect.
+                  `block truncate` keeps the row one line however long the URL is;
+                  the title attribute is how you read the rest of it. */}
+              <a
+                href={w.url}
+                target="_blank"
+                rel="noreferrer"
+                data-act="open-url"
+                title={w.url}
+                className="block truncate text-xs text-muted-foreground underline-offset-2 hover:text-primary hover:underline"
+              >
+                {w.url}
+              </a>
             </div>
             <Button
               type="button"

@@ -42,17 +42,17 @@ export type JobView = {
  *  `ApplyPrompt`), so only `"yes"` is ever held. */
 export type ApplyAnswer = "yes" | "no" | null;
 
-/** Which of the apply prompt's two dialogs is on screen. `"ask"` is the question
+/** Which of the apply prompt's two steps is on screen. `"ask"` is the question
  *  itself, two buttons and nothing else; `"note"` is the one Yes opens. */
 export type ApplyPromptStep = "ask" | "note";
 
 /**
- * The dialog a given answer puts on screen — the "the note belongs to Yes" rule,
+ * The step a given answer puts on screen — the "the note belongs to Yes" rule,
  * provable with plain values. The component holds the answer in `useState` and
  * renders what this returns; nothing about the rule lives in JSX.
  *
  * There is nothing to note about a job you did not apply to, so No never reaches
- * the second dialog: it answers and closes the question on the click.
+ * the second step: it answers and closes the question on the click.
  */
 export function applyPromptStep(answer: ApplyAnswer): ApplyPromptStep {
   return answer === "yes" ? "note" : "ask";
@@ -66,6 +66,23 @@ export function applyPromptStep(answer: ApplyAnswer): ApplyPromptStep {
 export const BLOCK_CONFIRM_MS = 5000;
 
 export type ListMode = "new" | "all";
+
+/**
+ * The rows a mode actually puts on screen: "new" drops the *read* ones, "all"
+ * keeps everything.
+ *
+ * Read, not opened — a job you clicked open stays here highlighted so you can go
+ * back to it, and only the row's tick removes it. Blocked jobs stay in both modes
+ * too, greyed: the blocklist governs what future scans surface, and silently
+ * deleting rows you can already see would be a second, unasked-for action.
+ *
+ * Here rather than inside `JobList` because two callers need the same answer: the
+ * list renders these, and the apply prompt has to know whether the row it belongs
+ * under is among them before it can attach itself to one.
+ */
+export function visibleJobs(jobs: JobView[], mode: ListMode): JobView[] {
+  return mode === "new" ? jobs.filter((j) => !j.read) : jobs;
+}
 
 export type EmptyKind =
   | "no-watches"

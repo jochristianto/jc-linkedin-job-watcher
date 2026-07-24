@@ -1,7 +1,7 @@
 // Options page — PRD §11 step 7. The §14 side-effect wrapper for the settings
 // form: it reads/writes the `settings` storage key, renders the five section
-// cards (Searches, Filters, Scanning, Telegram push, Retention) under the
-// collapsed how-it-works explainer, and wires every control.
+// cards (Searches, Filters, Scanning, Telegram push, Retention) beside the
+// how-it-works explainer, and wires every control.
 //
 // Every DECISION lives tested in options-form.ts — validation, the quiet-hours
 // time mapping, and the §6 normalize-on-write rule. This file only moves values
@@ -179,245 +179,273 @@ export function OptionsPage() {
   );
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-8">
-      <h1 className="text-xl font-semibold">LinkedIn Job Watcher — Settings</h1>
+    <div>
+      {/* The title sticks too, mirroring the save bar: the page is a long scroll
+          and the two edges should stay put rather than one holding and the other
+          sliding away. Same opaque treatment and full-width gutters, with the
+          shadow cast downwards. */}
+      <div className="sticky top-0 border-b bg-background shadow-[0_4px_12px_-6px_rgb(0_0_0/0.15)]">
+        <div className="flex w-full items-center px-4 py-3">
+          <h1 className="text-xl font-semibold">LinkedIn Job Watcher — Settings</h1>
+        </div>
+      </div>
 
-      <HowItWorks />
+      <div className="flex w-full flex-col gap-4 px-4 py-6">
+        {/* Full window width on a twelve-column grid: this only ever opens on a
+            desktop browser, and a single centred column left most of it empty
+            while the page ran several screens deep. The settings take nine
+            columns, the explainer sits alongside in three — it is reference text
+            you read while changing a knob, not something to scroll past first.
+            Below lg the two stack, settings first. */}
+        <div className="grid grid-cols-12 items-start gap-4">
+          <div className="col-span-12 grid grid-cols-1 items-start gap-4 lg:col-span-9 xl:grid-cols-2">
+            <Card className="xl:col-span-2">
+              <CardHeader>
+                <CardTitle>Searches</CardTitle>
+                <CardDescription>
+                  Saved LinkedIn job-search URLs with your filters already applied. Each runs on the
+                  same cycle; toggle any off to pause it.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4">
+                <WatchList watches={form.watches} onChange={(w) => set("watches", w)} />
+                <div className="flex flex-col gap-3 border-t pt-4">
+                  <div className="flex flex-col gap-3 sm:flex-row">
+                    <div className="flex flex-col gap-1.5 sm:w-48">
+                      <Label htmlFor="new-name">Nickname</Label>
+                      <Input
+                        id="new-name"
+                        value={newWatch.name}
+                        placeholder="e.g. Singapore"
+                        onChange={(e) => setNewWatch({ ...newWatch, name: e.target.value })}
+                      />
+                    </div>
+                    <div className="flex flex-1 flex-col gap-1.5">
+                      <Label htmlFor="new-url">Search URL</Label>
+                      <Input
+                        id="new-url"
+                        value={newWatch.url}
+                        placeholder="https://www.linkedin.com/jobs/search/?…"
+                        onChange={(e) => setNewWatch({ ...newWatch, url: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                  {newWatchError && (
+                    <p id="new-search-error" className="text-xs text-destructive">
+                      {newWatchError}
+                    </p>
+                  )}
+                  <Button type="button" id="add-search" onClick={onAddSearch} className="self-start">
+                    Add search
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Searches</CardTitle>
-          <CardDescription>
-            Saved LinkedIn job-search URLs with your filters already applied. Each runs on the
-            same cycle; toggle any off to pause it.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <WatchList watches={form.watches} onChange={(w) => set("watches", w)} />
-          <div className="flex flex-col gap-3 border-t pt-4">
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <div className="flex flex-col gap-1.5 sm:w-48">
-                <Label htmlFor="new-name">Nickname</Label>
-                <Input
-                  id="new-name"
-                  value={newWatch.name}
-                  placeholder="e.g. Singapore"
-                  onChange={(e) => setNewWatch({ ...newWatch, name: e.target.value })}
+            <Card>
+              <CardHeader>
+                <CardTitle>Filters</CardTitle>
+                <CardDescription>Company names match partially, case-insensitive.</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-5">
+                <TagInput
+                  id="company"
+                  label="Blocked companies"
+                  placeholder="Add a company to block, then Enter…"
+                  values={form.blockedCompanies.map((c) => c.display)}
+                  onAdd={(v) => set("blockedCompanies", [...form.blockedCompanies, makeBlockedCompany(v)])}
+                  onRemove={(i) =>
+                    set("blockedCompanies", form.blockedCompanies.filter((_, idx) => idx !== i))
+                  }
                 />
-              </div>
-              <div className="flex flex-1 flex-col gap-1.5">
-                <Label htmlFor="new-url">Search URL</Label>
-                <Input
-                  id="new-url"
-                  value={newWatch.url}
-                  placeholder="https://www.linkedin.com/jobs/search/?…"
-                  onChange={(e) => setNewWatch({ ...newWatch, url: e.target.value })}
+                <TagInput
+                  id="keyword"
+                  label="Blocked title keywords"
+                  placeholder="Add a keyword to block, then Enter…"
+                  values={form.blockedTitleKeywords}
+                  onAdd={(v) => set("blockedTitleKeywords", [...form.blockedTitleKeywords, v])}
+                  onRemove={(i) =>
+                    set("blockedTitleKeywords", form.blockedTitleKeywords.filter((_, idx) => idx !== i))
+                  }
                 />
-              </div>
-            </div>
-            {newWatchError && (
-              <p id="new-search-error" className="text-xs text-destructive">
-                {newWatchError}
-              </p>
-            )}
-            <Button type="button" id="add-search" onClick={onAddSearch} className="self-start">
-              Add search
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+                <ToggleRow
+                  id="hide-reposted"
+                  label="Hide jobs marked “Reposted”"
+                  checked={form.hideReposted}
+                  onChange={(v) => set("hideReposted", v)}
+                />
+              </CardContent>
+            </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Filters</CardTitle>
-          <CardDescription>Company names match partially, case-insensitive.</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-5">
-          <TagInput
-            id="company"
-            label="Blocked companies"
-            placeholder="Add a company to block, then Enter…"
-            values={form.blockedCompanies.map((c) => c.display)}
-            onAdd={(v) => set("blockedCompanies", [...form.blockedCompanies, makeBlockedCompany(v)])}
-            onRemove={(i) =>
-              set("blockedCompanies", form.blockedCompanies.filter((_, idx) => idx !== i))
-            }
-          />
-          <TagInput
-            id="keyword"
-            label="Blocked title keywords"
-            placeholder="Add a keyword to block, then Enter…"
-            values={form.blockedTitleKeywords}
-            onAdd={(v) => set("blockedTitleKeywords", [...form.blockedTitleKeywords, v])}
-            onRemove={(i) =>
-              set("blockedTitleKeywords", form.blockedTitleKeywords.filter((_, idx) => idx !== i))
-            }
-          />
-          <ToggleRow
-            id="hide-reposted"
-            label="Hide jobs marked “Reposted”"
-            checked={form.hideReposted}
-            onChange={(v) => set("hideReposted", v)}
-          />
-        </CardContent>
-      </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>Scanning</CardTitle>
+                <CardDescription>
+                  Lower the depth if you don't need it — every page is a real load against LinkedIn
+                  (PRD §12).
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4">
+                <div className="flex flex-col gap-4 sm:flex-row">
+                  {numField("intervalMinutes", "Interval (minutes)", 1)}
+                  {numField("jitterMinutes", "Jitter (± minutes)", 0)}
+                </div>
+                <div className="flex flex-col gap-4 sm:flex-row">
+                  {numField("pagesPerScan", "Pages per scan", 1)}
+                  {numField("catchUpPages", "Catch-up pages (on startup)", 1)}
+                </div>
+                <ToggleRow
+                  id="quiet-enabled"
+                  label="Pause scanning during quiet hours"
+                  checked={form.quietHoursEnabled}
+                  onChange={(v) => set("quietHoursEnabled", v)}
+                />
+                <div className="flex flex-col gap-4 sm:flex-row">
+                  <div className="flex flex-1 flex-col gap-1.5">
+                    <Label htmlFor="quietStart">Quiet hours start</Label>
+                    <Input
+                      id="quietStart"
+                      type="time"
+                      value={form.quietStart}
+                      aria-invalid={Boolean(errors.quietStart)}
+                      onChange={(e) => set("quietStart", e.target.value)}
+                    />
+                    {errors.quietStart && (
+                      <p data-err="quietStart" className="text-xs text-destructive">
+                        {errors.quietStart}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex flex-1 flex-col gap-1.5">
+                    <Label htmlFor="quietEnd">Quiet hours end</Label>
+                    <Input
+                      id="quietEnd"
+                      type="time"
+                      value={form.quietEnd}
+                      aria-invalid={Boolean(errors.quietEnd)}
+                      onChange={(e) => set("quietEnd", e.target.value)}
+                    />
+                    {errors.quietEnd && (
+                      <p data-err="quietEnd" className="text-xs text-destructive">
+                        {errors.quietEnd}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Scanning</CardTitle>
-          <CardDescription>
-            Lower the depth if you don't need it — every page is a real load against LinkedIn
-            (PRD §12).
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-col gap-4 sm:flex-row">
-            {numField("intervalMinutes", "Interval (minutes)", 1)}
-            {numField("jitterMinutes", "Jitter (± minutes)", 0)}
-          </div>
-          <div className="flex flex-col gap-4 sm:flex-row">
-            {numField("pagesPerScan", "Pages per scan", 1)}
-            {numField("catchUpPages", "Catch-up pages (on startup)", 1)}
-          </div>
-          <ToggleRow
-            id="quiet-enabled"
-            label="Pause scanning during quiet hours"
-            checked={form.quietHoursEnabled}
-            onChange={(v) => set("quietHoursEnabled", v)}
-          />
-          <div className="flex flex-col gap-4 sm:flex-row">
-            <div className="flex flex-1 flex-col gap-1.5">
-              <Label htmlFor="quietStart">Quiet hours start</Label>
-              <Input
-                id="quietStart"
-                type="time"
-                value={form.quietStart}
-                aria-invalid={Boolean(errors.quietStart)}
-                onChange={(e) => set("quietStart", e.target.value)}
-              />
-              {errors.quietStart && (
-                <p data-err="quietStart" className="text-xs text-destructive">
-                  {errors.quietStart}
-                </p>
-              )}
-            </div>
-            <div className="flex flex-1 flex-col gap-1.5">
-              <Label htmlFor="quietEnd">Quiet hours end</Label>
-              <Input
-                id="quietEnd"
-                type="time"
-                value={form.quietEnd}
-                aria-invalid={Boolean(errors.quietEnd)}
-                onChange={(e) => set("quietEnd", e.target.value)}
-              />
-              {errors.quietEnd && (
-                <p data-err="quietEnd" className="text-xs text-destructive">
-                  {errors.quietEnd}
-                </p>
-              )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>Telegram push</CardTitle>
+                <CardDescription>
+                  Optional: also deliver new jobs to your phone via a Telegram bot, additive to the
+                  desktop notification (PRD §8). Nothing here is stored anywhere but this browser —
+                  never committed. Use <b>Send test message</b> to confirm the credentials before
+                  trusting it.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4">
+                {pushWarn && (
+                  <HealthBanner
+                    message={PUSH_FAILING_MESSAGE}
+                    severity="warn"
+                    className="rounded-md border"
+                  />
+                )}
+                {prefilled && (
+                  <HealthBanner
+                    message="Filled in from your .env by `npm run build:dev` — press Save settings to keep it."
+                    severity="warn"
+                    className="rounded-md border"
+                  />
+                )}
+                <ToggleRow
+                  id="push-enabled"
+                  label="Send new jobs to Telegram"
+                  checked={form.pushEnabled}
+                  onChange={(v) => set("pushEnabled", v)}
+                />
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="pushBotToken">Bot token</Label>
+                  <Input
+                    id="pushBotToken"
+                    type="password"
+                    autoComplete="off"
+                    value={form.pushBotToken}
+                    placeholder="123456:ABC-DEF…"
+                    onChange={(e) => set("pushBotToken", e.target.value)}
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="pushChatId">Chat id</Label>
+                  <Input
+                    id="pushChatId"
+                    type="text"
+                    autoComplete="off"
+                    value={form.pushChatId}
+                    placeholder="987654321"
+                    onChange={(e) => set("pushChatId", e.target.value)}
+                  />
+                </div>
+                <div className="flex items-center gap-3">
+                  <Button type="button" variant="outline" id="send-test" onClick={onSendTest}>
+                    Send test message
+                  </Button>
+                  <StatusText id="test-status" status={testStatus} />
+                </div>
+              </CardContent>
+            </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Telegram push</CardTitle>
-          <CardDescription>
-            Optional: also deliver new jobs to your phone via a Telegram bot, additive to the
-            desktop notification (PRD §8). Nothing here is stored anywhere but this browser —
-            never committed. Use <b>Send test message</b> to confirm the credentials before
-            trusting it.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          {pushWarn && (
-            <HealthBanner
-              message={PUSH_FAILING_MESSAGE}
-              severity="warn"
-              className="rounded-md border"
-            />
-          )}
-          {prefilled && (
-            <HealthBanner
-              message="Filled in from your .env by `npm run build:dev` — press Save settings to keep it."
-              severity="warn"
-              className="rounded-md border"
-            />
-          )}
-          <ToggleRow
-            id="push-enabled"
-            label="Send new jobs to Telegram"
-            checked={form.pushEnabled}
-            onChange={(v) => set("pushEnabled", v)}
-          />
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="pushBotToken">Bot token</Label>
-            <Input
-              id="pushBotToken"
-              type="password"
-              autoComplete="off"
-              value={form.pushBotToken}
-              placeholder="123456:ABC-DEF…"
-              onChange={(e) => set("pushBotToken", e.target.value)}
-            />
+            <Card>
+              <CardHeader>
+                <CardTitle>Retention</CardTitle>
+                <CardDescription>
+                  How long records are kept before daily clean-up prunes them (PRD §7).
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4">
+                <div className="flex flex-col gap-4 sm:flex-row">
+                  {numField("seenDays", "Seen IDs (days)", 1)}
+                  {numField("openedJobDays", "Opened jobs (days)", 1)}
+                </div>
+                <div className="flex flex-col gap-4 sm:flex-row">
+                  {numField("unopenedJobDays", "Unopened jobs (days)", 1)}
+                  {numField("seenHardCap", "Seen hard cap", 1)}
+                </div>
+              </CardContent>
+            </Card>
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="pushChatId">Chat id</Label>
-            <Input
-              id="pushChatId"
-              type="text"
-              autoComplete="off"
-              value={form.pushChatId}
-              placeholder="987654321"
-              onChange={(e) => set("pushChatId", e.target.value)}
-            />
-          </div>
-          <div className="flex items-center gap-3">
-            <Button type="button" variant="outline" id="send-test" onClick={onSendTest}>
-              Send test message
-            </Button>
-            <StatusText id="test-status" status={testStatus} />
-          </div>
-        </CardContent>
-      </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Retention</CardTitle>
-          <CardDescription>
-            How long records are kept before daily clean-up prunes them (PRD §7).
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-col gap-4 sm:flex-row">
-            {numField("seenDays", "Seen IDs (days)", 1)}
-            {numField("openedJobDays", "Opened jobs (days)", 1)}
-          </div>
-          <div className="flex flex-col gap-4 sm:flex-row">
-            {numField("unopenedJobDays", "Unopened jobs (days)", 1)}
-            {numField("seenHardCap", "Seen hard cap", 1)}
-          </div>
-        </CardContent>
-      </Card>
+          <aside className="col-span-12 lg:col-span-3">
+            <HowItWorks />
+          </aside>
+        </div>
+      </div>
 
       {/* The save bar sticks: the page is a long scroll and Save should never be
           somewhere you have to hunt for. Opaque rather than the usual translucent
           treatment — it passes over white section cards, and letting those bleed
-          through made it read as a rendering artefact instead of a bar. */}
-      <div className="sticky bottom-0 -mx-4 flex items-center justify-end gap-3 border-t bg-background px-4 py-3 shadow-[0_-4px_12px_-6px_rgb(0_0_0/0.15)]">
-        <StatusText id="save-status" status={saveStatus} />
-        <Button type="button" variant="outline" id="reset" onClick={onReset}>
-          Reset
-        </Button>
-        <Button type="button" id="save" onClick={onSave}>
-          Save settings
-        </Button>
+          through made it read as a rendering artefact instead of a bar. The bar
+          itself spans the window, and so does its content — the same full-width
+          gutters as everything above, so nothing shifts as the window resizes. */}
+      <div className="sticky bottom-0 border-t bg-background shadow-[0_-4px_12px_-6px_rgb(0_0_0/0.15)]">
+        <div className="flex w-full items-center justify-between gap-4 px-4 py-3">
+          <p className="max-w-lg text-xs text-faint">
+            Personal use only · Don't publish as extension, and lower the frequency as much as
+            possible to reduce the chance of getting blocked, and turn off when not needed.
+          </p>
+          <div className="flex shrink-0 items-center gap-3">
+            <StatusText id="save-status" status={saveStatus} />
+            <Button type="button" variant="outline" id="reset" onClick={onReset}>
+              Reset
+            </Button>
+            <Button type="button" id="save" onClick={onSave}>
+              Save settings
+            </Button>
+          </div>
+        </div>
       </div>
-
-      <p className="text-center text-xs text-faint">
-        Personal single-user tool · against LinkedIn's ToS · keep the depth low.
-      </p>
     </div>
   );
 }

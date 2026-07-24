@@ -241,10 +241,10 @@ const files: Record<string, string> = {
     css,
     // The Options *form* reads chrome.storage on mount, so it cannot be rendered
     // headlessly the way the list view can. What can: the how-it-works explainer
-    // that sits above it, which reads nothing — it ships here collapsed exactly
-    // as production shows it, and `<details>` is native, so the file opens it on
-    // a click with no script. Below it, the banner pair — the two things on that
-    // page a screenshot would otherwise never show.
+    // that sits in the column beside it, which reads nothing — it ships here
+    // expanded exactly as production shows it, and `<details>` is native, so the
+    // file collapses it on a click with no script. Below it, the banner pair —
+    // the two things on that page a screenshot would otherwise never show.
     renderToStaticMarkup(
       <div className="mx-auto flex max-w-3xl flex-col gap-4 p-8">
         <h1 className="text-xl font-semibold">LinkedIn Job Watcher — Settings</h1>

@@ -7,11 +7,15 @@
 // and no PRD section numbers. The GitHub link at the bottom is the way out to
 // the full README, the source, and the issue tracker.
 //
-// It is a `<details>`, collapsed by default: someone opening Options to change
-// an interval should not have to scroll past an essay every time. Native
-// disclosure means no React state, no storage key to remember, and the keyboard
-// and screen-reader behaviour is the browser's rather than ours — the same
-// reasoning that keeps dark mode on `prefers-color-scheme` with no JS.
+// It is a `<details>`, open by default. It used to sit above the settings and
+// start collapsed, where an open essay was something to scroll past; now it sits
+// in its own column beside them, so showing it costs the settings no room and
+// hiding it would only leave that column blank. Native disclosure still means no
+// React state, no storage key to remember, and the keyboard and screen-reader
+// behaviour is the browser's rather than ours — the same reasoning that keeps
+// dark mode on `prefers-color-scheme` with no JS. `open` is the initial state
+// only: React writes it once, so collapsing it survives every re-render of the
+// form next door.
 
 import { ChevronRight, ExternalLink } from "lucide-react";
 
@@ -21,6 +25,7 @@ export const REPO_URL = "https://github.com/jochristianto/jc-linkedin-job-watche
 export function HowItWorks() {
   return (
     <details
+      open
       id="how-it-works"
       className="group rounded-xl border bg-card text-card-foreground shadow-sm"
     >
