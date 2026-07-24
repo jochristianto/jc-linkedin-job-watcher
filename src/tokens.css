@@ -1,665 +1,160 @@
-/* Design tokens + list-view styles for the LinkedIn Job Watcher mockups.
+/* Design tokens for the LinkedIn Job Watcher — Tailwind v4 + shadcn/ui.
  *
- * Plain CSS, one token file, no framework (issue #4: fewest moving parts).
- * Light and dark are both defined — dark via prefers-color-scheme, so it
- * follows the OS with zero JS. The same file styles the popup, the full tab,
- * and the options page; the popup/tab diverge only through .view-popup /
- * .view-tab on the root element, never through different markup. */
+ * Tailwind v4 is configured in CSS, not a JS config file: `@theme inline` below
+ * is what turns each `--color-*` into a utility (`bg-background`, `text-muted-
+ * foreground`, …), which is why there is no tailwind.config.js in this repo.
+ *
+ * The palette is the project's own, not shadcn's neutral default: the warm grey
+ * page and the LinkedIn blue are the app's identity, converted to OKLCH (the
+ * v4/shadcn convention) from the hex values this file used to carry. Only the
+ * *names* are shadcn's, so every component from the registry drops in unchanged.
+ *
+ * Dark mode stays on `prefers-color-scheme` — it follows the OS with zero JS,
+ * as it always has. The `@custom-variant` below is what re-points shadcn's
+ * `dark:` utilities at that media query instead of the `.dark` class they
+ * normally expect, so the registry components come along for free. */
+
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* shadcn ships `dark:` as a `.dark` class variant, which needs JS to toggle.
+ * This app has never had a theme switch — it follows the OS — so the variant is
+ * re-bound to the media query and the class is never needed. */
+@custom-variant dark (@media (prefers-color-scheme: dark));
 
 :root {
-  --bg: #f3f2ef; /* LinkedIn-ish warm grey page */
-  --surface: #ffffff;
-  --surface-2: #f6f8fa;
-  --border: #e2e1de;
-  --text: #1a1a1a;
-  --muted: #5f6368;
-  --faint: #8a8f98;
-  --accent: #0a66c2; /* LinkedIn blue */
-  --accent-weak: #e8f0fe;
-  --unread: #0a66c2; /* unread dot + accent bar */
-  --danger: #b3261e;
-  --danger-weak: #fce8e6;
-  --warn: #8a5a00; /* amber — soft warnings (structure-changed / stalled) */
-  --warn-weak: #fdf1dc;
-  --ok: #146c2e;
+  /* 10px — the radius the old `--r-md` used, and shadcn's own default. */
+  --radius: 0.625rem;
 
-  --r-sm: 6px;
-  --r-md: 10px;
-  --s-1: 4px;
-  --s-2: 8px;
-  --s-3: 12px;
-  --s-4: 16px;
-  --s-5: 24px;
-  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
-    Arial, sans-serif;
+  --background: oklch(0.9611 0.0041 91.45); /* LinkedIn-ish warm grey page */
+  --foreground: oklch(0.2178 0 0);
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.2178 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.2178 0 0);
+
+  /* Brand. shadcn's `--primary` is the "this is the app's colour" role, which
+   * here is LinkedIn blue — the old `--accent`. */
+  --primary: oklch(0.5156 0.1632 254.73);
+  --primary-foreground: oklch(1 0 0);
+
+  --secondary: oklch(0.9782 0.0034 247.86);
+  --secondary-foreground: oklch(0.2178 0 0);
+
+  --muted: oklch(0.9782 0.0034 247.86);
+  --muted-foreground: oklch(0.4979 0.0094 253.91);
+
+  /* NOTE: shadcn's `--accent` is the subtle hover/tint background, NOT the brand
+   * colour. The brand blue is `--primary` above; this is the old `--accent-weak`. */
+  --accent: oklch(0.9532 0.0207 261.77);
+  --accent-foreground: oklch(0.5156 0.1632 254.73);
+
+  --destructive: oklch(0.5013 0.1783 28.7);
+  --destructive-foreground: oklch(1 0 0);
+
+  --border: oklch(0.9097 0.0042 91.45);
+  --input: oklch(0.9097 0.0042 91.45);
+  --ring: oklch(0.5156 0.1632 254.73);
+
+  /* App-specific roles with no shadcn equivalent. `--warn` is the soft amber the
+   * health banner and the push warning share (PRD §16.7/§16.8); `--ok` is the
+   * good-news green on the Send-test result; `--faint` is the third-tier text in
+   * a job row's footer, a step below `--muted-foreground`. */
+  --warn: oklch(0.5078 0.108 73.3);
+  --warn-weak: oklch(0.962 0.0305 81.76);
+  --ok: oklch(0.467 0.1247 148.2);
+  --destructive-weak: oklch(0.9464 0.0221 24.44);
+  --faint: oklch(0.6488 0.0146 262.36);
+  /* The unread dot and the accent bar down the side of an unread row. */
+  --unread: oklch(0.5156 0.1632 254.73);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #1b1f23;
-    --surface: #24292e;
-    --surface-2: #2d333b;
-    --border: #3a4048;
-    --text: #e6e8eb;
-    --muted: #9aa2ad;
-    --faint: #6b7480;
-    --accent: #4a9eff;
-    --accent-weak: #16334d;
-    --unread: #4a9eff;
-    --danger: #ff6b61;
-    --danger-weak: #3a1f1d;
-    --warn: #f0b429;
-    --warn-weak: #3a2f16;
-    --ok: #4ac06a;
+    --background: oklch(0.2369 0.0097 248.24);
+    --foreground: oklch(0.9303 0.0046 258.33);
+
+    --card: oklch(0.2781 0.0117 248.25);
+    --card-foreground: oklch(0.9303 0.0046 258.33);
+    --popover: oklch(0.2781 0.0117 248.25);
+    --popover-foreground: oklch(0.9303 0.0046 258.33);
+
+    --primary: oklch(0.6929 0.1647 253.96);
+    --primary-foreground: oklch(0.2369 0.0097 248.24);
+
+    --secondary: oklch(0.3186 0.0165 255.64);
+    --secondary-foreground: oklch(0.9303 0.0046 258.33);
+
+    --muted: oklch(0.3186 0.0165 255.64);
+    --muted-foreground: oklch(0.7093 0.0184 256.31);
+
+    --accent: oklch(0.3124 0.0585 247.89);
+    --accent-foreground: oklch(0.6929 0.1647 253.96);
+
+    --destructive: oklch(0.7099 0.1826 26.6);
+    --destructive-foreground: oklch(0.2369 0.0097 248.24);
+
+    --border: oklch(0.369 0.0159 255.61);
+    --input: oklch(0.369 0.0159 255.61);
+    --ring: oklch(0.6929 0.1647 253.96);
+
+    --warn: oklch(0.8045 0.1558 82.54);
+    --warn-weak: oklch(0.3108 0.0423 86.15);
+    --ok: oklch(0.7204 0.1625 149.39);
+    --destructive-weak: oklch(0.2749 0.0425 24.74);
+    --faint: oklch(0.5555 0.0216 255.6);
+    --unread: oklch(0.6929 0.1647 253.96);
   }
 }
 
-* {
-  box-sizing: border-box;
+/* The bridge from the variables above to Tailwind utilities. `inline` means the
+ * values are substituted at build time, so `bg-card` compiles to the var
+ * reference and still flips with the media query at runtime. */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-weak: var(--destructive-weak);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-warn: var(--warn);
+  --color-warn-weak: var(--warn-weak);
+  --color-ok: var(--ok);
+  --color-faint: var(--faint);
+  --color-unread: var(--unread);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  /* The system stack the app has always used — no webfont, nothing to load. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
 }
 
-body {
-  margin: 0;
-  font-family: var(--font);
-  color: var(--text);
-  background: var(--bg);
-  font-size: 14px;
-  line-height: 1.4;
-}
-
-/* ---- Root sizing: the one place popup and tab diverge ---- */
-.view-popup {
-  width: 380px;
-  min-height: 480px;
-  max-height: 600px;
-  display: flex;
-  flex-direction: column;
-}
-.view-tab {
-  max-width: 720px;
-  margin: 0 auto;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-}
-
-/* ---- Icons (Lucide, inlined by src/icons.ts) ---- */
-/* Every icon is stroked in `currentColor`, so it simply inherits whatever the
- * control around it is doing — hover, pressed, disabled, dark mode — instead of
- * needing a second asset per state.
- *
- * `pointer-events: none` is load-bearing, not polish: mount.ts and options.ts
- * delegate clicks and resolve them with `e.target.closest(...)`. Letting the
- * <svg> (or one of its <path>s) become the event target would still work through
- * closest(), but only by accident of the DOM shape — this keeps the button
- * itself the thing that was clicked, always. */
-.lucide {
-  flex: 0 0 auto;
-  vertical-align: middle;
-  pointer-events: none;
-}
-
-/* ---- Header ---- */
-.hdr {
-  display: flex;
-  align-items: center;
-  gap: var(--s-2);
-  padding: var(--s-3) var(--s-4);
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  position: sticky;
-  top: 0;
-  z-index: 2;
-}
-.hdr-title {
-  font-weight: 700;
-  font-size: 15px;
-  flex: 1;
-  /* The header carries three controls now; let the title give way rather than
-   * wrap the row when a long one (e.g. the tab's) meets a narrow popup. */
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.badge {
-  background: var(--danger);
-  color: #fff;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 1px 7px;
-  min-width: 18px;
-  text-align: center;
-}
-.hdr-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s-1);
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  padding: var(--s-1) var(--s-2);
-  border-radius: var(--r-sm);
-  font-size: 13px;
-}
-/* The gear has no label to pad around, so it gets a square hit area instead of
- * the wider one a text control needs. */
-.hdr-btn.icon-only {
-  padding: var(--s-1);
-}
-.hdr-btn:hover {
-  background: var(--surface-2);
-  color: var(--text);
-}
-/* Only ever set on the scan control, while a cycle holds the lock. */
-.hdr-btn:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-.hdr-btn:disabled:hover {
-  background: transparent;
-  color: var(--muted);
-}
-/* A halted scan needs the user to act, so its label is the one header control
- * that shouts. */
-.hdr-btn[data-scan-state="halted"] {
-  color: var(--danger);
-  font-weight: 600;
-}
-
-/* ---- Toolbar: watch chips + New/All toggle ---- */
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: var(--s-2);
-  padding: var(--s-2) var(--s-4);
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
-}
-.chips {
-  display: flex;
-  gap: var(--s-1);
-  flex: 1;
-  flex-wrap: wrap;
-}
-.chip {
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--muted);
-  border-radius: 999px;
-  padding: 2px 10px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.chip[aria-pressed="true"] {
-  background: var(--accent-weak);
-  border-color: var(--accent);
-  color: var(--accent);
-  font-weight: 600;
-}
-.toggle {
-  display: inline-flex;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  overflow: hidden;
-}
-.toggle button {
-  border: none;
-  background: var(--surface);
-  color: var(--muted);
-  padding: 3px 12px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.toggle button[aria-pressed="true"] {
-  background: var(--accent);
-  color: #fff;
-  font-weight: 600;
-}
-
-/* ---- Scan status banner (non-blocking) ---- */
-.banner {
-  display: flex;
-  align-items: center;
-  gap: var(--s-2);
-  padding: var(--s-2) var(--s-4);
-  font-size: 12px;
-  background: var(--surface-2);
-  color: var(--muted);
-  border-bottom: 1px solid var(--border);
-}
-.banner-error {
-  background: var(--danger-weak);
-  color: var(--danger);
-}
-.banner-warn {
-  background: var(--warn-weak);
-  color: var(--warn);
-}
-
-/* ---- List ---- */
-.list {
-  flex: 1;
-  overflow-y: auto;
-  padding: var(--s-2);
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-2);
-}
-
-/* A row is a container, not one big link: the posting is the <a class="job-main">
- * filling the row, the two actions are buttons beside it (buttons cannot legally
- * live inside an anchor). Clicking anywhere but a button still opens the job. */
-.job {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--s-2);
-  padding: var(--s-3);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  position: relative;
-}
-.job:hover {
-  border-color: var(--accent);
-}
-.job-main {
-  display: flex;
-  gap: var(--s-2);
-  flex: 1;
-  min-width: 0;
-  text-decoration: none;
-  color: inherit;
-}
-.job-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--unread);
-  margin-top: 6px;
-  flex: 0 0 auto;
-}
-
-/* Opened: you clicked through to the posting. The row STAYS on screen — marked,
- * not removed — tinted with an accent bar down its left edge, so you can find
- * your way back to the one you were just looking at. */
-.job[data-opened="true"] {
-  background: var(--accent-weak);
-  border-color: var(--accent);
-}
-.job[data-opened="true"]::before {
-  content: "";
-  position: absolute;
-  inset: var(--s-2) auto var(--s-2) 0;
-  width: 3px;
-  border-radius: 0 var(--r-sm) var(--r-sm) 0;
-  background: var(--accent);
-}
-
-/* Dealt with — either you ticked it read, or you blocked its company. Both grey
- * out the same way (dim, no dot, un-bold title), and both come after the opened
- * highlight so they win at equal specificity: a job you opened and then
- * dismissed reads as dismissed. Read rows show only in "All"; blocked rows stay
- * in both, because blocking governs future scans, not what's already here. */
-.job[data-read="true"],
-.job[data-blocked="true"] {
-  background: var(--surface-2);
-  border-color: var(--border);
-}
-.job[data-read="true"]::before,
-.job[data-blocked="true"]::before {
-  display: none;
-}
-.job[data-read="true"] .job-dot,
-.job[data-blocked="true"] .job-dot {
-  visibility: hidden;
-}
-.job[data-read="true"] .job-title,
-.job[data-blocked="true"] .job-title {
-  font-weight: 500;
-  color: var(--muted);
-}
-.job-body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-/* ---- Row actions: Block the company, then the tick that dismisses ---- */
-.job-actions {
-  display: flex;
-  gap: var(--s-1);
-  flex: 0 0 auto;
-}
-.job-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  color: var(--muted);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  cursor: pointer;
-}
-.job-btn:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-/* Pressed = the state is already on, and the button is now the undo: the undo
- * arrow puts a read job back, the ban icon unblocks the company. */
-.job-btn[aria-pressed="true"] {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: var(--accent-weak);
-}
-/* Block carries its own word, so it sizes to that word instead of the tick's
- * 26px square: an unlabelled ban icon reads as a status, not as a control, and
- * block vs unblock lived only in the tooltip.
- *
- * Red at rest, not only on hover: it is the one row action whose consequences
- * outlive the row it sits in — every future scan stops surfacing that company —
- * and a control that only admits to that once your pointer is already on it is
- * warning you too late. The tick beside it stays neutral, so the two never read
- * as the same kind of thing. */
-.job-btn-block {
-  width: auto;
-  gap: var(--s-1);
-  padding: 0 var(--s-2);
-  font: 600 12px/1 var(--font);
-  white-space: nowrap;
-  color: var(--danger);
-  border-color: var(--danger);
-}
-/* Hover, and the pressed state that reads "Unblock": same red, tinted fill. */
-.job-btn-block:hover,
-.job-btn-block[aria-pressed="true"] {
-  color: var(--danger);
-  border-color: var(--danger);
-  background: var(--danger-weak);
-}
-
-/* Armed — pressed once, asking "Sure?". Solid where the resting button is
- * outlined: the escalation is the signal. A label change alone is easy to miss
- * on a button you have already looked away from. The text is var(--bg) rather
- * than white so it stays legible against the lighter red dark mode uses. It
- * reverts on its own, or on a click anywhere else (mount.ts). */
-.job-btn-block[data-armed="true"],
-.job-btn-block[data-armed="true"]:hover {
-  color: var(--bg);
-  background: var(--danger);
-  border-color: var(--danger);
-}
-
-/* Says *why* a row is greyed — read and blocked look identical otherwise. */
-.job-tag {
-  display: inline-block;
-  margin-left: var(--s-2);
-  padding: 0 6px;
-  border-radius: var(--r-sm);
-  background: var(--danger-weak);
-  color: var(--danger);
-  font-size: 11px;
-  font-weight: 600;
-}
-.job-tag:first-child {
-  margin-left: 0;
-}
-.job-title {
-  font-weight: 700;
-  font-size: 14px;
-  color: var(--text);
-}
-.job-meta {
-  font-size: 13px;
-  color: var(--muted);
-}
-.job-foot {
-  font-size: 12px;
-  color: var(--faint);
-}
-/* The tab has room; let titles breathe. The popup clamps to one line. */
-.view-popup .job-title,
-.view-popup .job-meta {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* ---- Empty states ---- */
-.empty {
-  margin: auto;
-  text-align: center;
-  padding: var(--s-5);
-  color: var(--muted);
-  max-width: 300px;
-}
-/* The artwork, not a control: faint by default so it frames the message rather
- * than competing with it. `line-height: 0` keeps the inline <svg> from dragging
- * a text baseline's worth of space under itself. */
-.empty-icon {
-  line-height: 0;
-  color: var(--faint);
-  margin-bottom: var(--s-2);
-}
-/* The one empty state that is a failure, not a lull — it gets to look like one. */
-.empty[data-kind="scan-error"] .empty-icon {
-  color: var(--danger);
-}
-.empty-title {
-  font-weight: 700;
-  color: var(--text);
-  margin-bottom: var(--s-1);
-}
-.empty-body {
-  font-size: 13px;
-}
-
-/* ---- Status bar: what the scan loop is doing, and when it runs next ---- */
-/* A footer, not a banner: the list above is flex:1 and scrolls inside itself, so
- * this strip stays put at the bottom of both the popup and the tab. It is the
- * quietest thing on screen on purpose — ambient status, glanced at, never
- * competing with the health banners or a job row. */
-.statusbar {
-  flex: 0 0 auto;
-  padding: var(--s-2) var(--s-4);
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-}
-/* No enabled search means nothing is scheduled and `renderScanStatus` emits
- * nothing, so the bar itself disappears rather than sitting there empty. This
- * relies on the footer's contents being written with no surrounding whitespace —
- * a stray text node would defeat :empty. */
-.statusbar:empty {
-  display: none;
-}
-.scan-status {
-  display: flex;
-  align-items: center;
-  gap: var(--s-2);
-  font-size: 12px;
-  color: var(--faint);
-}
-/* A scan in progress is the one state worth noticing from across the room. */
-.scan-status[data-kind="scanning"] {
-  color: var(--accent);
-  font-weight: 600;
-}
-.scan-status[data-kind="halted"] {
-  color: var(--danger);
-  font-weight: 600;
-}
-/* The spin is what makes "Scanning…" read as *now* rather than as a label. */
-@keyframes ljw-spin {
-  to {
-    transform: rotate(360deg);
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
   }
-}
-.scan-status[data-kind="scanning"] .lucide {
-  animation: ljw-spin 1.4s linear infinite;
-}
-@media (prefers-reduced-motion: reduce) {
-  .scan-status[data-kind="scanning"] .lucide {
-    animation: none;
+  body {
+    @apply bg-background text-foreground font-sans text-sm/[1.4] antialiased;
+    margin: 0;
   }
-}
-
-/* ---- Options page ---- */
-.opt-wrap {
-  max-width: 640px;
-  margin: 0 auto;
-  padding: var(--s-5) var(--s-4);
-}
-.opt-wrap h1 {
-  font-size: 20px;
-  margin: 0 0 var(--s-4);
-}
-.section {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: var(--s-4);
-  margin-bottom: var(--s-4);
-}
-.section > h2 {
-  font-size: 14px;
-  margin: 0 0 var(--s-1);
-}
-.section > .hint {
-  color: var(--muted);
-  font-size: 12px;
-  margin: 0 0 var(--s-3);
-}
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-1);
-  margin-bottom: var(--s-3);
-}
-.field-row {
-  display: flex;
-  gap: var(--s-3);
-}
-.field-row .field {
-  flex: 1;
-}
-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--muted);
-}
-input[type="text"],
-input[type="number"],
-input[type="password"] {
-  padding: 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--surface-2);
-  color: var(--text);
-  font: inherit;
-}
-.watch-row,
-.block-row {
-  display: flex;
-  align-items: center;
-  gap: var(--s-2);
-  padding: var(--s-2) 0;
-  border-top: 1px solid var(--border);
-}
-.watch-row .grow {
-  flex: 1;
-  min-width: 0;
-}
-.watch-row .name {
-  font-weight: 600;
-}
-.watch-row .url {
-  font-size: 12px;
-  color: var(--faint);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 2px 10px;
-  font-size: 12px;
-  margin: 0 4px 4px 0;
-}
-.btn {
-  border: 1px solid var(--accent);
-  background: var(--accent);
-  color: #fff;
-  border-radius: var(--r-sm);
-  padding: 7px 14px;
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-}
-.btn.ghost {
-  background: transparent;
-  color: var(--accent);
-}
-.btn.sm {
-  padding: 3px 10px;
-  font-size: 12px;
-}
-/* The ✕ on a blocklist tag: no label to pad around, and no border either — a
- * pill inside a pill reads as two controls. */
-.btn.icon-only {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px;
-  border-color: transparent;
-}
-.switch {
-  font-size: 12px;
-  color: var(--muted);
-}
-.test-result {
-  font-size: 12px;
-  font-weight: 600;
-}
-.test-result.ok {
-  color: var(--ok);
-}
-.test-result.err {
-  color: var(--danger);
-}
-.foot-note {
-  color: var(--faint);
-  font-size: 12px;
-  text-align: center;
-  padding: var(--s-4);
-}
-.field-error {
-  color: var(--danger);
-  font-size: 12px;
-  font-weight: 600;
-}
-.field-error:empty {
-  display: none;
-}
-input.invalid {
-  border-color: var(--danger);
-}
-.save-bar {
-  display: flex;
-  align-items: center;
-  gap: var(--s-3);
-  justify-content: flex-end;
-}
-.save-bar .test-result {
-  margin-right: auto;
 }

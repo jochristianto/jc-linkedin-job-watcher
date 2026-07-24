@@ -86,11 +86,12 @@ In both views:
 - **Click a job** → opens the posting in a new tab and **highlights the row**, which stays in the list. Nothing disappears because you looked at it. Cmd/Ctrl/middle-click opens it in the background.
 - **The tick on a row** → marks that one job read: the row greys out, drops out of **New**, and the badge falls by one. This is the only thing that clears a job. Press it again (it flips to an undo arrow) to bring the job back.
 - **Block on a row** → adds that job's company to your blocklist, without a trip to Options. Future scans stop surfacing it. Jobs from that company already in your list stay on screen, greyed and tagged **Blocked**, and stop counting towards the badge. It asks first: the button reads **Sure?** after one press and only blocks on the second — click anywhere else, or wait five seconds, and the question goes away. The button then reads **Unblock**, which takes just the one press.
-- **Scan now** runs a cycle immediately, ignoring the interval and quiet hours. It reads *Scanning…* (greyed out) while a cycle is in flight, and the list repaints on its own when that cycle finishes. After a manual scan the next automatic one is a full interval away, not stacked minutes behind. When a verification challenge has halted scanning, the same button turns red and reads **Resume** — that is how you clear the halt.
+- **Scan now** runs a cycle immediately, ignoring the interval and quiet hours. It flips to *Scanning…* (greyed out, with the status bar below it saying the same) **the moment you press it** — not when the background gets round to answering, which can take a second or two if Chrome had put the extension to sleep. The list repaints on its own when the cycle finishes. After a manual scan the next automatic one is a full interval away, not stacked minutes behind. When a verification challenge has halted scanning, the same button turns red and reads **Resume** — that is how you clear the halt.
 - **The status bar** along the bottom says what the loop is doing: *Scanning for new jobs…* with a spinning icon while a cycle is running, otherwise a live countdown to the next one (*Next scan in 4m 12s*). Inside quiet hours it says so, which is why that number is hours rather than minutes. It reads the armed alarm itself, so it can't drift from the real schedule — and with no search enabled there is nothing to scan, so the bar disappears entirely.
 - **Watch chips** filter the list to one search. The badge still counts across all of them.
 - **New ⇄ All** toggles between unread-only and everything.
 - **Mark all as read** clears the badge and empties New in one action.
+- **Open as a full page** (the arrow icon, popup only) moves the list you're looking at into a 720px tab — the popup is a small panel that closes the moment you click anything outside it, which is the wrong place to read a long list. Your chip and mode come with you, and an already-open jobs tab is focused rather than duplicated.
 - Your last chip + mode are remembered, so reopening the popup lands you where you left off.
 
 A row therefore has three looks: plain (untouched), highlighted with a blue bar (you opened it), and greyed (you read it, or blocked its company).
@@ -295,10 +296,11 @@ These are real gaps in the current build, not misconfiguration:
 
 ```bash
 npm install
-npm test          # 212 unit tests, node --test, no browser needed
+npm test          # 300 unit tests, node's test runner via tsx, no browser needed
 npm run typecheck # tsc --noEmit
 npm run build     # → dist/, never contains credentials
 npm run build:dev # → dist/ with .env baked in as Options defaults (local only)
+npm run build:mockups # regenerate mockups/*.html from the real components
 ```
 
 No environment setup is needed for any of the above. The one optional extra is `cp .env.example .env`, which enables `npm run send-test-message` and `npm run build:dev` — see [Pre-filling Options from `.env`](#pre-filling-options-from-env-npm-run-builddev).
@@ -307,9 +309,41 @@ The architecture rule (PRD §14): **every decision lives in a pure, tested modul
 
 | | |
 |---|---|
-| **Pure & tested** | [parse.ts](src/parse.ts) · [filter.ts](src/filter.ts) · [dedupe.ts](src/dedupe.ts) · [schedule.ts](src/schedule.ts) · [health.ts](src/health.ts) · [lifecycle.ts](src/lifecycle.ts) · [scan.ts](src/scan.ts) · [render.ts](src/render.ts) · [view.ts](src/view.ts) · [gc.ts](src/gc.ts) · [options-form.ts](src/options-form.ts) · [push.ts](src/push.ts) |
-| **Side-effect wrappers** | [background.ts](src/background.ts) · [content.ts](src/content.ts) · [storage.ts](src/storage.ts) · [mount.ts](src/mount.ts) · [options.ts](src/options.ts) |
+| **Pure & tested** | [parse.ts](src/parse.ts) · [filter.ts](src/filter.ts) · [dedupe.ts](src/dedupe.ts) · [schedule.ts](src/schedule.ts) · [health.ts](src/health.ts) · [lifecycle.ts](src/lifecycle.ts) · [scan.ts](src/scan.ts) · [view.ts](src/view.ts) · [view-model.ts](src/view-model.ts) · [gc.ts](src/gc.ts) · [options-form.ts](src/options-form.ts) · [push.ts](src/push.ts) |
+| **Side-effect wrappers** | [background.ts](src/background.ts) · [content.ts](src/content.ts) · [storage.ts](src/storage.ts) · [jobs-tab.ts](src/jobs-tab.ts) · [components/](src/components/) · [hooks/](src/hooks/) |
 
 Two Vite builds run in sequence: [vite.config.ts](vite.config.ts) emits the service worker + three HTML pages, then [vite.content.config.ts](vite.content.config.ts) appends `content.js` as an IIFE — an MV3 content script can't be an ES module.
 
-The full specification is [prd.md](prd.md); static UI mockups live in [mockups/](mockups/).
+### UI stack
+
+**React 19 + Tailwind v4 + [shadcn/ui](https://ui.shadcn.com).** The pages mount
+React components; the registry components live unmodified in
+[src/components/ui/](src/components/ui/) so `npx shadcn add` can be re-run over
+them, and app styling goes in the components that use them.
+
+The §14 rule holds across the change: `selectView` in [view.ts](src/view.ts)
+decides *everything* the list view shows — badge count, which empty state, which
+banners, the scan status — as plain data, and the components only map that to
+JSX. That is why the suite stayed at ~300 tests without needing a DOM: component
+tests render to a string with `react-dom/server`, and the assembly logic is
+asserted on values.
+
+Two notes for anyone editing the styles:
+
+- Tailwind is configured **in CSS** ([src/tokens.css](src/tokens.css)), not a JS
+  config — there is no `tailwind.config.js` to look for. The palette is this
+  project's own (warm grey page, LinkedIn blue) in OKLCH, under shadcn's
+  semantic names. `--primary` is the brand blue; `--accent` is shadcn's *subtle
+  tint* role, not the brand.
+- Dark mode still follows the OS with **zero JS**. shadcn ships `dark:` as a
+  `.dark` class variant that needs a toggle, so `@custom-variant dark` re-binds
+  it to `prefers-color-scheme`.
+
+The cost of the stack, stated plainly: the popup's JS went from ~13 kB to
+~320 kB (~100 kB gzipped). What it buys is one consistent, accessible component
+set — focus rings, keyboard behaviour and ARIA come from Radix rather than from
+remembering to add them.
+
+The full specification is [prd.md](prd.md); UI mockups live in
+[mockups/](mockups/) and are **generated** from the real components by
+`npm run build:mockups`.

@@ -1,4 +1,6 @@
 import { defineConfig, loadEnv } from "vite";
+import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 import { copyFileSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -50,6 +52,11 @@ export default defineConfig(({ mode }) => {
   define: {
     __LJW_PREFILL_PUSH__: JSON.stringify(prefill),
   },
+  // shadcn's `@/…` convention. The specifiers keep their `.ts`/`.tsx` extension
+  // (tsconfig runs on NodeNext resolution), so this is a plain prefix swap.
+  resolve: {
+    alias: { "@": resolve(root, "src") },
+  },
   build: {
     outDir: "dist",
     emptyOutDir: true,
@@ -73,6 +80,8 @@ export default defineConfig(({ mode }) => {
     },
   },
   plugins: [
+    react(),
+    tailwindcss(),
     {
       name: "ljw-copy-manifest",
       closeBundle() {

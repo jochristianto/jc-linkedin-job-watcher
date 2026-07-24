@@ -12,7 +12,7 @@ import { DEFAULT_SETTINGS, type Settings, type Job, type ScanState, type HealthS
 import { IDLE_LIFECYCLE } from "./lifecycle.ts";
 import { OK_HEALTH, OK_PUSH_HEALTH, type PushHealthState } from "./health.ts";
 import type { SeenMap } from "./dedupe.ts";
-import type { ListMode } from "./render.ts";
+import type { ListMode } from "./view-model.ts";
 
 /** `jobId → full Job record` — the `jobs` key of §6 (feeds the list view). */
 export type JobsMap = Record<string, Job>;
