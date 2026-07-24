@@ -221,9 +221,8 @@ const REPOSTED_MARKER_SELECTORS = [
  *  and a word-boundary match keeps a title or description mentioning "reposted"
  *  from tripping it (§16, issue #2 finding 3 / issue #30 item 1). */
 function isRepostedCard(card: Element): boolean {
-  return REPOSTED_MARKER_SELECTORS.some((selector) =>
-    Array.from(card.querySelectorAll(selector)).some((el) => /\breposted\b/i.test(norm(el.textContent))),
-  );
+  const footers = card.querySelectorAll(REPOSTED_MARKER_SELECTORS.join(", "));
+  return Array.from(footers).some((el) => /\breposted\b/i.test(norm(el.textContent)));
 }
 
 /**
