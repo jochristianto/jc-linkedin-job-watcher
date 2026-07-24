@@ -359,33 +359,41 @@ body {
   border-color: var(--accent);
   background: var(--accent-weak);
 }
-.job-btn[data-action="block"]:hover,
-.job-btn[data-action="block"][aria-pressed="true"] {
-  color: var(--danger);
-  border-color: var(--danger);
-}
-.job-btn[data-action="block"][aria-pressed="true"] {
-  background: var(--danger-weak);
-}
-
 /* Block carries its own word, so it sizes to that word instead of the tick's
  * 26px square: an unlabelled ban icon reads as a status, not as a control, and
- * block vs unblock lived only in the tooltip. */
+ * block vs unblock lived only in the tooltip.
+ *
+ * Red at rest, not only on hover: it is the one row action whose consequences
+ * outlive the row it sits in — every future scan stops surfacing that company —
+ * and a control that only admits to that once your pointer is already on it is
+ * warning you too late. The tick beside it stays neutral, so the two never read
+ * as the same kind of thing. */
 .job-btn-block {
   width: auto;
   gap: var(--s-1);
   padding: 0 var(--s-2);
   font: 600 12px/1 var(--font);
   white-space: nowrap;
+  color: var(--danger);
+  border-color: var(--danger);
+}
+/* Hover, and the pressed state that reads "Unblock": same red, tinted fill. */
+.job-btn-block:hover,
+.job-btn-block[aria-pressed="true"] {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: var(--danger-weak);
 }
 
-/* Armed — pressed once, asking "Sure?". Filled in danger so it can't be mistaken
- * for the resting button: the next press is the one that blocks. It reverts on
- * its own, or on a click anywhere else (mount.ts). */
+/* Armed — pressed once, asking "Sure?". Solid where the resting button is
+ * outlined: the escalation is the signal. A label change alone is easy to miss
+ * on a button you have already looked away from. The text is var(--bg) rather
+ * than white so it stays legible against the lighter red dark mode uses. It
+ * reverts on its own, or on a click anywhere else (mount.ts). */
 .job-btn-block[data-armed="true"],
 .job-btn-block[data-armed="true"]:hover {
-  color: var(--danger);
-  background: var(--danger-weak);
+  color: var(--bg);
+  background: var(--danger);
   border-color: var(--danger);
 }
 
