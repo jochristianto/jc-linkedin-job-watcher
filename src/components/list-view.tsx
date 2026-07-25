@@ -18,7 +18,7 @@ import { EmptyState, type EmptyStateAction } from "@/components/empty-state.tsx"
 import { HealthBanner } from "@/components/health-banner.tsx";
 import { JobList } from "@/components/job-list.tsx";
 import { ListHeader } from "@/components/list-header.tsx";
-import { ScanningBar, ScanSkeletons } from "@/components/scanning.tsx";
+import { ScanSkeletons } from "@/components/scanning.tsx";
 import { ScanStatusBar } from "@/components/scan-status.tsx";
 import { Toolbar } from "@/components/toolbar.tsx";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -592,14 +592,10 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
                     stretched across a 27" monitor is unreadable, not spacious. */}
                 <div className="flex-1 overflow-y-auto bg-[color-mix(in_oklab,var(--muted)_45%,var(--background))]">
                   <div className="mx-auto w-full max-w-220 p-2.5 md:p-3.5">
-                    {/* A scan running over a list you are already reading. The
-                        empty case gets skeletons below instead — replacing rows
-                        you were reading with grey boxes would be worse than
-                        leaving them alone. */}
-                    {view.status.kind === "scanning" && view.emptyKind !== "scanning" && (
-                      <ScanningBar />
-                    )}
-
+                    {/* A scan over a list you are already reading says so in the
+                        header and the footer; the content area stays as it was.
+                        Only the empty case gets skeletons — there is nothing
+                        there to leave alone. */}
                     {view.emptyKind === "scanning" ? (
                       <ScanSkeletons />
                     ) : view.emptyKind ? (

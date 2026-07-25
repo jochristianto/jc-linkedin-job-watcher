@@ -1,24 +1,3 @@
-import { RefreshCw } from "lucide-react";
-
-/**
- * A one-line card above the list while a cycle runs and the list already has
- * something in it.
- *
- * The footer says "Scanning for new jobs…" too, but the footer is where you look
- * to find out *when* the loop runs, not to notice that it is running now. This
- * sits where the new rows will land, so a list that looks unchanged for the next
- * fifteen seconds is visibly mid-scan rather than visibly stale. On an empty list
- * it is redundant — {@link ScanSkeletons} occupies that space instead.
- */
-export function ScanningBar() {
-  return (
-    <div className="mb-2 flex items-center gap-2 rounded-[10px] border bg-card px-2.5 py-2">
-      <RefreshCw className="size-3.5 shrink-0 animate-spin text-primary" aria-hidden="true" />
-      <span className="text-[12.5px] text-muted-foreground">Scanning your watches…</span>
-    </div>
-  );
-}
-
 /** Three bar widths per card, deliberately uneven: rows of identical grey bars
  *  read as a loading *graphic*, whereas ragged ones read as text about to
  *  arrive — which is what is actually coming. */

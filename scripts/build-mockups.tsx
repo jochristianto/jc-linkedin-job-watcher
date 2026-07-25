@@ -32,7 +32,6 @@ import {
   CardHeader,
   CardTitle,
 } from "../src/components/ui/card";
-import { ScanningBar } from "../src/components/scanning.tsx";
 import { ScanStatusBar } from "../src/components/scan-status.tsx";
 import { Toolbar } from "../src/components/toolbar.tsx";
 import { TooltipProvider } from "../src/components/ui/tooltip";
@@ -280,7 +279,6 @@ function listView(opts: {
         )}
         <div className="flex-1 overflow-y-auto bg-[color-mix(in_oklab,var(--muted)_45%,var(--background))]">
           <div className="mx-auto w-full max-w-220 p-2.5 md:p-3.5">
-            {opts.status.kind === "scanning" && <ScanningBar />}
             <JobList
               jobs={opts.jobs}
               mode={opts.mode}
