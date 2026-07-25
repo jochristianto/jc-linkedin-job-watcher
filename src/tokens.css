@@ -4,10 +4,13 @@
  * is what turns each `--color-*` into a utility (`bg-background`, `text-muted-
  * foreground`, …), which is why there is no tailwind.config.js in this repo.
  *
- * The palette is the project's own, not shadcn's neutral default: the warm grey
- * page and the LinkedIn blue are the app's identity, converted to OKLCH (the
- * v4/shadcn convention) from the hex values this file used to carry. Only the
- * *names* are shadcn's, so every component from the registry drops in unchanged.
+ * The palette comes from the design system bound under `.design/_ds/` (Become
+ * One GMS — shadcn/Radix/Tailwind v4 with an olive-green brand). Values are
+ * copied from its `_ds_bundle.css` `:root`/`.dark` blocks, with the handful of
+ * tokens it declares in HSL converted to OKLCH so this file speaks one syntax.
+ * Where the design system has no equivalent for a role this app needs, the
+ * value is *derived* from a design-system token with `color-mix()` — the same
+ * idiom the comps in `.design/*.dc.html` use for their own weak tints.
  *
  * Dark mode stays on `prefers-color-scheme` — it follows the OS with zero JS,
  * as it always has. The `@custom-variant` below is what re-points shadcn's
@@ -23,116 +26,130 @@
 @custom-variant dark (@media (prefers-color-scheme: dark));
 
 :root {
-  /* 10px — the radius the old `--r-md` used, and shadcn's own default. */
+  /* 10px. The design system's own `--radius` is 8px, but corner rounding is not
+   * part of the palette this file was asked to adopt, so it stays put. */
   --radius: 0.625rem;
 
-  --background: oklch(0.9611 0.0041 91.45); /* LinkedIn-ish warm grey page */
-  --foreground: oklch(0.2178 0 0);
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.141 0.005 285.823);
 
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.2178 0 0);
+  --card-foreground: oklch(0.141 0.005 285.823);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.2178 0 0);
+  --popover-foreground: oklch(0.141 0.005 285.823);
 
   /* Brand. shadcn's `--primary` is the "this is the app's colour" role, which
-   * here is LinkedIn blue — the old `--accent`. */
-  --primary: oklch(0.5156 0.1632 254.73);
-  --primary-foreground: oklch(1 0 0);
+   * here is the design system's `--brand` — hsl(92 19% 35%), a deep olive. */
+  --primary: oklch(0.5005 0.0561 131);
+  --primary-foreground: oklch(0.9848 0 0);
 
-  --secondary: oklch(0.9782 0.0034 247.86);
-  --secondary-foreground: oklch(0.2178 0 0);
+  --secondary: oklch(0.967 0.001 286.375);
+  --secondary-foreground: oklch(0.21 0.006 285.885);
 
-  --muted: oklch(0.9782 0.0034 247.86);
-  --muted-foreground: oklch(0.4979 0.0094 253.91);
+  --muted: oklch(0.967 0.001 286.375);
+  --muted-foreground: oklch(0.552 0.016 285.938);
 
   /* NOTE: shadcn's `--accent` is the subtle hover/tint background, NOT the brand
-   * colour. The brand blue is `--primary` above; this is the old `--accent-weak`. */
-  --accent: oklch(0.9532 0.0207 261.77);
-  --accent-foreground: oklch(0.5156 0.1632 254.73);
+   * colour. The brand olive is `--primary` above. The design system fills this
+   * role with plain grey; this app has always wanted a brand tint here, so it is
+   * mixed from `--primary` the way the comps mix their own tints. */
+  --accent: color-mix(in oklab, var(--primary) 10%, var(--card));
+  --accent-foreground: var(--primary);
 
-  --destructive: oklch(0.5013 0.1783 28.7);
-  --destructive-foreground: oklch(1 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.9848 0 0);
 
-  --border: oklch(0.9097 0.0042 91.45);
-  --input: oklch(0.9097 0.0042 91.45);
-  --ring: oklch(0.5156 0.1632 254.73);
+  /* The design system keeps two greys here — `--border` at 0.97 and `--input` at
+   * 0.92 — and its comps draw every visible edge with the `--input` one. This
+   * app applies `border-border` globally, so both carry that value or the cards
+   * would have no edge at all against the white page. */
+  --border: oklch(0.92 0.004 286.32);
+  --input: oklch(0.92 0.004 286.32);
+  --ring: oklch(0.5005 0.0561 131);
 
-  /* App-specific roles with no shadcn equivalent. `--warn` is the soft amber the
+  /* App-specific roles with no shadcn equivalent. `--warn` is the amber the
    * health banner and the push warning share (PRD §16.7/§16.8); `--ok` is the
    * good-news green on the Send-test result; `--faint` is the third-tier text in
-   * a job row's footer, a step below `--muted-foreground`. */
-  --warn: oklch(0.5078 0.108 73.3);
-  --warn-weak: oklch(0.962 0.0305 81.76);
-  --ok: oklch(0.467 0.1247 148.2);
-  --destructive-weak: oklch(0.9464 0.0221 24.44);
-  --faint: oklch(0.6488 0.0146 262.36);
+   * a job row's footer, a step below `--muted-foreground`. `--warning` is the
+   * design system's own amber, kept as the base the other two are mixed from —
+   * at full strength it is a fill colour, too light to read as text. */
+  --warning: oklch(0.794 0.1709 71.06);
+  --warn: color-mix(in oklab, var(--warning) 62%, #000);
+  --warn-weak: color-mix(in oklab, var(--warning) 18%, var(--card));
+  --ok: color-mix(in oklab, var(--success) 62%, #241f11);
+  --destructive-weak: color-mix(in oklab, var(--destructive) 12%, var(--card));
+  --faint: color-mix(in oklab, var(--muted-foreground) 78%, var(--card));
   /* The unread dot and the accent bar down the side of an unread row. */
-  --unread: oklch(0.5156 0.1632 254.73);
+  --unread: var(--primary);
 
   /* The two roles the redesigned row's chips introduced. `--success` is the
-   * Applied badge and the strip that manages it — the same green as `--ok`,
-   * named for the role a badge variant asks for rather than for the sentence
-   * the Send-test result uses it in. `--info` is the third work-mode tone:
-   * Remote is success, Hybrid is info, On-site is plain foreground. */
-  --success: oklch(0.467 0.1247 148.2);
-  --info: oklch(0.5156 0.1632 254.73);
+   * Applied badge and the strip that manages it — the design system's own green,
+   * which `--ok` above darkens for use as text. `--info` is the third work-mode
+   * tone: Remote is success, Hybrid is info, On-site is plain foreground. */
+  --success: oklch(0.723 0.219 149.579);
+  --info: oklch(0.6141 0.2114 256.22);
 
   /* Employer monogram tones. A company's first letter is tinted by a stable
    * hash of its name (see `companyTone`), so the same employer wears the same
    * colour in every scan and repeat senders are recognisable before the name is
-   * read. Five hues, deliberately low-chroma: they sit behind a letter, not in
-   * front of it. */
-  --chart-1: oklch(0.5156 0.1632 254.73);
-  --chart-2: oklch(0.5502 0.1274 172.55);
-  --chart-3: oklch(0.5713 0.1516 39.51);
-  --chart-4: oklch(0.5289 0.1655 305.42);
-  --chart-5: oklch(0.5698 0.1201 132.19);
+   * read. These are the design system's five chart colours; `monoStyle` mixes
+   * each one down against the card before it ever sits behind a letter. */
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: oklch(0.2369 0.0097 248.24);
-    --foreground: oklch(0.9303 0.0046 258.33);
+    --background: oklch(0.141 0.005 285.823);
+    --foreground: oklch(0.985 0 0);
 
-    --card: oklch(0.2781 0.0117 248.25);
-    --card-foreground: oklch(0.9303 0.0046 258.33);
-    --popover: oklch(0.2781 0.0117 248.25);
-    --popover-foreground: oklch(0.9303 0.0046 258.33);
+    --card: oklch(0.21 0.006 285.885);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.21 0.006 285.885);
+    --popover-foreground: oklch(0.985 0 0);
 
-    --primary: oklch(0.6929 0.1647 253.96);
-    --primary-foreground: oklch(0.2369 0.0097 248.24);
+    /* The design system's dark brand is not a darker olive but a mint green —
+     * its `.dark` block says so, and this follows it rather than inventing one. */
+    --primary: oklch(0.696 0.17 162.48);
+    --primary-foreground: oklch(0.393 0.095 152.535);
 
-    --secondary: oklch(0.3186 0.0165 255.64);
-    --secondary-foreground: oklch(0.9303 0.0046 258.33);
+    --secondary: oklch(0.274 0.006 286.033);
+    --secondary-foreground: oklch(0.985 0 0);
 
-    --muted: oklch(0.3186 0.0165 255.64);
-    --muted-foreground: oklch(0.7093 0.0184 256.31);
+    --muted: oklch(0.274 0.006 286.033);
+    --muted-foreground: oklch(0.705 0.015 286.067);
 
-    --accent: oklch(0.3124 0.0585 247.89);
-    --accent-foreground: oklch(0.6929 0.1647 253.96);
+    /* Same recipe as light, a touch stronger so it survives the darker card. */
+    --accent: color-mix(in oklab, var(--primary) 16%, var(--card));
+    --accent-foreground: var(--primary);
 
-    --destructive: oklch(0.7099 0.1826 26.6);
-    --destructive-foreground: oklch(0.2369 0.0097 248.24);
+    --destructive: oklch(0.704 0.191 22.216);
+    --destructive-foreground: oklch(0.141 0.005 285.823);
 
-    --border: oklch(0.369 0.0159 255.61);
-    --input: oklch(0.369 0.0159 255.61);
-    --ring: oklch(0.6929 0.1647 253.96);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.527 0.154 150.069);
 
-    --warn: oklch(0.8045 0.1558 82.54);
-    --warn-weak: oklch(0.3108 0.0423 86.15);
-    --ok: oklch(0.7204 0.1625 149.39);
-    --destructive-weak: oklch(0.2749 0.0425 24.74);
-    --faint: oklch(0.5555 0.0216 255.6);
-    --unread: oklch(0.6929 0.1647 253.96);
+    /* On a dark card the amber and the green are already legible as text, so
+     * neither is darkened the way the light scheme has to darken them. */
+    --warn: var(--warning);
+    --warn-weak: color-mix(in oklab, var(--warning) 18%, var(--card));
+    --ok: var(--success);
+    --destructive-weak: color-mix(in oklab, var(--destructive) 18%, var(--card));
+    --faint: color-mix(in oklab, var(--muted-foreground) 78%, var(--card));
+    --unread: var(--primary);
 
-    --success: oklch(0.7204 0.1625 149.39);
-    --info: oklch(0.6929 0.1647 253.96);
+    --success: oklch(0.696 0.17 162.48);
+    /* The design system leaves `--info` alone in dark; so does this. */
 
-    --chart-1: oklch(0.6929 0.1647 253.96);
-    --chart-2: oklch(0.7217 0.1179 173.36);
-    --chart-3: oklch(0.7413 0.1421 51.86);
-    --chart-4: oklch(0.7127 0.1439 306.51);
-    --chart-5: oklch(0.7434 0.1359 134.87);
+    --chart-1: oklch(0.488 0.243 264.376);
+    --chart-2: oklch(0.696 0.17 162.48);
+    --chart-3: oklch(0.769 0.188 70.08);
+    --chart-4: oklch(0.627 0.265 303.9);
+    --chart-5: oklch(0.645 0.246 16.439);
   }
 }
 
