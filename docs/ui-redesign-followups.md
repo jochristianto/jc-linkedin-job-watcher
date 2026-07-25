@@ -25,7 +25,7 @@ it went in with the redesign.
 | "Opened" chip on a row you clicked through to | `JobView.opened` |
 | The logged note, rendered on the applied row | `JobView.notes` ← `Job.applyNotes` |
 | Empty states as an icon tile + title + body + **one action button** | `components/empty-state.tsx` |
-| Skeleton rows during a first scan; a scanning bar over a list that already has rows | `components/scanning.tsx` |
+| Skeleton rows during a first scan | `ScanSkeletons` in `components/scanning.tsx` |
 | Footer: status left, `N new · M watches` right | `components/scan-status.tsx` |
 | End-of-list line with the retention rule | `components/list-view.tsx` |
 | Apply prompt: quick-note chips, auto-growing box, Cmd/Ctrl+Enter saves, Esc cancels | `components/apply-prompt.tsx` |
@@ -144,16 +144,23 @@ right-aligned, block as an icon, and rows grouped under `Last 3 hours` /
 **Recommendation:** lowest value of the four for the *tab*, which has the room the
 cards want. It is really a popup feature. Park it until someone asks.
 
-### 5. The settings drawer
+### 5. The settings drawer — ~~deferred~~ **resolved, differently**
 
 The design's gear opens a right-hand drawer listing Watches / Scan interval /
-Quiet hours / Blocked employers / Notifications — and says so itself: *"Full
+Quiet hours / Blocked employers / Notifications — and said so itself: *"Full
 settings design comes next — this panel is a placeholder so the gear has somewhere
 to go."*
 
-This extension already has a real, complete Options page. **Recommendation: don't
-build it.** The gear keeps calling `chrome.runtime.openOptionsPage()`. Revisit only
-if the Options page itself gets redesigned into a drawer.
+The recommendation here was "don't build it", because the extension already had a
+real Options page. That still holds, and the gear still calls
+`chrome.runtime.openOptionsPage()`. What changed is the page it opens: the
+Settings page has since had its own redesign (`.design/SettingsPage.dc.html`) into
+a pinned shell with a section rail, a configuration summary in the header, and
+per-section unsaved-edit markers. So the drawer's job — "settings should look like
+the rest of the app" — got done, in the place the settings already lived.
+
+**Nothing left to do here.** Everything the page derives is pure and tested in
+[`src/settings-view.ts`](../src/settings-view.ts).
 
 ### 6. The `sessionExpired` empty state
 
@@ -193,3 +200,13 @@ someone to Options to debug selectors when all they need is to log in.
    three widths ("Same markup", frame 1c), so restyling the shared `ListView` was
    the change; `variant="popup"` still governs the fixed 380×600 shell and the
    compact "Mark all read".
+6. **A running scan is announced in the chrome, not in the list.** The redesign
+   shipped a `ScanningBar` — a one-line "Scanning your watches…" card above a list
+   that already had rows in it — on the reasoning that the footer is where you
+   look to find out *when* the loop runs, not to notice that it is running now.
+   It has since been removed. The header and the footer already say it, and a
+   third announcement pushed every row down by a card's height for the fifteen
+   seconds of a scan, which is a worse thing to do to someone mid-read than
+   leaving the list alone. The empty case still gets `ScanSkeletons`: there is
+   nothing there to leave alone, and the skeletons say "rows are coming" in the
+   place the rows will land.

@@ -10,9 +10,11 @@ A desktop app would need to store your LinkedIn cookies and mimic a browser, whi
 
 ## 2. What it does
 
-You save one or more LinkedIn job search URLs, each with your filters already applied. On a schedule the extension quietly loads each one in a background tab, reads the job cards across the configured number of pages, compares against what it has seen before, and tells you about anything new.
+You save one or more LinkedIn job search URLs, each with your filters already applied. On a schedule the extension loads each one into a small window tucked into the corner of the screen, reads the job cards across the configured number of pages, compares against what it has seen before, and tells you about anything new.
 
 New jobs surface in two places: a badge count on the extension icon, and a desktop notification. Both lead into the extension's own list view — never straight to LinkedIn. You pick what to open from there.
+
+> **A window, not a hidden tab.** This section originally said "background tab", and every later section was written on that assumption. It was measured on 2026-07-24 and it does not work: a tab you cannot see gets no animation frames, so LinkedIn's lazy results column never finishes drawing. **§18 supersedes it** — where an earlier section still says "hidden tab" or "background tab", read "the scan window".
 
 ---
 
@@ -26,6 +28,8 @@ New jobs surface in two places: a badge count on the extension icon, and a deskt
 
 ### Scanning
 
+- A **master on/off switch** in the list header (`Settings.enabled`, default on). Off clears the routine alarm and makes "Scan now" inert — the whole loop stops until it is turned back on. Distinct from a *per-watch* toggle, which silences one search
+- **"Only scan when I press Scan now"** (`Settings.manualOnly`, default off). No alarm is ever armed, so nothing is loaded from LinkedIn until the button is pressed — but the watches stay on and a manual round behaves exactly like a scheduled one. It hands the *timing* to the user; the master switch above stops the loop outright (§15, decision 7)
 - Configurable interval, default **60 minutes**, with **±30 minutes jitter** — every wake lands somewhere in 30–90 minutes (§15)
 - Configurable page depth, default **1 page** per search — page 2 is mostly stale when sorted by date; the startup / quiet-hours catch-up scan (default 4 pages) recovers anything that drifted deeper during a gap (§15)
 - Pagination uses LinkedIn's `&start=` parameter (page 2 = `start=25`, page 3 = `start=50`)
@@ -44,6 +48,7 @@ New jobs surface in two places: a badge count on the extension icon, and a deskt
 - One merged notification per cycle, not one per search
 - Clicking the notification opens the extension's list view, **not** LinkedIn
 - The notification click marks nothing as opened — it only gets you to the list
+- Switchable off (`Settings.notifyDesktop`, default on). Off silences the pop-up and nothing else: the badge still moves and Telegram still delivers, because those are how you find out *later* rather than *now*
 - Optional Telegram push so results reach your phone when you're away from the machine
 
 ### List view
@@ -57,6 +62,8 @@ New jobs surface in two places: a badge count on the extension icon, and a deskt
 - Toggle between "New" and "All"
 - "Mark all as read"
 - Middle-click / ctrl-click opens in a background tab so you can queue several
+- Opening a posting queues **"Did you apply for this job?"** on that job's own card, answerable when you come back from LinkedIn. Yes takes an optional note and pushes an `[Applied]` message; No records nothing (§19)
+- A status bar reading the armed alarm itself: scanning, a live countdown, quiet hours, manual-only, or paused
 
 ### Storage
 
@@ -67,14 +74,16 @@ New jobs surface in two places: a badge count on the extension icon, and a deskt
 
 ## 4. Architecture
 
-```
+```text
 manifest.json (MV3)
 │
 ├── background (service worker)
 │   ├── chrome.alarms → fires every N minutes
 │   ├── checks isScanning lock → skips if a cycle is still running
+│   ├── opens ONE scan window for the whole cycle (unfocused, corner, §18)
 │   ├── for each enabled watch, sequentially:
-│   │     open hidden tab → inject content script → scrape → next page → close
+│   │     navigate the window → inject content script → scrape → next page
+│   ├── closes the scan window
 │   ├── merges results across all watches → filters → dedupes
 │   ├── fires one notification
 │   └── updates badge count
@@ -92,7 +101,7 @@ manifest.json (MV3)
     └── interval + page depth settings
 ```
 
-**Stack:** TypeScript + **plain Vite, no extension plugin** (`@crxjs/vite-plugin` is maintained but its content-script handling — this project's most load-bearing surface — is its weakest; issue #4 / ticket 03). Chrome API typings come from **`@types/chrome`**, not `chrome-types` (the latter types `storage.get` as `any`; same ticket). Pure logic is unit-tested with `node --test --experimental-strip-types`, which needs no bundler (§14). Permissions (§10) stand unchanged.
+**Stack:** TypeScript + **plain Vite, no extension plugin** (`@crxjs/vite-plugin` is maintained but its content-script handling — this project's most load-bearing surface — is its weakest; issue #4 / ticket 03). Chrome API typings come from **`@types/chrome`**, not `chrome-types` (the latter types `storage.get` as `any`; same ticket). Pure logic is unit-tested with Node's test runner via `tsx` (`npm test`), which needs no browser (§14). Permissions (§10) stand unchanged.
 
 ---
 
@@ -113,6 +122,13 @@ type Job = {
   openedAt: number | null;
   read: boolean; // you dismissed it — greys the row, drops it out of "New"
   readAt: number | null;
+  // Applying is a third state again, and the only one that means you *acted* on
+  // the posting. All three are optional: records written before this shipped
+  // carry none of them, and an absent `applied` reads as "never applied", so no
+  // migration is needed. Answering "No" writes nothing at all (§19).
+  applied?: boolean;
+  appliedAt?: number | null;
+  applyNotes?: string; // what was typed alongside a Yes; "" when left empty
 };
 
 type Watch = {
@@ -128,6 +144,8 @@ type BlockedCompany = {
 };
 
 type Settings = {
+  enabled: boolean; // default true — the master switch (§3). Off stops the loop AND "Scan now"
+  manualOnly: boolean; // default false — no alarm is armed; "Scan now" is the only trigger (§15.7)
   watches: Watch[];
   blockedCompanies: BlockedCompany[];
   blockedTitleKeywords: string[];
@@ -137,6 +155,7 @@ type Settings = {
   pagesPerScan: number; // default 1 — routine depth (§15); page 2 is mostly stale
   catchUpPages: number; // default 4, used on startup and quiet-hours resume (§9/§15)
   quietHours: QuietHours;
+  notifyDesktop: boolean; // default true — the desktop pop-up only; badge and push are unaffected
   pacing: PacingConfig;
   backoff: BackoffConfig;
   retention: RetentionConfig;
@@ -158,7 +177,9 @@ type PacingConfig = {
 
 type BackoffConfig = {
   emptyScansBeforeBackoff: number; // default 3 — consecutive all-empty scans (§15)
-  maxIntervalMinutes: number; // default 60 — ceiling the doubling interval hits
+  // Default 240. The ceiling has to sit above `intervalMinutes` or the rule is
+  // inert: a 60-minute base clamped to a 60-minute maximum can never double.
+  maxIntervalMinutes: number;
 };
 
 type PushConfig = {
@@ -341,7 +362,7 @@ Two messages, one shape. Every job is a linked title followed by labelled lines,
 
 New jobs:
 
-```
+```text
 [New Job Posts]
 
 1. {jobTitle}
@@ -355,7 +376,7 @@ Location: {location}
 
 Applied (the answer to "Did you apply for this job?"):
 
-```
+```text
 [Applied]
 
 {jobTitle}
@@ -422,22 +443,26 @@ Silent push failure is the most likely thing to go wrong — a wrong chat ID pro
 
 ### Scan cycle
 
-```
+```text
 Alarm fires
   → if isScanning, skip this tick and return
+  → recover any stale lock, sweep tabs a dead cycle orphaned (§16.6/§17.2)
   → set isScanning = true
+  → open ONE scan window for the whole cycle (unfocused, corner, §18)
   → for each enabled watch, sequentially:
         for page 1..pagesPerScan:
-            open background tab at url + &start=(page-1)*25
+            navigate the scan window to url + &start=(page-1)*25
             inject content script with a one-time token
-            scrape, send back, close tab
+            scrape, send back
             pause ~3-5s
+            a short read retries that page once, with focus (§18)
         pause ~10s between watches
+  → close the scan window
   → merge all results
   → apply blocklists and reposted filter
   → drop anything already in the seen set
   → persist new jobs, update badge
-  → if new jobs > 0, fire one notification
+  → if new jobs > 0, fire one notification (unless notifyDesktop is off)
   → set isScanning = false
 ```
 
@@ -527,7 +552,7 @@ When a scan opens its own tab, it passes a one-time token to the injected script
 
 1. **Scrape once, manually** — a content script that reads job cards from a LinkedIn search page you already have open. Prove the selectors work before anything else.
 2. **Storage + dedupe** — save seen IDs, detect what's new.
-3. **Single-watch scan loop** — alarm, background tab, one page, close.
+3. **Single-watch scan loop** — alarm, scan window (§18), one page, close.
 4. **List view** — popup with badge count, highlight-on-click, and per-row mark-as-read / block-company. Build it as a shared component from the start.
 5. **Multi-watch + pagination** — sequential cycle, scan lock, injection token.
 6. **Notifications** — merged per cycle, opening `jobs.html`.
@@ -555,7 +580,9 @@ Page 2 is mostly stale. When sorted by date, new postings land on page 1; an hou
 
 This is against LinkedIn's ToS. Personal single-user use in your own logged-in browser is low-risk in practice, but the risk isn't zero — account restriction is the realistic worst case.
 
-### Background tabs and MV3
+### The scan surface, and MV3
+
+The original plan here was a background tab. §18 records why that had to become a visible window, and what it costs: a scan is now something the user can see happen, which is the price of reading a page LinkedIn only renders when it is on screen.
 
 Manifest V3 service workers get killed after ~30 seconds idle (there is no longer a maximum *lifetime* — idleness, not age, is what kills them; issue #3). Use `chrome.alarms` to wake them rather than a bare `setInterval`, which will not survive a teardown. A scan cycle spanning 60–90 seconds keeps itself alive with a 25s keepalive ping — the Chrome-sanctioned pattern — and treats `isScanning` with a timestamp so a stale lock expires rather than blocking forever. §17 settles the full policy: **keepalive, not restartability** (a lost cycle costs one skipped scan; dedupe makes the re-scan lossless), orphaned tabs are swept on stale-lock recovery, and no per-page cursor is persisted.
 
@@ -604,6 +631,9 @@ Every piece of **pure logic** — a function of its inputs, no `chrome.*`, no DO
 | Failure diagnosis & surfacing — page classification, health reducer, stale-lock, push-fail, partial-parse (§16) | 08 | **Reference example** — `src/health.ts` + `src/health.test.ts` |
 | Worker lifecycle — keepalive constant, catch-up flag, orphan-tab tracking, stale-lock recovery (§17) | 10 | **Reference example** — `src/lifecycle.ts` + `src/lifecycle.test.ts` |
 | Card parser — DOM → `Job` | 01 | Fixture-driven, see below |
+| What the list view shows — badge count, which empty state, which banner, the scan status, the applied record (§19) | 09/UI | **Done** — `src/view.ts` + `src/view-model.ts`, with their tests. `selectView` returns it all as data; the components only map it to JSX |
+| What the settings page derives — dirty sections, watch-URL chips, the header summary, the load estimate and its tier | UI | **Done** — `src/settings-view.ts` + `src/settings-view.test.ts`, above `options-form.ts`'s validation and storage round-trip |
+| Notification text and when one is due | 06 | **Done** — `src/notify.ts` + `src/notify.test.ts` |
 
 That is the line. Anything that is *only* an orchestration of `chrome.*` calls (opening tabs, firing alarms, setting the badge) is **not** unit-tested — see "the untestable remainder".
 
@@ -624,15 +654,17 @@ parseJobCards(document);
 
 ### Test runner
 
-**`node --test` with type-stripping** (`node --test --experimental-strip-types`), already wired as `npm test`. Vitest was the Vite-toolchain default, but the pure logic has no bundler dependency, so the zero-config Node runner is fewer moving parts (issue #4's bias). If the parser fixtures later need a heavier DOM setup, revisit — until then, don't add a second runner.
+**Node's own test runner, driven by `tsx`** — `tsx --test`, wired as `npm test`. Vitest was the Vite-toolchain default, but the pure logic has no bundler dependency, so the zero-config Node runner is fewer moving parts (issue #4's bias), and that reasoning still holds: this is `node:test` with `node:assert`, not a second framework.
+
+*Amended.* This originally read `node --test --experimental-strip-types`, and that was true until the UI moved to React. Node's type stripping does not compile JSX and does not resolve the `@/` path alias, which between them cover every `*.test.tsx` and most of what they import. `tsx` handles both and changes nothing about how the tests are written. If the parser fixtures later need a heavier DOM setup, revisit — until then, don't add a second runner.
 
 **`chrome.*` in tests:** the tested code contains **no `chrome.*`** — that is the whole point of the pure/side-effect split (below). So there is nothing to fake. `chrome.*` lives only in thin wrappers that the tests don't import. Do **not** stub `chrome` globally; if a function needs a stub, that function is on the wrong side of the line — refactor the pure part out.
 
 ### The untestable remainder — a human checklist at checkpoints
 
-Background tabs opening, alarms firing on schedule, desktop notifications appearing, the badge count, notification-click focusing the tab, the startup catch-up scan: these need a human to look. They run **at checkpoints, not after every ticket** (most tickets touch only pure logic or one wrapper). The three checkpoints:
+The scan window opening in the corner, alarms firing on schedule, desktop notifications appearing, the badge count, notification-click focusing the tab, the startup catch-up scan: these need a human to look. They run **at checkpoints, not after every ticket** (most tickets touch only pure logic or one wrapper). The three checkpoints:
 
-1. **After ticket 03 (single-watch scan loop):** load unpacked; confirm the alarm fires, a hidden tab opens and closes, and one page's jobs land in `chrome.storage.local`.
+1. **After ticket 03 (single-watch scan loop):** load unpacked; confirm the alarm fires, the scan window opens in the corner and closes itself, and one page's jobs land in `chrome.storage.local`.
 2. **After ticket 06 (notifications):** confirm a cycle with new jobs shows exactly one merged desktop notification, and clicking it opens `jobs.html` (reusing an existing tab, not spawning duplicates).
 3. **After ticket 10 (startup handling):** quit Chrome mid-scan, relaunch; confirm the stale lock clears, any tabs the dead cycle left open are closed, the alarm is recreated, and **exactly one** catch-up scan runs (not two — §17.5).
 
@@ -661,7 +693,7 @@ Because the logic must be testable without Chrome, **the separation of pure func
 
 Resolves issue #8 / ticket 07. PRD §12 set the defaults at 576 page loads a day per watch and then hedged. This section turns that hedge into shipped numbers, informed by #5's cycle timing (two watches × two pages ≈ 60–90s, §9). The pure logic lives in `src/schedule.ts` (a §14 reference example); `chrome.alarms` and the scan loop are the thin wrappers that call it.
 
-Seven decisions, seven answers:
+Eight decisions, eight answers:
 
 1. **Interval — 60 minutes.** *Revised down from 5.* A recruiter posting is still on page 1 hours later (§13), so the freshness a 5-minute beat bought was mostly theoretical: you find out about a job in the hour rather than in the minute, and you were never going to apply inside five minutes anyway. What it cost was real — 288 loads a day per watch is a volume no human browsing session resembles, and the thing this extension must not do is get the account flagged (§12). An hour is the cadence a person checking between meetings actually has. Configurable for anyone who wants it tighter, but the shipped number now errs towards not being noticed.
 2. **Page depth — default 1, not 2.** Page 2 is mostly stale when sorted by date (§12); the gap it guards against — a burst pushing a posting past page 1 between checks — is exactly what the catch-up scan (`catchUpPages`, default 4) recovers on startup and quiet-hours resume. So routine scans go shallow and the rare deep scan happens only when a real gap preceded it. One page halves the request volume for free.
@@ -669,15 +701,25 @@ Seven decisions, seven answers:
 4. **Quiet hours — yes, clock-based, default on.** Scanning pauses in a user-set local window, default 23:00–07:00. It's stored as minutes-of-day and may wrap midnight (`isWithinQuietHours` handles the wrap). At the boundary: when the next fire would land inside the window, the alarm is pushed to the window's end instead, and that first wake runs a **catch-up scan** at `catchUpPages` depth — a quiet gap is the same problem as a closed-Chrome gap (§9). Recruiters post in business hours, so the overnight gap costs almost nothing and cuts ~8h of loads.
 5. **In-cycle pauses — keep, but randomise.** 3–5s between pages and ~8–12s between watches (PRD §9), drawn uniformly per pause via `randomPauseMs()` rather than a fixed value, same reasoning as the interval jitter.
 6. **The stopping rule — back off *and* tell the user.** The back-off signal is `emptyScansBeforeBackoff` (default 3) consecutive scans returning **zero cards across every watch** — the signature of a broken parser or a soft block (§12). On trip, the extension doubles its own interval each further empty scan up to `maxIntervalMinutes` (default 240 — the ceiling has to sit above the base interval or the rule is inert, which is why raising the interval to 60 raised this too) *and* surfaces a "reading may be broken" warning (`shouldWarnStalled`). It recovers instantly: one non-empty scan resets the counter and the interval snaps back to base. It does both — self-throttle so it stops hammering, and tell the human so a genuine DOM break gets fixed rather than silently backed-off forever.
-7. **Shipped defaults** (all configurable per §5):
+7. **A way out of the schedule entirely — `manualOnly`.** Every decision above tunes *when* the extension decides to scan, and there is a user for whom the honest answer is "never, unless I say so": someone who wants the watchlist, the dedupe and the Telegram push, but does not want their browser touching LinkedIn while they are not looking. With `manualOnly` on, no alarm is ever armed — `nextScanDelayMs` is not consulted, because there is no next scan — and **"Scan now" is the only thing that loads a page.** Everything downstream is unchanged: watches stay enabled, a manual round updates the list, the badge, the notification and the push exactly as a scheduled one would, and the back-off counter still ticks. Three things follow from "no alarm":
+   - The status bar has no countdown to report, so it says *Manual only — press Scan now* rather than counting down to nothing.
+   - `chrome.alarms.getAll()` returning an empty list is **correct**, not a fault — worth stating because it is the first thing anyone debugging a silent extension checks.
+   - The load estimate (§12) cannot be a daily figure without predicting how often a human presses a button. It reports the **per-press** cost instead.
+
+   Interval, jitter and quiet hours are *kept*, not cleared — greyed out on the page and back in service the moment the switch goes off. It is deliberately **not** the same control as `enabled` (§3): that one stops the loop *including* the manual button, and is the switch for "I am not job-hunting this month". This one is "I will decide when."
+
+8. **Shipped defaults** (all configurable per §5):
 
 | Setting | Default | Why |
 | --- | --- | --- |
+| `enabled` | true | The master switch; off stops the loop and the manual button both (§3) |
+| `manualOnly` | false | Scheduled rounds are the point; the escape hatch is opt-in (decision 7) |
 | `intervalMinutes` | 60 | Hourly is as fresh as the postings are; 5 min was volume for nothing (decision 1) |
 | `jitterMinutes` | 30 | Every wake lands in 30–90 min, so there is no period to recognise (decision 3) |
 | `pagesPerScan` | 1 | Page 2 mostly stale; catch-up covers the gap (decision 2) |
 | `catchUpPages` | 4 | One deep scan on startup / quiet-hours resume (decisions 2, 4) |
 | `quietHours` | on, 23:00–07:00 | Cuts ~8h of loads at near-zero freshness cost (decision 4) |
+| `notifyDesktop` | true | A find is worth interrupting for; silencing it is one switch away (§3) |
 | `pacing.pagePauseMs` | [3000, 5000] | Randomised page pause (decision 5) |
 | `pacing.watchPauseMs` | [8000, 12000] | Randomised watch pause (decision 5) |
 | `backoff.emptyScansBeforeBackoff` | 3 | Trip the stopping rule after 3 empty scans (decision 6) |
@@ -831,3 +873,75 @@ Per §14, the decision logic is pure and tested (`src/lifecycle.ts` +
 unit-tested, all of the decisions are. This is the last of the three
 worker-lifecycle checkpoints (§14): quit Chrome mid-scan, relaunch, and confirm
 the stale lock clears, the strays close, and exactly one catch-up scan runs.
+
+---
+
+## 18. The scan window: why the page has to be on screen
+
+Every section above §12 was written assuming a background tab — `tabs.create({ active: false })`, invisible, out of the way. That was issue #5's question 4 and it was left open, which meant the whole design rested on an assumption nobody had checked.
+
+It was checked on **2026-07-24**, and it is false.
+
+### The measurement
+
+Chrome gives a tab you cannot see **no animation frames and heavily throttled timers**. LinkedIn's results column fills in lazily as the viewport moves, so it needs both. Measured on the same search page, in the same profile, minutes apart:
+
+| Surface | Postings rendered |
+| --- | --- |
+| Visible tab | **25 of 25** |
+| Hidden tab (`active: false`) | **7 of 25** |
+
+Scrolling does not close the gap. The missing 18 rows were never painted, so there was nothing in the DOM to read — a parser fix could not have helped, because the parser was reading everything that existed. A hidden scan would have silently reported roughly a quarter of the postings and looked exactly like a quiet day.
+
+### The decision
+
+**The scan window is genuinely on screen, and that is not negotiable.** Given that, the job becomes making it the smallest thing to see that still renders:
+
+1. **One window per *cycle*, not per page.** A nine-page cycle interrupts the user once instead of nine times. `openScanSession` / `closeScanSession` bracket the whole run; the per-page work only navigates the window that already exists.
+2. **A `popup`-type window, `focused: false`,** placed at the bottom-right of whichever screen the user's browser is on (derived from the last-focused window's bounds, so it needs no `system.display` permission).
+3. **Always closed in a `finally`,** even if parsing throws. A scan window that outlives its scan is the worst failure this design can produce, because it is the one the user has to clean up by hand.
+4. **1000 × 720, and the width is load-bearing.** Below roughly 1024px LinkedIn switches `/jobs/search/` to a single-column layout the selectors have never been verified against, and 1000px is the width the 25-of-25 read was measured at. **The height is the dial to turn** for a less obtrusive window — the lazy-scroll walk simply takes a step or two more. The width should only move behind another measurement.
+5. **Focus is borrowed only as a last resort.** Chrome also throttles a window it considers fully covered, so a page that comes back short is retried **once, with the window focused**, and focus is handed straight back to the window the user was in (captured before the retry, restored in a `finally`). This is the only point at which a scan takes focus, and it never happens on a first attempt.
+
+### What it costs, stated plainly
+
+A scan is now visible. There is no version of this that reads LinkedIn's results reliably and stays invisible, so the honest framing is that the extension trades invisibility for correctness — and then spends its effort on frequency instead. That is why §15's defaults matter more after this section than before it: the cheapest way to be seen less is to scan less. Manual-only (§15, decision 7) exists partly for exactly this reason.
+
+### Structural consequence
+
+Per §14 this is all wrapper code — `openScanSession`, `scanPageIn` and `closeScanSession` in `background.ts` are `chrome.windows.*` orchestration and are not unit-tested. What *is* pure and tested is everything they feed: `classifyPage` decides whether a short read is a retry case, `scan-probe.ts` owns the settle-polling and card-identity logic, and `parse.ts` reads the DOM the window produced. The window's own dimensions are named constants with the measurement written next to them, because the next person to shrink it needs to know which number was measured and which was chosen.
+
+---
+
+## 19. "Did you apply for this job?"
+
+The list view tracks two things a job can be: *looked at* (`opened`) and *dealt with* (`read`). Neither says whether you actually applied — which is the only outcome the whole extension exists to produce, and the one thing it had no record of. A job you applied to and a job you glanced at and closed looked identical a week later.
+
+### When the question is asked
+
+**On opening a posting, on that job's own card.** Clicking a row opens LinkedIn in a new tab, marks the job opened, and queues the question against that job id. The card carries it when you come back.
+
+Two details that look small and are not:
+
+- **It is written to storage, not held in component state.** Opening a tab takes focus, and a popup that loses focus is destroyed. A question held in memory would never be asked at all.
+- **It is asked on the card, never above the list.** A prompt at the top of the list is about "a job"; a prompt on the card is about *that* job, which is the only version that survives a list with four unanswered questions in it.
+
+The question is **never asked twice** about the same job, and never asked about one already answered Yes. It does not re-open on its own — being re-asked on every popup reopen would make the popup unusable — but clicking the row queues it again.
+
+### The two answers are not symmetrical
+
+**No writes nothing.** Not `applied: false` — nothing. You might apply tomorrow, and a stored "no" is a fact with a shelf life. Three other actions mean the same thing and share the same path: the note step's Cancel, and either way of ticking the job read. That last one matters for safety: the tick can never write an applied record you did not ask for.
+
+**Yes is two steps.** The answer, then a note box — quick-note chips as a head start, an auto-growing textarea, `Cmd/Ctrl + Enter` to save, `Esc` to cancel. Only **Save** records anything; cancelling at the note step takes the Yes back with it and lands exactly where No does. The note is optional, the answer is not.
+
+Saving writes `applied`, `appliedAt` (first answer wins — it records when you applied, not when you last confirmed it) and `applyNotes` (overwritten, because a second answer is you correcting the note), then pushes the `[Applied]` Telegram message from §8.
+
+### Undo takes the note with it
+
+Tapping the **Applied** tag deletes all three fields rather than setting `applied: false`, so the job returns to the exact shape it had before it was ever answered — nothing left over to distinguish "I un-applied this" from "never applied", and the question becomes askable again. That does discard the note, which is the price of a one-tap undo, and the reason the control's accessible name spells the consequence out.
+
+> **Known rough edge.** "Undo, and forget the note" is harsh for the only affordance a logged application has. The designed replacement — a *manage applied* strip with `Edit note` / `Not applied` — is specced in [docs/ui-redesign-followups.md](docs/ui-redesign-followups.md) and needs no storage change.
+
+### Structural consequence
+
+Per §14: `markJobApplied` and `clearJobApplied` are pure functions over the jobs map in `view.ts`, tested there; `buildAppliedMessage` is pure in `push.ts`. The components own only the two-step interaction, and the pending question id lives in the `ui` storage key beside the active chip and mode.
