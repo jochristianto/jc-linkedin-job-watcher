@@ -2,6 +2,7 @@ import {
   BadgeCheck,
   Ban,
   ExternalLink,
+  EyeIcon,
   EyeOffIcon,
   History,
 } from "lucide-react";
@@ -231,9 +232,13 @@ export function JobRow({
         "shadow-[0_1px_2px_rgba(16,24,40,0.04)] transition-[opacity,background-color] duration-200",
         "has-[a:focus-visible]:ring-[3px] has-[a:focus-visible]:ring-ring/50",
         // Read is the row filed away: it keeps its place in All, tinted back
-        // towards the page so the unread ones are the white cards.
-        job.read && "bg-[color-mix(in_oklab,var(--muted)_55%,var(--card))]",
-        job.blocked && "opacity-50",
+        // towards the page so the unread ones are the white cards. Blocked is
+        // filed away too, and takes the same tint — deliberately a background
+        // rather than the opacity the whole card used to carry, because fading
+        // the card faded its buttons with it and Unblock, the one way back from
+        // a mis-click, ended up looking disabled. The greying that says "this
+        // one is out" belongs on the text (`dimmed`), not on the controls.
+        dimmed && "bg-[color-mix(in_oklab,var(--muted)_55%,var(--card))]",
       )}
     >
       <div
@@ -372,9 +377,7 @@ export function JobRow({
           read as the start of the same line rather than as the end of the
           posting. The border and the padding either side of it are what say the
           card has two halves: what the job is, then what you can do about it. */}
-      {stacked && (
-        <div className="flex border-t mx-3 px-2 py-1.5">{actions}</div>
-      )}
+      {stacked && <div className="flex border-t mx-3 py-3">{actions}</div>}
 
       {/* Pinned inside the card, under the posting: "Did you apply for this job?"
           on the one row it is about. */}
@@ -434,18 +437,18 @@ function RowActions({
       className={cn(
         "flex items-center",
         stacked
-          ? "w-full gap-1.5"
+          ? "w-full gap-3"
           : // Centred against the posting rather than pinned to its first line:
             // the card is as tall as its chips and its note, and buttons hanging
             // off the top of that read as belonging to the title alone.
-            "shrink-0 gap-0.5 self-center",
+            "shrink-0 gap-3 self-center",
       )}
     >
       {job.applied && (
         <Button
           type="button"
           size="sm"
-          variant="ghost"
+          variant="outline"
           data-action="unapply"
           aria-pressed={true}
           // The visible word is only "Applied", so the accessible name is what has
@@ -466,7 +469,7 @@ function RowActions({
         <Button
           type="button"
           size="sm"
-          variant={armed ? "destructive" : "ghost"}
+          variant={armed ? "destructive" : "outline"}
           data-action="block"
           data-armed={armed}
           aria-pressed={job.blocked}
@@ -478,14 +481,17 @@ function RowActions({
           }
           onClick={onBlock}
           className={cn(
-            "h-8 gap-1.5 px-2 text-xs font-medium",
+            "h-8 gap-2 px-2 text-xs font-medium",
             stacked && "flex-1",
             // Red at rest so it reads as the one destructive thing on the row,
             // solid red once armed so the second press is unmistakable.
             !armed &&
               !job.blocked &&
               "text-destructive hover:bg-destructive/10 hover:text-destructive",
-            job.blocked && "text-muted-foreground",
+            // Unblock is not destructive, so it loses the red — but it keeps the
+            // full-strength foreground, because it is the only way back off a
+            // block and a grey label on a grey card reads as "nothing to press".
+            job.blocked && "text-foreground hover:bg-muted",
           )}
         >
           <Ban className="size-3.5" aria-hidden="true" />
@@ -501,7 +507,7 @@ function RowActions({
         // Icon-only in the tab, so the button is square rather than a `sm` with
         // one lopsided side of padding where the word used to be.
         size={stacked ? "sm" : "icon-sm"}
-        variant="ghost"
+        variant="default"
         data-action="read"
         aria-pressed={job.read}
         aria-label={readLabel}
@@ -509,12 +515,16 @@ function RowActions({
         onClick={onToggleRead}
         className={cn(
           stacked && "h-8 flex-1 gap-1.5 px-2 text-xs font-medium",
-          job.read
-            ? "text-primary"
-            : "text-muted-foreground hover:text-foreground",
+          // job.read
+          //   ? "text-primary"
+          //   : "text-muted-foreground hover:text-foreground",
         )}
       >
-        <EyeOffIcon className="size-3.5" aria-hidden="true" />
+        {job.read ? (
+          <EyeIcon className="size-3.5" aria-hidden="true" />
+        ) : (
+          <EyeOffIcon className="size-3.5" aria-hidden="true" />
+        )}
         {/* The label rides along only where there is a line to hold it. In the
             tab `aria-label` and `title` still carry it. */}
         {stacked && readLabel}

@@ -1,30 +1,24 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { applyPromptStep, metaLine, type ApplyAnswer } from "@/view-model.ts";
-
-/** The little the prompt needs in order to say *which* job it is asking about.
- *  The url is deliberately absent: the message's link is read from storage by the
- *  worker that sends it, so the prompt never has to carry it around. */
-export type ApplyPromptJob = { id: string; title: string; company: string };
-
-/**
- * Where this prompt is standing.
- *
- * `"row"` is the normal one: pinned inside the card of the job it is asking
- * about, the way LinkedIn's own "Did you finish applying?" sits in the posting.
- * `"list"` is the fallback for when that row is not on screen — the question
- * outlives a chip switch and a New⇄All switch, so it has to be askable with no
- * row to sit in (see `pendingApplyJob` in list-view).
- */
-export type ApplyPromptPlacement = "row" | "list";
+import { applyPromptStep, type ApplyAnswer } from "@/view-model.ts";
 
 export type ApplyPromptProps = {
-  job: ApplyPromptJob;
-  placement?: ApplyPromptPlacement;
+  /** Which job is being asked about — the id and nothing else. The question is
+   *  always rendered inside that job's own card, so the posting one line above it
+   *  says which one it is; the url is the sending worker's to read from storage.
+   *  The id is here to be the strip's `data-job-id`, the handle tests and QA pair
+   *  a question with its row through. */
+  jobId: string;
   /** Yes with the typed note, or No with nothing. What each *means* is the
    *  caller's: only Yes is recorded and pushed (see `markJobApplied`). */
   onAnswer: (applied: boolean, notes: string) => void;
@@ -42,10 +36,17 @@ export type ApplyPromptProps = {
  * so the useful version costs one click rather than a sentence. Appended with the
  * same " · " the meta line uses, so two chips read as one note and not two.
  */
-const QUICK_NOTES = ["Referral", "Recruiter reply", "Cold apply", "Take-home sent"] as const;
+const QUICK_NOTES = [
+  "Referral",
+  "Recruiter reply",
+  "Cold apply",
+  "Take-home sent",
+] as const;
 
 /**
- * The tinted strip both steps share.
+ * The tinted strip both steps share, pinned inside the card of the job it is
+ * asking about — the way LinkedIn's own "Did you finish applying?" sits in the
+ * posting, and the only place this question is ever asked.
  *
  * Deliberately NOT a dialog, and not an overlay. The question is a small one
  * about something you did a minute ago, and a modal answers it by taking the
@@ -55,38 +56,39 @@ const QUICK_NOTES = ["Referral", "Recruiter reply", "Cold apply", "Take-home sen
  * still one click away. It is a wash of the brand colour rather than a health
  * tier because it is not a warning; nothing has gone wrong.
  *
- * In a row it names no job: the title is one line above it, inside the same card,
- * and repeating it there would be the same sentence twice. Standing alone in the
- * list it has to name one — a question that arrives minutes later, in a popup you
- * reopened, is about nothing in particular without it.
+ * It names no job, because it never has to: the title is one line above it,
+ * inside the same card, and repeating it there would be the same sentence twice.
  */
 function ApplyBanner({
-  job,
+  jobId,
   heading,
-  placement,
   tone = "ask",
   children,
 }: {
-  job: ApplyPromptJob;
+  jobId: string;
   heading: string;
-  placement: ApplyPromptPlacement;
   /** The note step tints a shade further into the brand colour than the question
    *  does: it is the step you are being asked to *do* something in, not just
    *  answer, and the two need to look like two. */
   tone?: "ask" | "note";
   children: ReactNode;
 }) {
-  const inRow = placement === "row";
-  // The row's own fallback, for the same reason it has one: a strip that names a
-  // blank title would be asking about nothing.
-  const title = job.title.trim() || "Untitled role";
+  const ref = useRef<HTMLElement>(null);
+
+  // The row is wherever the list put it, and the list scrolls: reopen the popup
+  // on a question waiting three cards down and the whole point of asking on the
+  // job — that you can see which job — is below the fold. `nearest` is the
+  // narrowest correction there is; a strip already on screen does not move.
+  useEffect(() => {
+    ref.current?.scrollIntoView({ block: "nearest" });
+  }, []);
 
   return (
     <section
+      ref={ref}
       data-slot="apply-prompt"
-      data-placement={placement}
       aria-labelledby="apply-prompt-title"
-      data-job-id={job.id}
+      data-job-id={jobId}
       // Wraps rather than shrinks: at 380px the popup can run out of room for the
       // question and the answers side by side, and when it does the answers drop
       // to their own line instead of squeezing the words being answered.
@@ -95,25 +97,18 @@ function ApplyBanner({
         // Flush with the card's edges and separated by a rule, not inset: the
         // strip is the bottom of the posting's own card, so a floating block
         // tucked inside it would read as a second, unrelated thing.
-        inRow ? "border-t" : "border-y",
+        "border-t",
         tone === "ask"
           ? "bg-[color-mix(in_oklab,var(--primary)_7%,var(--card))]"
           : "border-primary/20 bg-[color-mix(in_oklab,var(--primary)_5%,var(--card))]",
       )}
     >
-      <div className="flex min-w-0 flex-1 basis-40 flex-col gap-0.5">
-        <h2
-          id="apply-prompt-title"
-          className="text-[13px] font-semibold text-foreground"
-        >
-          {heading}
-        </h2>
-        {!inRow && (
-          <p className="truncate text-xs text-muted-foreground">
-            {metaLine([title, job.company])}
-          </p>
-        )}
-      </div>
+      <h2
+        id="apply-prompt-title"
+        className="min-w-0 flex-1 basis-40 text-[13px] font-semibold text-foreground"
+      >
+        {heading}
+      </h2>
       {children}
     </section>
   );
@@ -132,22 +127,16 @@ function ApplyBanner({
  * also why the strip needs no close button of its own.
  */
 export function ApplyQuestion({
-  job,
-  placement = "row",
+  jobId,
   onYes,
   onNo,
 }: {
-  job: ApplyPromptJob;
-  placement?: ApplyPromptPlacement;
+  jobId: string;
   onYes: () => void;
   onNo: () => void;
 }) {
   return (
-    <ApplyBanner
-      job={job}
-      placement={placement}
-      heading="Did you apply for this job?"
-    >
+    <ApplyBanner jobId={jobId} heading="Did you apply for this job?">
       {/* Yes is the answer that does something and it is the filled one; No is the
           outline beside it. Sized to sit inside a row without out-weighing the
           posting above them, but still padded past the two words they hold: a
@@ -156,7 +145,7 @@ export function ApplyQuestion({
       <div className="flex shrink-0 items-center gap-1.5">
         <Button
           type="button"
-          size="sm"
+          size="xs"
           data-answer="yes"
           onClick={onYes}
           className="h-8 px-4 text-[13px]"
@@ -165,7 +154,7 @@ export function ApplyQuestion({
         </Button>
         <Button
           type="button"
-          size="sm"
+          size="xs"
           variant="outline"
           data-answer="no"
           onClick={onNo}
@@ -192,13 +181,11 @@ export function ApplyQuestion({
  * field must not have.
  */
 export function ApplyNote({
-  job,
-  placement = "row",
+  jobId,
   onSave,
   onDismiss,
 }: {
-  job: ApplyPromptJob;
-  placement?: ApplyPromptPlacement;
+  jobId: string;
   onSave: (notes: string) => void;
   onDismiss: () => void;
 }) {
@@ -233,7 +220,7 @@ export function ApplyNote({
   };
 
   return (
-    <ApplyBanner job={job} placement={placement} heading="Add a note?" tone="note">
+    <ApplyBanner jobId={jobId} heading="Add a note?" tone="note">
       {/* A full-width row of its own under the job, not beside it: the box is the
           thing being filled in, and half a strip is not enough of it to type in. */}
       <div className="flex w-full basis-full flex-col gap-1.5">
@@ -319,31 +306,30 @@ export function ApplyNote({
  * answer can be known — before you have seen the posting there is nothing to
  * answer.
  *
+ * Wherever it is asked, it is asked *on the job it is about*: inside that row's
+ * card, never as a band over the top of the list. A question floating above a
+ * list of twenty postings is a question about none of them, and the caller only
+ * renders this once the row is on screen to hold it (see `pendingApplyJobId` in
+ * list-view).
+ *
  * Asked in two steps, because the two answers cost different things. No is the
  * common one and is done in a single click: it answers, records nothing and
  * closes — which is also why it is the only way out the first step needs. Yes is
  * the one worth a second screen, so it — and only it — opens the note. Which step
  * belongs to which answer is `applyPromptStep`'s, tested with plain values.
  */
-export function ApplyPrompt({
-  job,
-  placement = "row",
-  onAnswer,
-  onDismiss,
-}: ApplyPromptProps) {
+export function ApplyPrompt({ jobId, onAnswer, onDismiss }: ApplyPromptProps) {
   const [answer, setAnswer] = useState<ApplyAnswer>(null);
 
   return applyPromptStep(answer) === "ask" ? (
     <ApplyQuestion
-      job={job}
-      placement={placement}
+      jobId={jobId}
       onYes={() => setAnswer("yes")}
       onNo={() => onAnswer(false, "")}
     />
   ) : (
     <ApplyNote
-      job={job}
-      placement={placement}
+      jobId={jobId}
       onSave={(notes) => onAnswer(true, notes)}
       onDismiss={onDismiss}
     />

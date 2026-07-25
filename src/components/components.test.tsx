@@ -498,41 +498,20 @@ test("JobList pins nothing when no row has a question waiting", () => {
 // `ApplyPrompt` renders unanswered is the first of the two, asserted below.
 
 const prompt = (over: Partial<React.ComponentProps<typeof ApplyPrompt>> = {}): string =>
-  html(
-    <ApplyPrompt
-      job={{ id: "3901", title: "Senior Software Engineer", company: "Acme Corp" }}
-      onAnswer={noop}
-      onDismiss={noop}
-      {...over}
-    />,
-  );
+  html(<ApplyPrompt jobId="3901" onAnswer={noop} onDismiss={noop} {...over} />);
 
 const note = (over: Partial<React.ComponentProps<typeof ApplyNote>> = {}): string =>
-  html(
-    <ApplyNote
-      job={{ id: "3901", title: "Senior Software Engineer", company: "Acme Corp" }}
-      onSave={noop}
-      onDismiss={noop}
-      {...over}
-    />,
-  );
+  html(<ApplyNote jobId="3901" onSave={noop} onDismiss={noop} {...over} />);
 
 test("ApplyPrompt asks the question, on the row it is asking about", () => {
   const h = prompt();
   assert.match(h, /Did you apply for this job\?/);
+  // The one thing the strip carries about the job: which one it is, for the row
+  // it is pinned inside. The title is a line above it in that same card, so the
+  // strip naming it too would be the same sentence twice — and there is no
+  // second placement that has to.
   assert.match(h, /data-job-id="3901"/);
-  assert.match(h, /data-placement="row"/);
-  // Pinned in that job's own card, one line under its title: repeating the title
-  // inside the strip would be the same sentence twice.
-  assert.doesNotMatch(h, /Senior Software Engineer/);
-});
-
-test("ApplyPrompt names the job when it has no row to sit in", () => {
-  const h = prompt({ placement: "list" });
-  assert.match(h, /data-placement="list"/);
-  // Asked minutes later, in a popup you reopened, with the row filtered out from
-  // under it — without the job it is asking about nothing in particular.
-  assert.match(h, /Senior Software Engineer · Acme Corp/);
+  assert.doesNotMatch(h, /data-placement/);
 });
 
 test("ApplyPrompt is a labelled strip in the layout, not a modal over it", () => {
@@ -570,25 +549,17 @@ test("ApplyPrompt asks the question first and nothing else", () => {
   assert.doesNotMatch(h, />Not now</);
 });
 
-test("ApplyPrompt falls back to a placeholder when the title never parsed", () => {
-  const h = prompt({ placement: "list", job: { id: "7", title: "  ", company: "Acme Corp" } });
-  assert.match(h, /Untitled role/);
-});
-
-test("ApplyPrompt escapes the job it names", () => {
-  const job = { id: "a&b", title: "R&D <lead>", company: 'A<"B">' };
-  const h = prompt({ placement: "list", job });
-  assert.match(h, /R&amp;D &lt;lead&gt;/);
-  assert.doesNotMatch(h, /<lead>/);
-  // The id is an attribute in both placements, whether or not the title is shown.
-  assert.match(prompt({ job }), /data-job-id="a&amp;b"/);
+test("ApplyPrompt escapes the id it carries", () => {
+  // A LinkedIn id is digits, but it is a parsed string and it lands in an
+  // attribute, so it is escaped like every other one.
+  assert.match(prompt({ jobId: 'a&b"c' }), /data-job-id="a&amp;b&quot;c"/);
 });
 
 test("ApplyNote is the second step, and stays where the question was", () => {
   const h = note();
   assert.match(h, /Add a note\?/);
-  assert.match(h, /data-placement="row"/);
-  assert.match(note({ placement: "list" }), /Senior Software Engineer · Acme Corp/);
+  // Same strip, same card, same job — only the contents change.
+  assert.match(h, /data-job-id="3901"/);
   // The question is behind you by now: no Yes/No to answer a second time.
   assert.doesNotMatch(h, /data-answer=/);
 });

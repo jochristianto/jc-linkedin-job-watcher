@@ -50,7 +50,7 @@ import {
   toggleBlockedCompany,
   unreadCount,
 } from "@/view.ts";
-import { visibleJobs, type ListMode, type ViewVariant } from "@/view-model.ts";
+import { type ListMode, type ViewVariant } from "@/view-model.ts";
 
 /** How long to wait before re-sending a message no listener took. Long enough for a
  *  cold MV3 worker to evaluate its script and register its handlers, short enough
@@ -355,41 +355,30 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
     [disarm, reload],
   );
 
-  /** The job the open question is about, read from the raw `jobs` map rather than
-   *  the rendered list: the question outlives a chip switch, a mode switch and the
-   *  popup itself, so the row it came from may well not be on screen. A job that has
-   *  since been garbage-collected (PRD §7) leaves nothing to ask about, and the
-   *  prompt simply doesn't render. */
-  const pendingApplyJob = useMemo(() => {
-    const job = pendingApplyId ? state?.jobs[pendingApplyId] : undefined;
-    return job ? { id: job.id, title: job.title, company: job.company } : null;
-  }, [state, pendingApplyId]);
-
   /**
-   * Which of the two places the question gets asked in.
+   * The job the open question is about, checked against the raw `jobs` map rather
+   * than the rendered list: the question outlives a chip switch, a mode switch and
+   * the popup itself. A job that has since been garbage-collected (PRD §7) leaves
+   * nothing to ask about, and the prompt simply doesn't render.
    *
-   * Inside the row's card whenever that row is on screen — asked *on* the job it
-   * is about, which is the whole point of it being inline. Everything above is
-   * why it cannot always be: watching paused hides the list, and a chip or a
-   * New⇄All switch can filter the row out from under a question already waiting.
-   * Rather than let it vanish — nothing else clears `pendingApplyId`, so a
-   * question with nowhere to render would be a question you could never answer —
-   * it falls back to a band under the header, naming the job itself.
+   * Being *rendered* is `JobList`'s: the question is pinned in this job's own card
+   * and nowhere else, so if a chip, a New⇄All switch or a paused list has the row
+   * off screen, the question is not asked yet — it waits in `pendingApplyId` and is
+   * asked the next time that row is in front of you. It used to fall back to a band
+   * under the header, which is how the question ended up hovering over a list it was
+   * no longer about — or, as in a paused popup, over no list at all.
    */
-  const applyPromptInRow = useMemo(() => {
-    // `emptyKind` swaps the whole list out for a message, so there are no rows to
-    // sit in even when one would otherwise have matched.
-    if (!view?.enabled || view.emptyKind || !pendingApplyJob) return false;
-    return visibleJobs(view.jobs, view.mode).some((j) => j.id === pendingApplyJob.id);
-  }, [view, pendingApplyJob]);
+  const pendingApplyJobId = useMemo(
+    () => (pendingApplyId && state?.jobs[pendingApplyId] ? pendingApplyId : null),
+    [state, pendingApplyId],
+  );
 
-  const applyPrompt = pendingApplyJob && (
+  const applyPrompt = pendingApplyJobId && (
     <ApplyPrompt
       // Keyed by the job: a question about a different posting starts from
       // unanswered, never with the previous one's typed note.
-      key={pendingApplyJob.id}
-      job={pendingApplyJob}
-      placement={applyPromptInRow ? "row" : "list"}
+      key={pendingApplyJobId}
+      jobId={pendingApplyJobId}
       onAnswer={onAnswerApply}
       // The note step's "Cancel": a Yes cancelled at the note is a Yes taken back,
       // which lands in exactly the same place a No does — nothing recorded.
@@ -556,12 +545,9 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
               onOpenOptions={onOpenOptions}
             />
 
-            {/* The fallback placement, and only that: a band under the header for
-                a question whose row is nowhere to be seen. Above the paused branch
-                because the question is about a job you already opened, so pausing
-                the loop is no reason to drop it — and paused hides the list
-                entirely, which is exactly one of the ways the row can be missing. */}
-            {applyPrompt && !applyPromptInRow && applyPrompt}
+            {/* Nothing between the header and the toolbar: "Did you apply for this
+                job?" is asked in the job's own card further down, never as a band up
+                here (see `pendingApplyJobId`). */}
 
             {/* Paused (§ master): the whole app body collapses to one message —
                 no toolbar, no list, no footer — so the switch in the header is
@@ -612,8 +598,8 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
                           variant={variant}
                           now={now}
                           armedBlockId={view.armedBlockId}
-                          applyPromptJobId={applyPromptInRow ? pendingApplyJob?.id : null}
-                          applyPrompt={applyPromptInRow ? applyPrompt : null}
+                          applyPromptJobId={pendingApplyJobId}
+                          applyPrompt={applyPrompt}
                           onOpen={onOpen}
                           onToggleRead={onToggleRead}
                           onBlock={onBlock}
