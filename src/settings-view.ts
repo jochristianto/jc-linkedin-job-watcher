@@ -23,8 +23,8 @@ export const SETTINGS_SECTIONS = [
   "watches",
   "filters",
   "scanning",
-  "notifications",
   "retention",
+  "notifications",
   "how",
 ] as const;
 
@@ -34,8 +34,8 @@ export const SECTION_LABELS: Record<SettingsSection, string> = {
   watches: "Watches",
   filters: "Filters",
   scanning: "Scanning",
-  notifications: "Notifications",
   retention: "Retention",
+  notifications: "Notifications",
   how: "How this works",
 };
 
@@ -55,14 +55,14 @@ const SECTION_OF_FIELD: Record<keyof OptionsFormValues, SettingsSection> = {
   quietHoursEnabled: "scanning",
   quietStart: "scanning",
   quietEnd: "scanning",
-  notifyDesktop: "notifications",
-  pushEnabled: "notifications",
-  pushBotToken: "notifications",
-  pushChatId: "notifications",
   seenDays: "retention",
   openedJobDays: "retention",
   unopenedJobDays: "retention",
   seenHardCap: "retention",
+  notifyDesktop: "notifications",
+  pushEnabled: "notifications",
+  pushBotToken: "notifications",
+  pushChatId: "notifications",
 };
 
 /** The section a given form field is edited in. */
@@ -194,8 +194,35 @@ export function spanHours(start: string, end: string): number {
 }
 
 /**
- * The line under the page title: how many searches run, how often, when they
- * stop, and where the result is delivered.
+ * How the cadence reads in one phrase: the *band* the jitter actually produces,
+ * not the bare interval.
+ *
+ * "Every 33 min" was a description of a setting rather than of the behaviour —
+ * no round ever runs exactly 33 minutes after the last one, because the interval
+ * is jittered before the alarm is armed (§15). Saying "Every 30–90 min" makes the
+ * header describe what the extension does, and makes the jitter field's effect
+ * visible in the summary the moment you change it. Zero jitter is the one case
+ * where a single number is the truth, so it keeps the plain form.
+ *
+ * The phrase is capitalised because the summary reads as separate segments split
+ * by "·" rather than as one sentence, so each starts like the one before it.
+ *
+ * The low edge is floored at 1 to match `jitteredDelayMs`, which cannot arm an
+ * alarm shorter than a minute whatever the jitter says (issue #3).
+ */
+function cadencePhrase(form: OptionsFormValues): string {
+  const minutes = Number.parseInt(form.intervalMinutes, 10);
+  if (!Number.isFinite(minutes)) return "Interval not set";
+
+  const jitter = Number.parseInt(form.jitterMinutes, 10);
+  if (!Number.isFinite(jitter) || jitter <= 0) return `Every ${minutes} min`;
+
+  return `Every ${Math.max(1, minutes - jitter)}–${minutes + jitter} min`;
+}
+
+/**
+ * The line under the page title: how many searches run, how often, between which
+ * hours, and where the result is delivered.
  *
  * It is built from the *form* rather than from storage on purpose — it tracks
  * what you are about to save, so raising the interval moves the summary before
@@ -203,26 +230,33 @@ export function spanHours(start: string, end: string): number {
  */
 export function headerSummary(form: OptionsFormValues): string {
   const active = form.watches.filter((w) => w.enabled).length;
-  const watches = `${active} ${active === 1 ? "watch" : "watches"}`;
+  // "No watch" rather than "0 watches": the zero case is the one a reader should
+  // notice, and a word stops it looking like just another number in the line.
+  const watches = active === 0 ? "No watch" : `${active} ${active === 1 ? "watch" : "watches"}`;
 
-  const minutes = Number.parseInt(form.intervalMinutes, 10);
-  const every = Number.isFinite(minutes) ? `every ${minutes} min` : "interval not set";
+  const every = cadencePhrase(form);
 
-  const quiet = form.quietHoursEnabled
-    ? `outside ${form.quietStart}–${form.quietEnd}`
-    : "around the clock";
+  // The hours it *runs*, not the hours it sleeps. The stored window is the quiet
+  // one, so the running window is simply its inverse — scanning resumes when
+  // quiet ends and stops when it starts. A zero-width quiet window is never quiet
+  // (`isWithinQuietHours`), so it reads as around the clock like a disabled one.
+  const zeroWidth = form.quietStart === form.quietEnd;
+  const hours =
+    form.quietHoursEnabled && !zeroWidth
+      ? `from ${form.quietEnd} to ${form.quietStart}`
+      : "around the clock";
 
   // Where a found job actually lands. Both off is worth saying plainly: the
   // toolbar count still moves, but nothing will come and tell you.
   const delivery = form.notifyDesktop
     ? form.pushEnabled
-      ? "desktop + Telegram"
-      : "desktop notification"
+      ? "Desktop + Telegram"
+      : "Desktop notification"
     : form.pushEnabled
       ? "Telegram only"
       : "badge only";
 
-  return `${watches} · ${every} ${quiet} · ${delivery}`;
+  return `${watches} · ${every} ${hours} · ${delivery}`;
 }
 
 // ── How hard the current pacing leans on LinkedIn ────────────────────────────
@@ -268,7 +302,7 @@ export function estimateLoad(form: OptionsFormValues): LoadEstimate {
     return Number.isFinite(n) && n >= min ? n : fallback;
   };
 
-  const interval = parse(form.intervalMinutes, 30, 1);
+  const interval = parse(form.intervalMinutes, 60, 1);
   const pagesPerScan = parse(form.pagesPerScan, 1, 1);
   const activeWatches = form.watches.filter((w) => w.enabled).length;
 

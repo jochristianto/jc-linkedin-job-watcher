@@ -8,8 +8,14 @@
 // the scroll so the current one is always marked, and carries an amber dot on any
 // section holding something the Save button has not yet written.
 //
-// It sticks rather than scrolling away, which is the whole point of a rail, and
-// it is hidden below `lg`: this page only ever opens as a full browser tab, and
+// It holds still while the settings scroll past it. The page keeps its single
+// scrollbar at the edge of the window — the rail is sticky rather than a column
+// of its own scroll box — and the offset it sticks at is the scroll area's own
+// top padding, so it is already stuck at the first pixel of scroll. With the
+// `top-0` this used to carry it would instead slide up by that padding and only
+// then catch, which read as a jolt and left it welded to the header afterwards.
+//
+// It is hidden below `lg`: this page only ever opens as a full browser tab, and
 // at that width the 190px column would take a third of the space the settings
 // themselves need. Nothing is lost when it goes — the header badge still counts
 // the unsaved edits, and the sections are titled.
@@ -30,7 +36,7 @@ export function SettingsNav({ active, dirty, onSelect }: SettingsNavProps) {
     <nav
       id="settings-nav"
       aria-label="Settings sections"
-      className="sticky top-0 hidden w-48 shrink-0 flex-col gap-0.5 lg:flex"
+      className="sticky top-4 hidden w-48 shrink-0 flex-col gap-0.5 md:top-6 lg:flex"
     >
       <span className="px-2.5 pt-0.5 pb-1.5 text-[10.5px] font-bold tracking-[0.08em] text-muted-foreground uppercase">
         On this page

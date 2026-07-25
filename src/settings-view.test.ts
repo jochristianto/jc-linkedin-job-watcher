@@ -117,26 +117,64 @@ test("headerSummary: counts only the watches that are switched on", () => {
   assert.match(line, /^1 watch · /);
 });
 
-test("headerSummary: names the quiet window, or says there isn't one", () => {
+test("headerSummary: names the hours it runs, which is the inverse of the quiet window", () => {
   assert.match(
     headerSummary(form({ quietHoursEnabled: true, quietStart: "23:00", quietEnd: "07:00" })),
-    /outside 23:00–07:00/,
+    /from 07:00 to 23:00/,
   );
   assert.match(headerSummary(form({ quietHoursEnabled: false })), /around the clock/);
+});
+
+test("headerSummary: a zero-width quiet window runs around the clock, not 23:00 to 23:00", () => {
+  // `isWithinQuietHours` is never quiet when start === end, so the header must
+  // not claim a window that silences nothing.
+  assert.match(
+    headerSummary(form({ quietHoursEnabled: true, quietStart: "23:00", quietEnd: "23:00" })),
+    /around the clock/,
+  );
+});
+
+test("headerSummary: no watch switched on says so in words, not as a zero", () => {
+  assert.match(headerSummary(form({ watches: [] })), /^No watch · /);
+  assert.match(headerSummary(form({ watches: [watch({ enabled: false })] })), /^No watch · /);
 });
 
 test("headerSummary: says where a found job is delivered, in all four combinations", () => {
   const delivery = (notifyDesktop: boolean, pushEnabled: boolean) =>
     headerSummary(form({ notifyDesktop, pushEnabled })).split(" · ")[2];
-  assert.equal(delivery(true, true), "desktop + Telegram");
-  assert.equal(delivery(true, false), "desktop notification");
+  assert.equal(delivery(true, true), "Desktop + Telegram");
+  assert.equal(delivery(true, false), "Desktop notification");
   assert.equal(delivery(false, true), "Telegram only");
   // Both off still moves the toolbar count, which is what "badge only" means.
   assert.equal(delivery(false, false), "badge only");
 });
 
 test("headerSummary: an interval that isn't a number is said, not rendered as NaN", () => {
-  assert.match(headerSummary(form({ intervalMinutes: "" })), /interval not set/);
+  assert.match(headerSummary(form({ intervalMinutes: "" })), /Interval not set/);
+});
+
+test("headerSummary: the cadence is the jittered band, not the bare interval", () => {
+  // No round ever lands exactly on the interval, so the header says the range the
+  // two fields actually produce (§15, decision 3).
+  assert.match(
+    headerSummary(form({ intervalMinutes: "60", jitterMinutes: "30" })),
+    /Every 30–90 min/,
+  );
+  assert.match(
+    headerSummary(form({ intervalMinutes: "33", jitterMinutes: "1" })),
+    /Every 32–34 min/,
+  );
+});
+
+test("headerSummary: no jitter is the one case that reads as a single number", () => {
+  assert.match(headerSummary(form({ intervalMinutes: "45", jitterMinutes: "0" })), /Every 45 min/);
+  assert.match(headerSummary(form({ intervalMinutes: "45", jitterMinutes: "" })), /Every 45 min/);
+});
+
+test("headerSummary: a jitter wider than the interval floors the band at 1 min", () => {
+  // `jitteredDelayMs` clamps to a 1-minute floor, so the header must not promise
+  // a gap of 0 — or a negative one — that the alarm could never honour.
+  assert.match(headerSummary(form({ intervalMinutes: "5", jitterMinutes: "20" })), /Every 1–25 min/);
 });
 
 // ── The daily load estimate ──────────────────────────────────────────────────

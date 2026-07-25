@@ -12,8 +12,8 @@ import { DEFAULT_SETTINGS } from "./types.ts";
 import type { Settings } from "./types.ts";
 
 test("DEFAULT_SETTINGS carries §15's shipped scan defaults", () => {
-  assert.equal(DEFAULT_SETTINGS.intervalMinutes, 5);
-  assert.equal(DEFAULT_SETTINGS.jitterMinutes, 1);
+  assert.equal(DEFAULT_SETTINGS.intervalMinutes, 60);
+  assert.equal(DEFAULT_SETTINGS.jitterMinutes, 30);
   assert.equal(DEFAULT_SETTINGS.pagesPerScan, 1);
   assert.equal(DEFAULT_SETTINGS.catchUpPages, 4);
 });
@@ -33,7 +33,7 @@ test("DEFAULT_SETTINGS carries §15 pacing and back-off defaults", () => {
   });
   assert.deepEqual(DEFAULT_SETTINGS.backoff, {
     emptyScansBeforeBackoff: 3,
-    maxIntervalMinutes: 60,
+    maxIntervalMinutes: 240,
   });
 });
 

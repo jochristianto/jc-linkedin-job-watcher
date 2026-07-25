@@ -1,6 +1,6 @@
 // Options page — PRD §11 step 7. The §14 side-effect wrapper for the settings
 // form: it reads/writes the `settings` storage key, renders the six sections
-// (Watches, Filters, Scanning, Notifications, Retention, How this works) beside
+// (Watches, Filters, Scanning, Retention, Notifications, How this works) beside
 // the rail that navigates them, and wires every control.
 //
 // Every DECISION lives tested elsewhere — validation, the quiet-hours time
@@ -17,7 +17,7 @@
 // find — and the header's summary line stays readable while you change the very
 // numbers it describes.
 
-import { ArrowLeft, Clock, Eye } from "lucide-react";
+import { Clock, Eye, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { HowItWorks } from "@/components/how-it-works.tsx";
@@ -45,7 +45,6 @@ import { Switch } from "@/components/ui/switch";
 import { HealthBanner } from "@/components/health-banner.tsx";
 import { cn } from "@/lib/utils";
 import { OK_PUSH_HEALTH, PUSH_FAILING_MESSAGE } from "@/health.ts";
-import { focusOrOpenJobsTab } from "@/jobs-tab.ts";
 import {
   applyPushPrefill,
   changedFormKeys,
@@ -81,6 +80,20 @@ const TEST_PUSH_JOBS: PushJob[] = [
     url: "https://www.linkedin.com/jobs/",
   },
 ];
+
+/**
+ * Shut the settings tab the header's Close button sits in.
+ *
+ * `window.close()` alone is not enough: Chrome refuses it for a tab the script
+ * did not open itself, and the options page is opened by the browser. So the tab
+ * asks for its own id and removes itself, and `window.close()` stays only as the
+ * fallback for a context that has no tab of its own to remove.
+ */
+async function closeSettingsTab(): Promise<void> {
+  const tab = await chrome.tabs.getCurrent();
+  if (tab?.id !== undefined) await chrome.tabs.remove(tab.id);
+  else window.close();
+}
 
 type Status = { message: string; kind: "ok" | "err" | "" };
 
@@ -123,7 +136,7 @@ function Section({
           {SECTION_LABELS[id]}
           {badge}
         </CardTitle>
-        <CardDescription className="max-w-[74ch] text-[12.5px] leading-relaxed text-pretty">
+        <CardDescription className="text-[12.5px] leading-relaxed text-pretty">
           {description}
         </CardDescription>
       </CardHeader>
@@ -180,10 +193,7 @@ export function OptionsPage() {
 
   // Which fields differ from storage, and so: whether Reset has anything to throw
   // away, what the header badge counts, and which rail entries wear a dot.
-  const changed = useMemo(
-    () => (form && base ? changedFormKeys(form, base) : []),
-    [form, base],
-  );
+  const changed = useMemo(() => (form && base ? changedFormKeys(form, base) : []), [form, base]);
   const dirty = changed.length > 0;
   const dirtyIn = useMemo(() => dirtySections(changed), [changed]);
 
@@ -346,25 +356,28 @@ export function OptionsPage() {
           </span>
         </div>
 
-        {/* The way out. Reuses an already-open jobs.html rather than stacking a
-            second copy — the same rule a notification click follows. */}
+        {/* The way out: settings open in their own tab, so the way out is to shut
+            it rather than to travel somewhere else. */}
         <Button
           type="button"
           size="sm"
           variant="ghost"
-          id="back-to-jobs"
-          onClick={() => void focusOrOpenJobsTab()}
+          id="close-settings"
+          onClick={() => void closeSettingsTab()}
           className="shrink-0"
         >
-          <ArrowLeft className="size-3.5" />
-          Back to jobs
+          <X className="size-3.5" />
+          Close
         </Button>
       </header>
 
-      {/* The only thing that scrolls. `relative` because the spy measures each
-          section's `offsetTop` against this box. A shade darker than the header
-          and footer, so the cards read as things laid on a surface rather than as
-          strips of the page — the same treatment the job list uses. */}
+      {/* The only thing that scrolls: one scrollbar, at the edge of the window,
+          for the whole body. `relative` because the spy measures each section's
+          `offsetTop` against this box. A shade darker than the header and footer,
+          so the cards read as things laid on a surface rather than as strips of
+          the page — the same treatment the job list uses. The rail scrolls with
+          it in markup only — it is stuck from the first pixel (see
+          settings-nav.tsx), so it holds still while the settings move past it. */}
       <div
         ref={scrollRef}
         onScroll={onScroll}
@@ -445,7 +458,7 @@ export function OptionsPage() {
                     "jitterMinutes",
                     "Jitter (± minutes)",
                     0,
-                    "Random wobble, so rounds are not clockwork.",
+                    "Random wobble, so rounds are not clockwork. 60 ± 30 lands anywhere in 30–90 min.",
                   )}
                   {numField(
                     "pagesPerScan",
@@ -469,7 +482,10 @@ export function OptionsPage() {
                     id="load-estimate"
                     className="flex flex-wrap items-center gap-2.5 rounded-xl border bg-muted/50 px-3 py-2.5"
                   >
-                    <Badge variant="outline" className={cn("px-2 py-0 text-[10.5px]", tier.className)}>
+                    <Badge
+                      variant="outline"
+                      className={cn("px-2 py-0 text-[10.5px]", tier.className)}
+                    >
                       {tier.label}
                     </Badge>
                     <span className="min-w-0 flex-1 basis-60 text-[12.5px] leading-snug">
@@ -538,6 +554,51 @@ export function OptionsPage() {
                     </div>
                   </div>
                 </ToggleRow>
+              </div>
+            </Section>
+
+            <Section
+              id="retention"
+              description="Seen ids are what stop a job coming back a second time — keep them longer than the age of the postings your searches return."
+            >
+              <div className="flex flex-col gap-3.5">
+                <div className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
+                  {numField(
+                    "seenDays",
+                    "Seen ids (days)",
+                    1,
+                    "How long a job stays “already shown”.",
+                  )}
+                  {numField(
+                    "openedJobDays",
+                    "Opened jobs (days)",
+                    1,
+                    "Rows you opened or ticked off.",
+                  )}
+                  {numField(
+                    "unopenedJobDays",
+                    "Unopened jobs (days)",
+                    1,
+                    "Rows you never touched.",
+                  )}
+                  {numField(
+                    "seenHardCap",
+                    "Seen hard cap",
+                    1,
+                    "A backstop; past it the oldest ids drop first.",
+                  )}
+                </div>
+                {/* Said out loud because the alternative is a section of controls
+                    that quietly does nothing — the collector is written and tested
+                    (gc.ts) but nothing calls it yet, so these values are stored and
+                    not yet acted on. See the README's known limitations. */}
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Clock aria-hidden="true" className="size-3.5 shrink-0" />
+                  <span>
+                    The daily clean-up is not wired up yet — these are saved, and take effect as
+                    soon as it is.
+                  </span>
+                </div>
               </div>
             </Section>
 
@@ -633,51 +694,6 @@ export function OptionsPage() {
             </Section>
 
             <Section
-              id="retention"
-              description="Seen ids are what stop a job coming back a second time — keep them longer than the age of the postings your searches return."
-            >
-              <div className="flex flex-col gap-3.5">
-                <div className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
-                  {numField(
-                    "seenDays",
-                    "Seen ids (days)",
-                    1,
-                    "How long a job stays “already shown”.",
-                  )}
-                  {numField(
-                    "openedJobDays",
-                    "Opened jobs (days)",
-                    1,
-                    "Rows you opened or ticked off.",
-                  )}
-                  {numField(
-                    "unopenedJobDays",
-                    "Unopened jobs (days)",
-                    1,
-                    "Rows you never touched.",
-                  )}
-                  {numField(
-                    "seenHardCap",
-                    "Seen hard cap",
-                    1,
-                    "A backstop; past it the oldest ids drop first.",
-                  )}
-                </div>
-                {/* Said out loud because the alternative is a section of controls
-                    that quietly does nothing — the collector is written and tested
-                    (gc.ts) but nothing calls it yet, so these values are stored and
-                    not yet acted on. See the README's known limitations. */}
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Clock aria-hidden="true" className="size-3.5 shrink-0" />
-                  <span>
-                    The daily clean-up is not wired up yet — these are saved, and take effect as
-                    soon as it is.
-                  </span>
-                </div>
-              </div>
-            </Section>
-
-            <Section
               id="how"
               description="It re-runs your saved searches in the background and tells you when something genuinely new turns up — so you can stop refreshing the tab yourself."
             >
@@ -691,54 +707,56 @@ export function OptionsPage() {
           somewhere you have to hunt for. Opaque rather than translucent — it
           passes over white cards, and letting those bleed through made it read
           as a rendering artefact instead of a bar. */}
-      <footer className="flex shrink-0 flex-wrap items-center gap-3 border-t bg-background px-4 py-2.5 md:px-6">
-        <p className="max-w-lg min-w-0 flex-1 basis-65 text-[11.5px] leading-snug text-faint text-pretty">
+      <footer className="flex shrink-0 flex-wrap items-center gap-3 border-t bg-background px-4 py-2.5 md:px-6 justify-between">
+        <p className="min-w-0 flex-1 basis-65 text-[11.5px] leading-snug text-faint text-pretty">
           Personal use only · keep the frequency low, and switch watching off when you are not
           looking for work.
         </p>
-        <StatusText id="save-status" status={saveStatus} />
-        <div className="flex shrink-0 items-center gap-2">
-          {/* Reset throws away work with no undo, and it stands right next to
+        <div>
+          <StatusText id="save-status" status={saveStatus} />
+          <div className="flex shrink-0 items-center gap-2">
+            {/* Reset throws away work with no undo, and it stands right next to
               Save — so it asks first. A modal here, unlike the list view's
               in-layout questions: this one is about the page it would change, and
               there is nothing to go on looking at while you answer it. With no
               unsaved edits it has nothing to throw away, so the button is
               disabled rather than opening a dialog about nothing. */}
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button type="button" variant="ghost" id="reset" disabled={!dirty}>
-                Reset
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Discard your unsaved changes?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  Every field goes back to the settings last saved. Anything typed since — watches
-                  added, filters, times, Telegram credentials — is lost, and there is no undo.
-                  Nothing already saved is deleted, and no jobs are touched.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                {/* The way out is the wide, safe one; the act that costs
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button type="button" variant="ghost" id="reset" disabled={!dirty}>
+                  Reset
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Discard your unsaved changes?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Every field goes back to the settings last saved. Anything typed since — watches
+                    added, filters, times, Telegram credentials — is lost, and there is no undo.
+                    Nothing already saved is deleted, and no jobs are touched.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  {/* The way out is the wide, safe one; the act that costs
                     something wears destructive and sits under the thumb. */}
-                <AlertDialogCancel id="reset-cancel">Keep editing</AlertDialogCancel>
-                <AlertDialogAction
-                  id="reset-confirm"
-                  onClick={onReset}
-                  className={cn(buttonVariants({ variant: "destructive" }))}
-                >
-                  Discard changes
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-          {/* Disabled with nothing to save, and saying so: a live Save on an
+                  <AlertDialogCancel id="reset-cancel">Keep editing</AlertDialogCancel>
+                  <AlertDialogAction
+                    id="reset-confirm"
+                    onClick={onReset}
+                    className={cn(buttonVariants({ variant: "destructive" }))}
+                  >
+                    Discard changes
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+            {/* Disabled with nothing to save, and saying so: a live Save on an
               untouched form invites a click that does nothing and reports
               success. */}
-          <Button type="button" id="save" onClick={onSave} disabled={!dirty}>
-            {dirty ? "Save settings" : "Saved"}
-          </Button>
+            <Button type="button" id="save" onClick={onSave} disabled={!dirty}>
+              {dirty ? "Save settings" : "Saved"}
+            </Button>
+          </div>
         </div>
       </footer>
     </div>
@@ -782,15 +800,7 @@ function ToggleRow({
   );
 }
 
-function StatusText({
-  id,
-  status,
-  className,
-}: {
-  id: string;
-  status: Status;
-  className?: string;
-}) {
+function StatusText({ id, status, className }: { id: string; status: Status; className?: string }) {
   if (!status.message) return null;
   return (
     <span

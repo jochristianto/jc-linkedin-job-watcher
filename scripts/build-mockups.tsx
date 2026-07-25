@@ -36,7 +36,13 @@ import { ScanningBar } from "../src/components/scanning.tsx";
 import { ScanStatusBar } from "../src/components/scan-status.tsx";
 import { Toolbar } from "../src/components/toolbar.tsx";
 import { TooltipProvider } from "../src/components/ui/tooltip";
-import type { EmptyKind, JobView, ListMode, ScanStatus, ViewVariant } from "../src/view-model.ts";
+import type {
+  EmptyKind,
+  JobView,
+  ListMode,
+  ScanStatus,
+  ViewVariant,
+} from "../src/view-model.ts";
 import type { Watch } from "../src/types.ts";
 
 const root = resolve(import.meta.dirname, "..");
@@ -52,7 +58,14 @@ function compileCss(): string {
     const out = join(dir, "mockups.css");
     execFileSync(
       "npx",
-      ["@tailwindcss/cli", "-i", join(root, "src/tokens.css"), "-o", out, "--minify"],
+      [
+        "@tailwindcss/cli",
+        "-i",
+        join(root, "src/tokens.css"),
+        "-o",
+        out,
+        "--minify",
+      ],
       { cwd: root, stdio: ["ignore", "ignore", "inherit"] },
     );
     return readFileSync(out, "utf8");
@@ -95,19 +108,65 @@ const WATCHES = [
 /** The popup's list: unread rows, one already opened, one whose location never
  *  parsed (the field-missing case), one blocked company still on screen. */
 const POPUP_JOBS: JobView[] = [
-  job({ id: "1", title: "Senior Backend Engineer (Go)", company: "Tokopedia", postedText: "12 minutes ago", foundAt: minsAgo(4) }),
-  job({ id: "2", title: "Staff Engineer, Platform", company: "GoTo Financial", location: "Jakarta (On-site)", postedText: "1 hour ago", foundAt: minsAgo(23), opened: true }),
+  job({
+    id: "1",
+    title: "Senior Backend Engineer (Go)",
+    company: "Tokopedia",
+    postedText: "12 minutes ago",
+    foundAt: minsAgo(4),
+  }),
+  job({
+    id: "2",
+    title: "Staff Engineer, Platform",
+    company: "GoTo Financial",
+    location: "Jakarta (On-site)",
+    postedText: "1 hour ago",
+    foundAt: minsAgo(23),
+    opened: true,
+  }),
   // Location never parsed — the meta line must not leave a dangling separator.
-  job({ id: "3", title: "Principal Engineer", company: "Momo Financial", location: "", postedText: "3 hours ago", foundAt: minsAgo(58) }),
-  job({ id: "4", title: "Engineering Manager", company: "Blocked Recruiters Ltd", location: "Remote", postedText: "5 hours ago", foundAt: minsAgo(94), blocked: true }),
+  job({
+    id: "3",
+    title: "Principal Engineer",
+    company: "Momo Financial",
+    location: "",
+    postedText: "3 hours ago",
+    foundAt: minsAgo(58),
+  }),
+  job({
+    id: "4",
+    title: "Engineering Manager",
+    company: "Blocked Recruiters Ltd",
+    location: "Remote",
+    postedText: "5 hours ago",
+    foundAt: minsAgo(94),
+    blocked: true,
+  }),
 ];
 
 /** The tab's list: everything the popup shows plus the states only "All" mode
  *  reaches — a read row still on screen, and a Block button mid-question. */
 const TAB_JOBS: JobView[] = [
   ...POPUP_JOBS,
-  job({ id: "5", title: "Distinguished Engineer", company: "Grab", location: "Singapore (Hybrid)", postedText: "yesterday", foundAt: minsAgo(1_100), watchName: "Japan", read: true }),
-  job({ id: "6", title: "Head of Engineering", company: "Sea Group", location: "Singapore (Remote)", postedText: "yesterday", foundAt: minsAgo(1_240), watchName: "Japan" }),
+  job({
+    id: "5",
+    title: "Distinguished Engineer",
+    company: "Grab",
+    location: "Singapore (Hybrid)",
+    postedText: "yesterday",
+    foundAt: minsAgo(1_100),
+    watchName: "Japan",
+    read: true,
+  }),
+  job({
+    id: "6",
+    title: "Head of Engineering",
+    company: "Sea Group",
+    location: "Singapore (Remote)",
+    postedText: "yesterday",
+    foundAt: minsAgo(1_240),
+    watchName: "Japan",
+  }),
   // The applied record, with the note it was logged against — the one row that
   // shows the list doubling as a record of what you sent.
   job({
@@ -214,7 +273,10 @@ function listView(opts: {
           onModeChange={noop}
         />
         {opts.banner && (
-          <HealthBanner message={opts.banner.message} severity={opts.banner.severity} />
+          <HealthBanner
+            message={opts.banner.message}
+            severity={opts.banner.severity}
+          />
         )}
         <div className="flex-1 overflow-y-auto bg-[color-mix(in_oklab,var(--muted)_45%,var(--background))]">
           <div className="mx-auto w-full max-w-220 p-2.5 md:p-3.5">
@@ -265,7 +327,9 @@ function headerMenuFrame(): string {
         <div className="flex w-87 flex-col gap-4 rounded-lg border bg-background p-4 shadow-lg">
           <div className="flex flex-col gap-0.5">
             <h2 className="text-sm font-semibold">Job Watcher</h2>
-            <p className="text-xs text-muted-foreground">Everything this popup can do.</p>
+            <p className="text-xs text-muted-foreground">
+              Everything this popup can do.
+            </p>
           </div>
           <HeaderMenu
             scanButton="idle"
@@ -281,7 +345,13 @@ function headerMenuFrame(): string {
   );
 }
 
-const EMPTY_KINDS: EmptyKind[] = ["no-watches", "no-jobs-yet", "no-new", "scanning", "scan-error"];
+const EMPTY_KINDS: EmptyKind[] = [
+  "no-watches",
+  "no-jobs-yet",
+  "no-new",
+  "scanning",
+  "scan-error",
+];
 
 /** All five empty/degraded states side by side, each in a popup-width frame so
  *  they are seen at the size they actually appear. */
@@ -293,7 +363,9 @@ function statesShowcase(): string {
         <div className="flex flex-wrap gap-5">
           {EMPTY_KINDS.map((kind) => (
             <figure key={kind} className="flex flex-col gap-2">
-              <figcaption className="font-mono text-xs text-muted-foreground">{kind}</figcaption>
+              <figcaption className="font-mono text-xs text-muted-foreground">
+                {kind}
+              </figcaption>
               <div className="flex h-[280px] w-[360px] flex-col rounded-lg border bg-background">
                 <EmptyState kind={kind} />
               </div>
@@ -356,7 +428,11 @@ const files: Record<string, string> = {
     renderToStaticMarkup(
       <div className="bg-[color-mix(in_oklab,var(--muted)_45%,var(--background))] p-6">
         <div className="mx-auto flex w-full max-w-275 flex-wrap items-start gap-4">
-          <SettingsNav active="watches" dirty={new Set(["scanning"] as const)} onSelect={noop} />
+          <SettingsNav
+            active="watches"
+            dirty={new Set(["scanning"] as const)}
+            onSelect={noop}
+          />
 
           <main className="flex min-w-0 flex-1 basis-115 flex-col gap-3.5">
             <Card className="gap-4 py-5">
@@ -364,10 +440,10 @@ const files: Record<string, string> = {
                 <CardTitle className="flex flex-wrap items-center gap-2 text-[15px] tracking-tight">
                   Watches
                 </CardTitle>
-                <CardDescription className="max-w-[74ch] text-[12.5px] leading-relaxed text-pretty">
-                  A watch is a saved LinkedIn search with your filters already applied. Every
-                  watch runs on the same cycle — switch one off to pause it without losing the
-                  URL.
+                <CardDescription className="text-[12.5px] leading-relaxed text-pretty">
+                  A watch is a saved LinkedIn search with your filters already
+                  applied. Every watch runs on the same cycle — switch one off
+                  to pause it without losing the URL.
                 </CardDescription>
               </CardHeader>
               <CardContent className="px-5">
@@ -377,10 +453,13 @@ const files: Record<string, string> = {
 
             <Card className="gap-4 py-5">
               <CardHeader className="gap-1.5 px-5">
-                <CardTitle className="text-[15px] tracking-tight">How this works</CardTitle>
-                <CardDescription className="max-w-[74ch] text-[12.5px] leading-relaxed text-pretty">
-                  It re-runs your saved searches in the background and tells you when something
-                  genuinely new turns up — so you can stop refreshing the tab yourself.
+                <CardTitle className="text-[15px] tracking-tight">
+                  How this works
+                </CardTitle>
+                <CardDescription className="text-[12.5px] leading-relaxed text-pretty">
+                  It re-runs your saved searches in the background and tells you
+                  when something genuinely new turns up — so you can stop
+                  refreshing the tab yourself.
                 </CardDescription>
               </CardHeader>
               <CardContent className="px-5">
@@ -389,9 +468,10 @@ const files: Record<string, string> = {
             </Card>
 
             <p className="text-sm text-muted-foreground">
-              The rest of the form is live over <code>chrome.storage</code>, so it is not
-              rendered here — load the unpacked extension and open Options to see it. Its two
-              transient banners are below, since neither shows on a healthy first open.
+              The rest of the form is live over <code>chrome.storage</code>, so
+              it is not rendered here — load the unpacked extension and open
+              Options to see it. Its two transient banners are below, since
+              neither shows on a healthy first open.
             </p>
             <HealthBanner
               message="Telegram push has been failing — run Send test message"
@@ -413,5 +493,7 @@ const files: Record<string, string> = {
 for (const [name, html] of Object.entries(files)) {
   const path = join(root, "mockups", name);
   writeFileSync(path, html);
-  console.log(`  wrote mockups/${name}  (${(html.length / 1024).toFixed(0)} kB)`);
+  console.log(
+    `  wrote mockups/${name}  (${(html.length / 1024).toFixed(0)} kB)`,
+  );
 }

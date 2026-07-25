@@ -26,7 +26,7 @@ New jobs surface in two places: a badge count on the extension icon, and a deskt
 
 ### Scanning
 
-- Configurable interval, default **5 minutes**, with **±1 minute jitter** (§15)
+- Configurable interval, default **60 minutes**, with **±30 minutes jitter** — every wake lands somewhere in 30–90 minutes (§15)
 - Configurable page depth, default **1 page** per search — page 2 is mostly stale when sorted by date; the startup / quiet-hours catch-up scan (default 4 pages) recovers anything that drifted deeper during a gap (§15)
 - Pagination uses LinkedIn's `&start=` parameter (page 2 = `start=25`, page 3 = `start=50`)
 - Pages scraped sequentially with a short randomised pause between, never in parallel
@@ -132,8 +132,8 @@ type Settings = {
   blockedCompanies: BlockedCompany[];
   blockedTitleKeywords: string[];
   hideReposted: boolean;
-  intervalMinutes: number; // default 5
-  jitterMinutes: number; // default 1 — ±this, randomised onto each interval (§15)
+  intervalMinutes: number; // default 60
+  jitterMinutes: number; // default 30 — ±this, randomised onto each interval (§15)
   pagesPerScan: number; // default 1 — routine depth (§15); page 2 is mostly stale
   catchUpPages: number; // default 4, used on startup and quiet-hours resume (§9/§15)
   quietHours: QuietHours;
@@ -218,7 +218,7 @@ Separate top-level keys, so a write to one doesn't rewrite everything else:
 'health'      → HealthState              // last failure/health snapshot (§16)
 ```
 
-`seen` is deliberately separate from `jobs`. During a scan the only question is "have I seen this ID before" — loading full job objects to answer that is wasteful, and it's the operation running every 5 minutes.
+`seen` is deliberately separate from `jobs`. During a scan the only question is "have I seen this ID before" — loading full job objects to answer that is wasteful, and it's the operation running on every card of every scan.
 
 ### Two different lifetimes
 
@@ -441,7 +441,7 @@ Alarm fires
   → set isScanning = false
 ```
 
-Two watches at two pages each takes roughly 60–90 seconds, comfortably inside a 5-minute window.
+Two watches at two pages each takes roughly 60–90 seconds, comfortably inside even the shortest gap the jittered interval can produce (30 minutes, §15).
 
 ### Notification click
 
@@ -547,9 +547,9 @@ LinkedIn changes their DOM regularly, sometimes monthly. Write the scraper so ea
 
 ### Request volume
 
-Two pages every 5 minutes would be **576 page loads a day per watchlist entry** — over 1,100 for two searches. That was the number most likely to draw attention, so the shipped defaults cut it: **one page** per scan, **quiet hours** overnight, **±1 minute jitter**. See §15 for the full working; the short version is 288 loads/day/watch clock-round, ~192 with the default 8-hour quiet window — roughly a third of the original.
+Two pages every 5 minutes would be **576 page loads a day per watchlist entry** — over 1,100 for two searches. That was the number most likely to draw attention, so the shipped defaults cut it: **one page** per scan, an **hourly interval** rather than a 5-minute one, **quiet hours** overnight, and **±30 minutes jitter**. See §15 for the full working; the short version is 24 loads/day/watch clock-round, ~16 with the default 8-hour quiet window — a rounding error next to the original.
 
-Page 2 is mostly stale. When sorted by date, new postings land on page 1; page 2 only helps if a burst pushed something down between checks, which at a 5-minute interval is uncommon — and the catch-up scan (§9, §15) covers the gap case where it isn't. Raise `pagesPerScan` only if you find you're actually missing things.
+Page 2 is mostly stale. When sorted by date, new postings land on page 1; an hour of postings for a normal search does not fill 25 cards, and the catch-up scan (§9, §15) covers the gap case where it does. Raise `pagesPerScan` only if you find you're actually missing things.
 
 ### Terms of Service
 
@@ -663,39 +663,39 @@ Resolves issue #8 / ticket 07. PRD §12 set the defaults at 576 page loads a day
 
 Seven decisions, seven answers:
 
-1. **Interval — keep 5 minutes.** A recruiter posting is still on page 1 hours later (§13), so 10 or 15 minutes loses little in freshness; 5 stays as a comfortable default that a burst won't outrun, and it's configurable for anyone who wants to relax it. The volume worry is answered by page depth and quiet hours, not by slowing the beat.
+1. **Interval — 60 minutes.** *Revised down from 5.* A recruiter posting is still on page 1 hours later (§13), so the freshness a 5-minute beat bought was mostly theoretical: you find out about a job in the hour rather than in the minute, and you were never going to apply inside five minutes anyway. What it cost was real — 288 loads a day per watch is a volume no human browsing session resembles, and the thing this extension must not do is get the account flagged (§12). An hour is the cadence a person checking between meetings actually has. Configurable for anyone who wants it tighter, but the shipped number now errs towards not being noticed.
 2. **Page depth — default 1, not 2.** Page 2 is mostly stale when sorted by date (§12); the gap it guards against — a burst pushing a posting past page 1 between checks — is exactly what the catch-up scan (`catchUpPages`, default 4) recovers on startup and quiet-hours resume. So routine scans go shallow and the rare deep scan happens only when a real gap preceded it. One page halves the request volume for free.
-3. **Jitter — ±1 minute, real but modest.** A fixed 5-minute heartbeat is a weak signal, not nothing; ±1 minute of jitter costs one line and removes a clean periodicity for no downside. It forces the **alarm shape**: a re-armed one-shot (`chrome.alarms.create(name, { when })` at the end of each cycle), because `chrome.alarms` can't jitter a periodic alarm and clamps periods under a minute (issue #3). `jitteredDelayMs()` is clamped to a 1-minute floor so a large jitter can never produce a sub-minute or negative delay.
+3. **Jitter — ±30 minutes, half the interval.** *Revised up from ±1.* A fixed heartbeat is the cheapest thing there is to recognise, and ±1 minute on a 5-minute beat still described a near-perfect metronome. At 60 ± 30 every wake lands somewhere in **30–90 minutes** and consecutive gaps are never the same length, so there is no period to lock onto — the interval stops being a fingerprint and starts looking like someone opening a tab when they think of it. Freshness is unaffected in the direction that matters: the worst case is a 90-minute gap on a posting that stays on page 1 for hours. It forces the **alarm shape**: a re-armed one-shot (`chrome.alarms.create(name, { when })` at the end of each cycle), because `chrome.alarms` can't jitter a periodic alarm and clamps periods under a minute (issue #3). `jitteredDelayMs()` is clamped to a 1-minute floor so a large jitter can never produce a sub-minute or negative delay.
 4. **Quiet hours — yes, clock-based, default on.** Scanning pauses in a user-set local window, default 23:00–07:00. It's stored as minutes-of-day and may wrap midnight (`isWithinQuietHours` handles the wrap). At the boundary: when the next fire would land inside the window, the alarm is pushed to the window's end instead, and that first wake runs a **catch-up scan** at `catchUpPages` depth — a quiet gap is the same problem as a closed-Chrome gap (§9). Recruiters post in business hours, so the overnight gap costs almost nothing and cuts ~8h of loads.
 5. **In-cycle pauses — keep, but randomise.** 3–5s between pages and ~8–12s between watches (PRD §9), drawn uniformly per pause via `randomPauseMs()` rather than a fixed value, same reasoning as the interval jitter.
-6. **The stopping rule — back off *and* tell the user.** The back-off signal is `emptyScansBeforeBackoff` (default 3) consecutive scans returning **zero cards across every watch** — the signature of a broken parser or a soft block (§12). On trip, the extension doubles its own interval each further empty scan up to `maxIntervalMinutes` (default 60) *and* surfaces a "reading may be broken" warning (`shouldWarnStalled`). It recovers instantly: one non-empty scan resets the counter and the interval snaps back to base. It does both — self-throttle so it stops hammering, and tell the human so a genuine DOM break gets fixed rather than silently backed-off forever.
+6. **The stopping rule — back off *and* tell the user.** The back-off signal is `emptyScansBeforeBackoff` (default 3) consecutive scans returning **zero cards across every watch** — the signature of a broken parser or a soft block (§12). On trip, the extension doubles its own interval each further empty scan up to `maxIntervalMinutes` (default 240 — the ceiling has to sit above the base interval or the rule is inert, which is why raising the interval to 60 raised this too) *and* surfaces a "reading may be broken" warning (`shouldWarnStalled`). It recovers instantly: one non-empty scan resets the counter and the interval snaps back to base. It does both — self-throttle so it stops hammering, and tell the human so a genuine DOM break gets fixed rather than silently backed-off forever.
 7. **Shipped defaults** (all configurable per §5):
 
 | Setting | Default | Why |
 | --- | --- | --- |
-| `intervalMinutes` | 5 | Fresh enough; a burst won't outrun it (decision 1) |
-| `jitterMinutes` | 1 | Breaks a clean 5-minute periodicity for one line (decision 3) |
+| `intervalMinutes` | 60 | Hourly is as fresh as the postings are; 5 min was volume for nothing (decision 1) |
+| `jitterMinutes` | 30 | Every wake lands in 30–90 min, so there is no period to recognise (decision 3) |
 | `pagesPerScan` | 1 | Page 2 mostly stale; catch-up covers the gap (decision 2) |
 | `catchUpPages` | 4 | One deep scan on startup / quiet-hours resume (decisions 2, 4) |
 | `quietHours` | on, 23:00–07:00 | Cuts ~8h of loads at near-zero freshness cost (decision 4) |
 | `pacing.pagePauseMs` | [3000, 5000] | Randomised page pause (decision 5) |
 | `pacing.watchPauseMs` | [8000, 12000] | Randomised watch pause (decision 5) |
 | `backoff.emptyScansBeforeBackoff` | 3 | Trip the stopping rule after 3 empty scans (decision 6) |
-| `backoff.maxIntervalMinutes` | 60 | Ceiling for the doubling interval (decision 6) |
+| `backoff.maxIntervalMinutes` | 240 | Ceiling for the doubling interval; must exceed the base (decision 6) |
 
-**Resulting volume.** One page every 5 minutes is 288 loads/day/watch clock-round; the default 8-hour quiet window drops that to ~192 — roughly a third of PRD §12's original 576, before the user touches a single setting. Two watches sit near 384/day rather than 1,100+.
+**Resulting volume.** One page an hour is 24 loads/day/watch clock-round; the default 8-hour quiet window drops that to ~16 — against PRD §12's original 576, before the user touches a single setting. Two watches sit near 32/day rather than 1,100+, which is the volume of a person who checks their saved searches now and then.
 
 ---
 
 ## 16. What happens when it breaks, and how do you find out?
 
-Resolves issue #9 / ticket 08. The PRD describes the happy path in detail and §12 says "log loudly," but for a tool that runs unattended every few minutes, **silence is indistinguishable from "no new jobs."** The failure mode this section exists to prevent is the extension quietly stopping for weeks. Each failure below gets a decided *behaviour* and a decided *signal*. The pure logic lives in `src/health.ts` (a §14 reference example); `background.ts` and the content script are the thin wrappers that feed it signals and act on the returned `HealthState`.
+Resolves issue #9 / ticket 08. The PRD describes the happy path in detail and §12 says "log loudly," but for a tool that runs unattended in the background, **silence is indistinguishable from "no new jobs."** The failure mode this section exists to prevent is the extension quietly stopping for weeks. Each failure below gets a decided *behaviour* and a decided *signal*. The pure logic lives in `src/health.ts` (a §14 reference example); `background.ts` and the content script are the thin wrappers that feed it signals and act on the returned `HealthState`.
 
 The unifying idea: the content script never reports a bare "0 cards." It reports a **classified page outcome** (`classifyPage`), and the cycle's outcomes collapse to the single worst one (`aggregateOutcome`) which a pure reducer (`reduceScanHealth`) folds into a persisted `HealthState`. One source of truth drives the badge, the popup banner, and notifications.
 
 ### The eight failures
 
-1. **Logged out.** The content script checks where the tab actually landed. LinkedIn redirects a signed-out session to `/authwall` or `/login`, so a final URL matching those → outcome `logged-out` (not "0 cards"). **Behaviour:** scanning **pauses** — hitting a login wall every 5 minutes is pointless and a poor signal. It resumes automatically on the next scan that comes back `ok` (i.e. once the user signs in). **Signal:** red badge, popup banner "Signed out of LinkedIn — scanning paused," and **one** desktop notification on the transition in.
+1. **Logged out.** The content script checks where the tab actually landed. LinkedIn redirects a signed-out session to `/authwall` or `/login`, so a final URL matching those → outcome `logged-out` (not "0 cards"). **Behaviour:** scanning **pauses** — hitting a login wall every round is pointless and a poor signal. It resumes automatically on the next scan that comes back `ok` (i.e. once the user signs in). **Signal:** red badge, popup banner "Signed out of LinkedIn — scanning paused," and **one** desktop notification on the transition in.
 
 2. **A challenge or captcha.** A final URL under `/checkpoint/` or containing `/challenge` → outcome `challenge`, which **outranks every other outcome** in the aggregate. This is the signal that matters most for account safety. **Behaviour:** scanning **halts entirely** — not backed-off, *stopped* — and stays halted until the user clears the challenge on LinkedIn and manually resumes. Continuing to load tabs through a verification wall is exactly what escalates to a restriction (§12). **Signal:** red badge, banner "LinkedIn asked for verification — scanning stopped," and one hard desktop notification (once, on transition).
 
