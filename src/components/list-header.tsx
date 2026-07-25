@@ -1,6 +1,7 @@
-import { CheckCheck, ExternalLink, Eye, MenuIcon, Power, Settings } from "lucide-react";
+import { CheckCheck, ExternalLink, MenuIcon, Power, Settings } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
+import { AppIcon } from "@/components/app-icon.tsx";
 import { ScanButton } from "@/components/scan-button.tsx";
 import { Button } from "@/components/ui/button";
 import {
@@ -279,13 +280,8 @@ export function ListHeader({
   return (
     <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b bg-background px-3 py-2 md:px-4">
       <div className="flex min-w-0 flex-1 basis-48 items-center gap-2">
-        {/* The app mark: the watching eye, the one thing this extension does. */}
-        <span
-          aria-hidden="true"
-          className="flex size-5.5 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground"
-        >
-          <Eye className="size-3.5" />
-        </span>
+        {/* The app mark — the extension's own icon, as shipped to the toolbar. */}
+        <AppIcon className="size-5.5" />
         <span className="truncate text-[14.5px] font-semibold tracking-tight">
           {title}
         </span>

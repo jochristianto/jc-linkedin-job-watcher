@@ -17,9 +17,10 @@
 // find — and the header's summary line stays readable while you change the very
 // numbers it describes.
 
-import { Clock, Eye, X } from "lucide-react";
+import { Clock, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
+import { AppIcon } from "@/components/app-icon.tsx";
 import { HowItWorks } from "@/components/how-it-works.tsx";
 import { SettingsNav } from "@/components/settings-nav.tsx";
 import { TagInput } from "@/components/tag-input.tsx";
@@ -385,13 +386,8 @@ export function OptionsPage() {
           it is worth the two lines it costs at every scroll position: change the
           interval down the page and this is what tells you what you just did. */}
       <header className="flex shrink-0 items-center gap-3.5 border-b bg-background px-4 py-2.5 md:px-6">
-        {/* The app mark: the watching eye, the one thing this extension does. */}
-        <span
-          aria-hidden="true"
-          className="flex size-6.5 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground"
-        >
-          <Eye className="size-3.5" />
-        </span>
+        {/* The app mark — the extension's own icon, as shipped to the toolbar. */}
+        <AppIcon className="size-6.5" />
 
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <div className="flex flex-wrap items-center gap-2">

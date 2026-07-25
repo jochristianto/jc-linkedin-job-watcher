@@ -8,7 +8,8 @@
     "build:dev": "vite build --mode prefill && vite build --config vite.content.config.ts",
     "test": "tsx --test \"src/**/*.test.ts\" \"src/**/*.test.tsx\" \"mockups/**/*.test.ts\"",
     "send-test-message": "node --env-file-if-exists=.env --experimental-strip-types scripts/send-test-message.ts",
-    "build:mockups": "tsx scripts/build-mockups.tsx"
+    "build:mockups": "tsx scripts/build-mockups.tsx",
+    "build:app-icon": "tsx scripts/build-app-icon.ts"
   },
   "devDependencies": {
     "@ai-hero/sandcastle": "^0.12.0",
