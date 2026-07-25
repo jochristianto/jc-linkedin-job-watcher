@@ -69,13 +69,36 @@ export function isTitleBlocked(title: string, keywords: string[]): boolean {
 }
 
 /**
+ * Does the reposted rule hide this job *right now*? Split out of
+ * {@link passesFilters} because the two blocklists and this rule are applied at
+ * different times: a blocked company only stops *future* scans (already-found
+ * rows stay on screen, greyed), while "Hide reposted jobs" is a statement about
+ * what you want to look at — so the list re-asks it on every render, the way it
+ * already re-derives `blocked`.
+ *
+ * Without this the setting only ever reached `dedupe`, which runs once per job,
+ * the first time it is evaluated. Turning it on left every reposted job already
+ * in the list there permanently, with nothing in the UI explaining why.
+ *
+ * `isReposted` is tested as `=== true` rather than for truthiness: records
+ * written before the flag existed have it absent, and an absent flag means "we
+ * never saw a repost marker", not "hide it".
+ */
+export function isHiddenAsReposted(
+  job: { isReposted?: boolean },
+  hideReposted: boolean,
+): boolean {
+  return hideReposted && job.isReposted === true;
+}
+
+/**
  * The surface-it decision: `true` means show/notify this job, `false` means drop
  * it (but the caller still marks it seen — PRD §6 "Seen means evaluated, not
  * shown"). Combines the two blocklists and the reposted rule (PRD §6:
  * `if (hideReposted && isReposted) continue`).
  */
 export function passesFilters(job: FilterJob, rules: FilterRules): boolean {
-  if (rules.hideReposted && job.isReposted) return false;
+  if (isHiddenAsReposted(job, rules.hideReposted)) return false;
   if (isCompanyBlocked(job.company, rules.blockedCompanies)) return false;
   if (isTitleBlocked(job.title, rules.blockedTitleKeywords)) return false;
   return true;

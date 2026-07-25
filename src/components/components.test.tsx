@@ -150,7 +150,12 @@ test("JobRow's popup actions take the whole line, split evenly between them", ()
   // `flex-1` off a zero basis is what makes it 50:50 regardless of the two
   // labels' different lengths — the line itself is full width.
   for (const b of buttons) assert.match(b, /\bflex-1\b/);
-  assert.match(h, /data-actions="below"[\s\S]*?<div class="[^"]*\bborder-t\b[^"]*\bpy-1\.5\b/);
+  // A rule with room to breathe under it. The *amount* of room is deliberately
+  // not pinned to a number: this assertion read `py-1.5` and broke on a redesign
+  // that only retuned the padding, which is a test failing over a decision it was
+  // never making. What must not silently go away is the padded strip itself —
+  // buttons crammed against the rule is the thing worth catching.
+  assert.match(h, /data-actions="below"[\s\S]*?<div class="[^"]*\bborder-t\b[^"]*\bpy-\d/);
 });
 
 test("JobRow fences the popup's action line off from the posting with a rule", () => {
@@ -312,8 +317,13 @@ test("JobRow leaves the block button unarmed by default", () => {
 });
 
 test("JobRow's row actions are Lucide icons, never a font glyph", () => {
+  // The tick wears the state it would take you *to*, so the two directions are
+  // two icons: an unread row offers the closing eye, a read one offers the open
+  // eye that brings it back. This used to expect `lucide-eye-off` for both, which
+  // asserted the opposite of what the button does.
   assert.match(row(job({ read: false })), /lucide-eye-off/);
-  assert.match(row(job({ read: true })), /lucide-eye-off/);
+  assert.match(row(job({ read: true })), /lucide-eye\b/);
+  assert.doesNotMatch(row(job({ read: true })), /lucide-eye-off/);
   assert.match(row(job()), /lucide-ban/);
   // The icon is decorative; the button's own aria-label is what gets announced.
   assert.match(row(job()), /aria-label="Mark as read"[^>]*>\s*<svg[^>]*aria-hidden="true"/);

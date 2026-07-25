@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   normalizeCompany,
   isCompanyBlocked,
+  isHiddenAsReposted,
   isTitleBlocked,
   passesFilters,
   type FilterRules,
@@ -75,6 +76,15 @@ test("passesFilters drops a blocked title keyword", () => {
     passesFilters(job({ title: "Intern, Backend" }), rules({ blockedTitleKeywords: ["intern"] })),
     false,
   );
+});
+
+test("isHiddenAsReposted needs both the flag and the setting, and treats an absent flag as no", () => {
+  assert.equal(isHiddenAsReposted({ isReposted: true }, true), true);
+  assert.equal(isHiddenAsReposted({ isReposted: true }, false), false);
+  assert.equal(isHiddenAsReposted({ isReposted: false }, true), false);
+  // A record written before the flag existed: nothing ever said it was a repost,
+  // so it stays visible rather than being hidden on a missing field.
+  assert.equal(isHiddenAsReposted({}, true), false);
 });
 
 test("passesFilters drops a reposted job only when hideReposted is on", () => {

@@ -130,7 +130,10 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 async function updateBadge(severity: Severity): Promise<void> {
   const [jobs, settings] = await Promise.all([get("jobs"), get("settings")]);
   const blocked = settings.blockedCompanies.map((b) => b.normalized);
-  const { text, color } = badgeFor(unreadCount(jobs, blocked), severity);
+  const { text, color } = badgeFor(
+    unreadCount(jobs, blocked, settings.hideReposted),
+    severity,
+  );
   await chrome.action.setBadgeText({ text });
   await chrome.action.setBadgeBackgroundColor({ color });
 }

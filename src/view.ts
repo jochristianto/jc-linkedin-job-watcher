@@ -15,7 +15,12 @@ import { isWithinQuietHours, minutesOfDay } from "./schedule.ts";
 // `makeBlockedCompany` is the write-side normalizer the Options blocklist field
 // uses too, so a company blocked from a row and one typed into Options end up in
 // the identical shape.
-import { isCompanyBlocked, normalizeCompany, makeBlockedCompany } from "./filter.ts";
+import {
+  isCompanyBlocked,
+  isHiddenAsReposted,
+  normalizeCompany,
+  makeBlockedCompany,
+} from "./filter.ts";
 import { PUSH_FAILING_MESSAGE } from "./health.ts";
 import type {
   JobView,
@@ -53,13 +58,23 @@ function toJobView(job: Job, watches: Watch[], blockedNormalized: string[]): Job
   };
 }
 
-/** All jobs as views, ordered newest-first by `foundAt` (PRD §5). */
+/** All jobs as views, ordered newest-first by `foundAt` (PRD §5).
+ *
+ *  `hideReposted` drops rows outright rather than greying them, which is the
+ *  difference between this and the blocklist: blocking a company is about that
+ *  company from now on, so its rows stay visible with an Unblock button, while
+ *  hiding reposts is about what the list should contain. Applied here, on every
+ *  render, so flipping the setting takes effect on jobs already found — see
+ *  {@link isHiddenAsReposted}. Nothing is deleted: turning it back off brings
+ *  the rows straight back. */
 export function toJobViews(
   jobs: Job[],
   watches: Watch[],
   blockedNormalized: string[] = [],
+  hideReposted = false,
 ): JobView[] {
   return [...jobs]
+    .filter((j) => !isHiddenAsReposted(j, hideReposted))
     .sort((a, b) => b.foundAt - a.foundAt)
     .map((j) => toJobView(j, watches, blockedNormalized));
 }
@@ -67,10 +82,22 @@ export function toJobViews(
 /** The badge number: how many jobs you have not looked at yet and are not
  *  blocked — the same rule the toolbar badge uses (see `unreadCount` in scan.ts).
  *  Both clicking a row and ticking it read take it off this count; the New list
- *  is the looser filter that only the tick empties (see `visibleJobs`). */
-export function unreadCount(jobs: Job[], blockedNormalized: string[] = []): number {
+ *  is the looser filter that only the tick empties (see `visibleJobs`).
+ *
+ *  A job hidden by `hideReposted` is off the count too, and must be: it is not on
+ *  the list at all, so counting it would leave a badge promising rows that cannot
+ *  be reached by any chip or mode. */
+export function unreadCount(
+  jobs: Job[],
+  blockedNormalized: string[] = [],
+  hideReposted = false,
+): number {
   return jobs.filter(
-    (j) => !j.read && !j.opened && !isCompanyBlocked(j.company, blockedNormalized),
+    (j) =>
+      !j.read &&
+      !j.opened &&
+      !isCompanyBlocked(j.company, blockedNormalized) &&
+      !isHiddenAsReposted(j, hideReposted),
   ).length;
 }
 
@@ -226,6 +253,10 @@ export type ViewContext = {
    *  whose company matches and flips their Block button to Unblock; those rows
    *  stay on screen, they just stop counting towards the badge. */
   blockedCompanies?: string[];
+  /** `settings.hideReposted` — "Hide jobs marked Reposted". Takes the rows off
+   *  the list and off the badge on every render, so turning it on also clears
+   *  reposts found before it was on, and turning it off brings them back. */
+  hideReposted?: boolean;
   /** The row whose Block button was pressed once and is now asking "Sure?".
    *  Blocking a company is the one row action that changes what future scans
    *  surface, so it takes two presses; mount.ts owns this id and clears it on
@@ -394,17 +425,18 @@ export type ViewProps = {
  */
 export function selectView(ctx: ViewContext): ViewProps {
   const blockedCompanies = ctx.blockedCompanies ?? [];
+  const hideReposted = ctx.hideReposted === true;
 
   // The badge always counts unread across every watch — it mirrors the toolbar
   // action badge, which the chip filter must not change (mockups decision 4).
-  const badge = unreadCount(ctx.jobs, blockedCompanies);
+  const badge = unreadCount(ctx.jobs, blockedCompanies, hideReposted);
 
   // The chip filters the *list*: an active watch drops jobs from other watches.
   const activeWatchId = ctx.activeWatchId || null;
   const listJobs = activeWatchId
     ? ctx.jobs.filter((j) => j.watchId === activeWatchId)
     : ctx.jobs;
-  const jobs = toJobViews(listJobs, ctx.watches, blockedCompanies);
+  const jobs = toJobViews(listJobs, ctx.watches, blockedCompanies, hideReposted);
   const visible = ctx.mode === "new" ? jobs.filter((v) => !v.read) : jobs;
 
   const banners: ViewProps["banners"] = [];

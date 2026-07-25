@@ -138,7 +138,10 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
       storage.get("health"),
     ]);
     const blocked = settings.blockedCompanies.map((b) => b.normalized);
-    const { text, color } = badgeFor(unreadCount(Object.values(jobs), blocked), health.severity);
+    const { text, color } = badgeFor(
+      unreadCount(Object.values(jobs), blocked, settings.hideReposted),
+      health.severity,
+    );
     await chrome.action.setBadgeText({ text });
     await chrome.action.setBadgeBackgroundColor({ color });
   }, []);
@@ -152,6 +155,10 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
       title,
       activeWatchId,
       blockedCompanies: state.settings.blockedCompanies.map((b) => b.normalized),
+      // Re-asked on every render, so flipping "Hide jobs marked Reposted" in
+      // Options also settles jobs already found — it used to reach only the scan
+      // that discovers a job, and never the list.
+      hideReposted: state.settings.hideReposted === true,
       scanning: state.scanState.isScanning,
       pendingScan,
       scanMode: state.health.mode,

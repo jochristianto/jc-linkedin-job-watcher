@@ -87,6 +87,31 @@ test("toJobViews derives blocked from the blocklist, so unblocking un-greys rows
   assert.equal(toJobViews(jobs, watches, [])[0]!.blocked, false);
 });
 
+test("toJobViews drops reposted rows when the setting is on, and only then", () => {
+  const jobs = [job({ id: "1", isReposted: true }), job({ id: "2" })];
+  assert.deepEqual(
+    toJobViews(jobs, watches, [], true).map((v) => v.id),
+    ["2"],
+  );
+  // Off — the default — leaves the list exactly as it was.
+  assert.equal(toJobViews(jobs, watches, [], false).length, 2);
+  assert.equal(toJobViews(jobs, watches).length, 2);
+});
+
+test("toJobViews re-asks the reposted rule per render, so it reaches jobs already found", () => {
+  // The job was discovered while the setting was off, so it is in storage; turning
+  // the setting on has to take it off the list without a re-scan. This is the bug:
+  // the rule used to be applied once, at discovery, and never again.
+  const stored = [job({ id: "old-repost", isReposted: true, foundAt: 100 })];
+  assert.equal(toJobViews(stored, watches, [], false).length, 1);
+  assert.equal(toJobViews(stored, watches, [], true).length, 0);
+});
+
+test("toJobViews hides nothing for records written before isReposted existed", () => {
+  const legacy = { ...job(), isReposted: undefined } as unknown as Job;
+  assert.equal(toJobViews([legacy], watches, [], true).length, 1);
+});
+
 test("unreadCount counts the jobs you have not looked at — either way of looking clears one", () => {
   const jobs = [job({ id: "1" }), job({ id: "2", read: true }), job({ id: "3" })];
   assert.equal(unreadCount(jobs), 2);
@@ -99,6 +124,12 @@ test("unreadCount ignores blocked companies, so blocking quiets the badge", () =
   const jobs = [job({ id: "1", company: "Acme Corp" }), job({ id: "2", company: "Globex" })];
   assert.equal(unreadCount(jobs, []), 2);
   assert.equal(unreadCount(jobs, ["acme"]), 1);
+});
+
+test("unreadCount ignores hidden reposts, so the badge can't promise unreachable rows", () => {
+  const jobs = [job({ id: "1", isReposted: true }), job({ id: "2" })];
+  assert.equal(unreadCount(jobs, [], false), 2);
+  assert.equal(unreadCount(jobs, [], true), 1);
 });
 
 test("markJobOpened sets opened + openedAt without mutating the input", () => {
@@ -313,6 +344,19 @@ test("selectView filters the list to the active watch chip", () => {
 test("selectView badge counts unread across all watches, ignoring the chip filter", () => {
   const jobs = [job({ id: "1", watchId: "w-id" }), job({ id: "2", watchId: "other" })];
   assert.equal(selectView(ctx({ jobs, mode: "all", activeWatchId: "w-id" })).badge, 2);
+});
+
+test("selectView keeps the badge and the list in step when reposts are hidden", () => {
+  const jobs = [job({ id: "1", isReposted: true }), job({ id: "2" })];
+  const hidden = selectView(ctx({ jobs, mode: "all", hideReposted: true }));
+  assert.deepEqual(hidden.jobs.map((j) => j.id), ["2"]);
+  // The badge must drop with the row: a "2" over a one-row list points at a job
+  // no chip or mode can reach.
+  assert.equal(hidden.badge, 1);
+
+  const shown = selectView(ctx({ jobs, mode: "all", hideReposted: false }));
+  assert.equal(shown.jobs.length, 2);
+  assert.equal(shown.badge, 2);
 });
 
 test("selectView shows the scanning empty state while a first scan is in flight", () => {

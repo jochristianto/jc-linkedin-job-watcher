@@ -9,7 +9,7 @@
 import type { Job, Watch } from "./types.ts";
 import type { JobsMap } from "./storage.ts";
 import type { Severity } from "./health.ts";
-import { isCompanyBlocked } from "./filter.ts";
+import { isCompanyBlocked, isHiddenAsReposted } from "./filter.ts";
 
 /** Postings per results page on `/jobs/search/` — the `&start=` step (PRD §9:
  *  `url + &start=(page-1)*25`). */
@@ -214,12 +214,24 @@ export function mergeJobs(existing: JobsMap, newJobs: Job[]): JobsMap {
  * showing you. `blockedNormalized` is the already-lowercased fragment list from
  * `settings.blockedCompanies` — same form `passesFilters` takes.
  *
+ * `hideReposted` (`settings.hideReposted`) is the stronger version of the same
+ * idea: those jobs are not merely uncounted, they are off the list entirely, so a
+ * badge counting them would point at rows nothing can bring back on screen.
+ *
  * Kept byte-for-byte in step with `unreadCount` in view.ts, which counts the same
  * rule over a `Job[]` for the header badge.
  */
-export function unreadCount(jobs: JobsMap, blockedNormalized: string[] = []): number {
+export function unreadCount(
+  jobs: JobsMap,
+  blockedNormalized: string[] = [],
+  hideReposted = false,
+): number {
   return Object.values(jobs).filter(
-    (j) => !j.read && !j.opened && !isCompanyBlocked(j.company, blockedNormalized),
+    (j) =>
+      !j.read &&
+      !j.opened &&
+      !isCompanyBlocked(j.company, blockedNormalized) &&
+      !isHiddenAsReposted(j, hideReposted),
   ).length;
 }
 

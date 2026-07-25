@@ -154,6 +154,15 @@ test("unreadCount skips blocked companies so blocking a row quiets the badge", (
   assert.equal(unreadCount(jobs, ["acme"]), 1);
 });
 
+test("unreadCount skips hidden reposts, in step with the same rule in view.ts", () => {
+  const jobs: JobsMap = {
+    "1": job({ id: "1", isReposted: true }),
+    "2": job({ id: "2" }),
+  };
+  assert.equal(unreadCount(jobs, [], false), 2);
+  assert.equal(unreadCount(jobs, [], true), 1);
+});
+
 test("badgeText is empty for zero, the number below 100, and 99+ above", () => {
   assert.equal(badgeText(0), "");
   assert.equal(badgeText(7), "7");
