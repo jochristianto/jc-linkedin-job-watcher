@@ -12,7 +12,7 @@ may not publish it as an extension or sell it.
 ```bash
 nvm use        # optional, picks up .nvmrc → Node v24.18.0
 npm install
-npm test       # 487 unit tests, no browser needed
+npm test       # 507 unit tests, no browser needed
 npm run build  # → dist/
 ```
 

@@ -17,7 +17,7 @@
 // find — and the header's summary line stays readable while you change the very
 // numbers it describes.
 
-import { Clock, X } from "lucide-react";
+import { Clock, Eraser, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { AppIcon } from "@/components/app-icon.tsx";
@@ -51,7 +51,17 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { HealthBanner } from "@/components/health-banner.tsx";
 import { cn } from "@/lib/utils";
+import {
+  historyCounts,
+  historyPhrase,
+  GC_PERIOD_MINUTES,
+  type ClearHistoryRequest,
+  type ClearHistoryResponse,
+  type HistoryCounts,
+} from "@/gc.ts";
 import { OK_PUSH_HEALTH, PUSH_FAILING_MESSAGE } from "@/health.ts";
+import { useNow } from "@/hooks/use-now.ts";
+import { IDLE_LIFECYCLE, recoverStaleLock } from "@/lifecycle.ts";
 import {
   applyPushPrefill,
   changedFormKeys,
@@ -74,7 +84,7 @@ import {
 } from "@/settings-view.ts";
 import { sendPush, type PushJob } from "@/push.ts";
 import * as storage from "@/storage.ts";
-import type { Settings } from "@/types.ts";
+import type { ScanState, Settings } from "@/types.ts";
 
 /** The sample batch the Send-test button pushes (PRD §8): one job that exercises
  *  HTML escaping and a tappable link, so the phone check is representative of a
@@ -110,6 +120,18 @@ const NO_STATUS: Status = { message: "", kind: "" };
  *  how far into the viewport the spy looks for "the section you are reading". */
 const SCROLL_MARGIN = 16;
 const SPY_OFFSET = 80;
+
+/** How often the scan lock is re-judged against the clock (see `scanning`). Far
+ *  coarser than the list view's one-second countdown: nothing here counts down,
+ *  and the only thing that changes on this tick is whether a lock has aged into
+ *  staleness — which happens once, five minutes after a worker died. */
+const LOCK_TICK_MS = 15_000;
+
+/** The storage keys this page reads *outside* the settings form. The form itself
+ *  is deliberately not live — repainting it would throw away unsaved edits —
+ *  but these three say what there is to delete and whether deleting is possible,
+ *  and both change while the page sits open. */
+const RETENTION_KEYS = ["jobs", "seen", "scanState"] as const;
 
 /** The rendered card for a section, found by the id {@link Section} gives it.
  *  Read only from the scroll handler and the rail, both of which run long after
@@ -187,6 +209,14 @@ export function OptionsPage() {
   const [pushWarn, setPushWarn] = useState(false);
   const [saveStatus, setSaveStatus] = useState<Status>(NO_STATUS);
   const [testStatus, setTestStatus] = useState<Status>(NO_STATUS);
+  const [clearStatus, setClearStatus] = useState<Status>(NO_STATUS);
+  // What is actually stored right now, so the Retention section can say what
+  // deleting it would cost instead of asking you to confirm an unknown quantity.
+  const [history, setHistory] = useState<HistoryCounts>({ jobs: 0, seen: 0 });
+  // The scan lock, held raw. A cycle in flight is the one state deleting must
+  // not happen in, but "in flight" is a judgement about the clock as much as
+  // about the flag — see `scanning` below.
+  const [scanState, setScanState] = useState<ScanState>(IDLE_LIFECYCLE);
   const [showToken, setShowToken] = useState(false);
   const [section, setSection] = useState<SettingsSection>("watches");
 
@@ -212,7 +242,24 @@ export function OptionsPage() {
       // drop unsaved edits) means the banner clears on the next open, which is
       // enough.
       setPushWarn((await storage.get("pushHealth")).warn);
+      await refreshRetentionState();
     })();
+  }, []);
+
+  // The settings tab is left open for long stretches, and a cycle finishing in
+  // the worker changes both how much there is to delete and whether deleting is
+  // possible. Same subscription the list view runs on (use-extension-state.ts),
+  // narrowed to the keys this page reads outside the form.
+  useEffect(() => {
+    const onChanged = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      area: string,
+    ): void => {
+      if (area !== "local") return;
+      if (RETENTION_KEYS.some((key) => key in changes)) void refreshRetentionState();
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => chrome.storage.onChanged.removeListener(onChanged);
   }, []);
 
   // Which fields differ from storage, and so: whether Reset has anything to throw
@@ -225,6 +272,30 @@ export function OptionsPage() {
   const dirtyIn = useMemo(() => dirtySections(changed), [changed]);
 
   const estimate = useMemo(() => (form ? estimateLoad(form) : null), [form]);
+
+  /**
+   * Whether a cycle is really in flight — the state the delete control is
+   * unavailable in.
+   *
+   * Derived against a ticking clock rather than stored as a flag, because the
+   * answer changes with time and not only with storage: a worker torn down
+   * mid-cycle writes nothing further, so a `scanState` read as "scanning" would
+   * stay that way for as long as this page stayed open, and the control would be
+   * disabled for good. `recoverStaleLock` — the same reading the worker takes —
+   * turns that stuck lock into "not scanning" once it ages past `staleLockMs`,
+   * and re-deriving each tick is what lets the page notice.
+   *
+   * This is only the hint. The worker checks the lock again, holding it, before
+   * it deletes anything.
+   */
+  const now = useNow(LOCK_TICK_MS);
+  const scanning = useMemo(
+    () =>
+      base
+        ? recoverStaleLock(scanState, now, base.staleLockMs).state.isScanning
+        : false,
+    [scanState, now, base],
+  );
 
   if (!form || !base) return null;
 
@@ -306,6 +377,55 @@ export function OptionsPage() {
         kind: "err",
       });
     }
+  }
+
+  /** Re-read the two things the Retention section shows about *stored data*
+   *  rather than about settings: how much there is, and the scan lock (which
+   *  says whether deleting it is possible right now). Kept raw — the staleness
+   *  judgement is derived below, against a clock, so it heals on its own. */
+  async function refreshRetentionState(): Promise<void> {
+    const [seen, jobs, scanState] = await Promise.all([
+      storage.get("seen"),
+      storage.get("jobs"),
+      storage.get("scanState"),
+    ]);
+    setHistory(historyCounts(seen, jobs));
+    setScanState(scanState);
+  }
+
+  /**
+   * Ask the worker to delete every job record and every seen id — retention
+   * taken to its limit by hand, for when you want to start collecting from
+   * scratch. Only reached through the confirmation dialog.
+   *
+   * The page does not write the two keys itself: the delete has to hold the scan
+   * lock or it can land inside a cycle's read-dedupe-write tail and have the
+   * records it deleted written straight back (§7), and only the worker holds the
+   * lock. So this asks, and reports whichever answer comes back — including the
+   * refusal, which is the honest outcome when a round is in flight.
+   */
+  async function onClearHistory(): Promise<void> {
+    setClearStatus({ message: "Deleting…", kind: "" });
+    const req: ClearHistoryRequest = { type: "LJW_CLEAR_HISTORY" };
+    const res = (await chrome.runtime
+      .sendMessage(req)
+      .catch(() => undefined)) as ClearHistoryResponse | undefined;
+    await refreshRetentionState();
+
+    if (res?.cleared) {
+      setClearStatus({
+        message: `Deleted ${historyPhrase(res.removed)}.`,
+        kind: "ok",
+      });
+      return;
+    }
+    setClearStatus({
+      message:
+        res?.reason === "scanning"
+          ? "A scan is running — nothing was deleted. Try again when it finishes."
+          : "Nothing was deleted — the extension's background worker did not answer.",
+      kind: "err",
+    });
   }
 
   /** Jump the scroll container to a section. The rail highlights it immediately
@@ -706,16 +826,98 @@ export function OptionsPage() {
                     "A backstop; past it the oldest ids drop first.",
                   )}
                 </div>
-                {/* Said out loud because the alternative is a section of controls
-                    that quietly does nothing — the collector is written and tested
-                    (gc.ts) but nothing calls it yet, so these values are stored and
-                    not yet acted on. See the README's known limitations. */}
+                {/* When the numbers above are acted on, said plainly: they are
+                    enforced once a day rather than the moment you save, so a
+                    record you have just put outside its limit lives until the
+                    next clean-up. */}
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Clock aria-hidden="true" className="size-3.5 shrink-0" />
                   <span>
-                    The daily clean-up is not wired up yet — these are saved,
-                    and take effect as soon as it is.
+                    Enforced by a clean-up that runs every{" "}
+                    {GC_PERIOD_MINUTES / 60} hours, never during a scan.
                   </span>
+                </div>
+
+                <Separator />
+
+                {/* The one control on this page that destroys data outright, so
+                    it names the quantity before you agree to lose it and sits
+                    behind the same confirm the footer's Reset uses. */}
+                <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2.5">
+                  <div className="min-w-0 flex-1 basis-65">
+                    <p className="text-[13px] font-semibold">
+                      Delete all job history
+                    </p>
+                    <p className="mt-0.5 text-xs leading-snug text-muted-foreground text-pretty">
+                      Start collecting from scratch. Holding{" "}
+                      <span className="font-medium text-foreground">
+                        {historyPhrase(history)}
+                      </span>{" "}
+                      right now. Your settings are not touched.
+                      {scanning && " Unavailable while a scan is running."}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-3">
+                    <StatusText id="clear-status" status={clearStatus} />
+                    {/* Nothing stored is nothing to delete, so the button is
+                        disabled rather than opening a dialog about nothing —
+                        the rule Reset follows in the save bar. */}
+                    <AlertDialog
+                      onOpenChange={(open) => {
+                        if (open) void refreshRetentionState();
+                      }}
+                    >
+                      <AlertDialogTrigger asChild>
+                        {/* Eraser, not the bin: the bin is the Watches list's
+                            "remove this one", and one page must not use one icon
+                            for two different acts. */}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          id="clear-history"
+                          disabled={
+                            scanning ||
+                            (history.jobs === 0 && history.seen === 0)
+                          }
+                          className="text-destructive hover:text-destructive"
+                        >
+                          <Eraser aria-hidden="true" />
+                          Delete history
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>
+                            Delete all job history?
+                          </AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This deletes {historyPhrase(history)} from this
+                            browser, and there is no undo. Your settings —
+                            watches, filters, times, Telegram — are left exactly
+                            as they are. Because the memory of what has already
+                            been shown goes too, the next round will treat
+                            postings still live on LinkedIn as new and announce
+                            them again.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel id="clear-history-cancel">
+                            Keep it
+                          </AlertDialogCancel>
+                          <AlertDialogAction
+                            id="clear-history-confirm"
+                            onClick={() => void onClearHistory()}
+                            className={cn(
+                              buttonVariants({ variant: "destructive" }),
+                            )}
+                          >
+                            Delete history
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
                 </div>
               </div>
             </Section>

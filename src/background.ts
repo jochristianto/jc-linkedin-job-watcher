@@ -20,6 +20,7 @@ import {
   KEEPALIVE_PING_MS,
   beginScan,
   endScan,
+  holdLock,
   recoverStaleLock,
   requestCatchUp,
   trackTab,
@@ -61,6 +62,18 @@ import {
   type AppliedPushRequest,
   type AppliedPushResponse,
 } from "./push.ts";
+import {
+  clearHistory,
+  collectGarbage,
+  historyCounts,
+  historyPhrase,
+  removedCounts,
+  GC_ALARM_NAME,
+  GC_FIRST_RUN_DELAY_MINUTES,
+  GC_PERIOD_MINUTES,
+  type ClearHistoryRequest,
+  type ClearHistoryResponse,
+} from "./gc.ts";
 import { buildScanNotification, SCAN_NOTIFICATION_ID } from "./notify.ts";
 import { focusOrOpenJobsTab } from "./jobs-tab.ts";
 import type { HealthState, Job, Settings } from "./types.ts";
@@ -731,10 +744,125 @@ async function onAlarm(): Promise<void> {
   await runLockedCycle(settings, await takeScanLock(settings, recovered.state));
 }
 
+// ── Garbage collection ─────────────────────────────────────────────────────────
+
+/**
+ * The daily prune (PRD §7): job records past their lifetime and seen ids past
+ * theirs, dropped on the collector's own alarm.
+ *
+ * No decision here either — `collectGarbage` owns both lifetimes and the
+ * hard-cap backstop, `removedCounts` says what that came to. This only reads the
+ * three keys, writes back the ones that actually changed, and says so.
+ *
+ * It runs whatever the master switch says. Switching scanning off stops the
+ * extension *doing* things; it does not freeze the clock, and a job found six
+ * weeks ago is equally stale whether or not anything has scanned since.
+ */
+async function runGarbageCollection(): Promise<void> {
+  const settings = await get("settings");
+
+  // Never against a live cycle (§7 "never on the scan path"). A cycle reads
+  // `seen` and writes it back at its end; a prune landing between those two is
+  // either overwritten by the cycle — harmless, tomorrow collects again — or
+  // overwrites the ids the cycle just recorded, which would re-announce every job
+  // it had just found. The window is short, but a daily run will find it.
+  //
+  // Read through `recoverStaleLock` rather than off the raw flag, exactly as the
+  // two scan paths do: a worker torn down mid-cycle leaves `isScanning` true
+  // forever, and a collector that trusted it would then skip every single day —
+  // silently, and worst of all under the master switch, where no scan tick ever
+  // comes to clear the lock. Recovery here is read-only: releasing the lock and
+  // sweeping the tabs it orphaned belongs to the scan paths, not to this one.
+  const recovered = recoverStaleLock(await get("scanState"), Date.now(), settings.staleLockMs);
+  if (recovered.state.isScanning) {
+    console.log("[ljw] gc skipped — a scan holds the lock; the next daily tick collects");
+    return;
+  }
+
+  const before = {
+    seen: await get("seen"),
+    jobs: await get("jobs"),
+    retention: settings.retention,
+  };
+  const after = collectGarbage(before, Date.now());
+  const removed = removedCounts(before, after);
+  const kept = historyPhrase(historyCounts(after.seen, after.jobs));
+
+  // §6 has no partial updates: writing a key re-serialises the whole map. So a
+  // key nothing aged out of is not written at all, and a run with nothing to do
+  // costs three reads.
+  if (removed.jobs === 0 && removed.seen === 0) {
+    console.log(`[ljw] gc — nothing to prune; ${kept} kept`);
+    return;
+  }
+  if (removed.seen > 0) await set("seen", after.seen);
+  if (removed.jobs > 0) await set("jobs", after.jobs);
+  console.log(`[ljw] gc — pruned ${historyPhrase(removed)}; ${kept} kept`);
+
+  // Dropped records can take unread jobs with them, and nothing else would
+  // notice until the next cycle — so the toolbar count is brought back in line
+  // here, at the severity the current health already stands at.
+  if (removed.jobs > 0) await updateBadge((await get("health")).severity);
+}
+
+/**
+ * "Delete all job history" (PRD §7): empty `jobs` and `seen` outright, on the
+ * options page's asking.
+ *
+ * It runs here rather than in the page because of the lock. A cycle reads `seen`,
+ * dedupes against it and writes it back at its end; a delete landing inside that
+ * makes every job the cycle just found new again, so it would write the records
+ * straight back and announce them — the exact opposite of what the button was
+ * pressed for. Holding the lock for the length of the delete is what makes that
+ * impossible, and only the worker can hold it.
+ *
+ * The lock is read through `recoverStaleLock` for the same reason the collector
+ * does, and `holdLock` keeps it — not `beginScan`, which would consume a pending
+ * catch-up this is not.
+ *
+ * What actually goes is `clearHistory`'s decision, not this wrapper's.
+ */
+async function clearAllHistory(): Promise<ClearHistoryResponse> {
+  const settings = await get("settings");
+  const recovered = recoverStaleLock(await get("scanState"), Date.now(), settings.staleLockMs);
+  if (recovered.state.isScanning) return { cleared: false, reason: "scanning" };
+  await set("scanState", holdLock(recovered.state, Date.now()));
+
+  try {
+    const [seen, jobs, ui] = await Promise.all([get("seen"), get("jobs"), get("ui")]);
+    const removed = historyCounts(seen, jobs);
+    const cleared = clearHistory(ui);
+    await set("seen", cleared.seen);
+    await set("jobs", cleared.jobs);
+    await set("ui", cleared.ui);
+    console.log(`[ljw] history deleted — ${historyPhrase(removed)} removed`);
+    // Nothing is unread when nothing is stored; the colour still belongs to the
+    // health this has not changed.
+    await updateBadge((await get("health")).severity);
+    return { cleared: true, removed };
+  } finally {
+    await set("scanState", endScan(await get("scanState")));
+  }
+}
+
+/** Make sure the daily collector alarm exists (PRD §7). Idempotent, and called
+ *  from both install and startup: a periodic alarm survives the worker being
+ *  torn down, so re-creating one that is already ticking would only push its
+ *  next run a fresh day out — on a browser restarted daily, that is a collector
+ *  that never runs. */
+async function ensureGcAlarm(): Promise<void> {
+  if (await chrome.alarms.get(GC_ALARM_NAME)) return;
+  await chrome.alarms.create(GC_ALARM_NAME, {
+    delayInMinutes: GC_FIRST_RUN_DELAY_MINUTES,
+    periodInMinutes: GC_PERIOD_MINUTES,
+  });
+}
+
 // ── Wiring ─────────────────────────────────────────────────────────────────────
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM_NAME) void onAlarm();
+  else if (alarm.name === GC_ALARM_NAME) void runGarbageCollection();
 });
 
 /** Settings were saved somewhere — the Options page, most of the time — so bring
@@ -808,6 +936,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return true;
 });
 
+/** The options page's "Delete all job history" (PRD §7). Handled here because the
+ *  delete has to hold the scan lock — see {@link clearAllHistory} — and only the
+ *  worker holds it. Channel kept open for the async reply, as above; a failure is
+ *  answered rather than left silent, so the page can say nothing was deleted
+ *  instead of appearing to hang. */
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if ((message as ClearHistoryRequest | undefined)?.type !== "LJW_CLEAR_HISTORY") return;
+  clearAllHistory().then(sendResponse, (err) => {
+    console.error("[ljw] Delete history failed:", err);
+    sendResponse({ cleared: false, reason: "failed" } satisfies ClearHistoryResponse);
+  });
+  return true;
+});
+
 /** Notification click (PRD §3/§9): open our own list, never LinkedIn, and clear
  *  the notification. Marks nothing as opened. `openPopup()` can't be triggered
  *  from a click, so this opens the full jobs.html tab (the list component is
@@ -828,6 +970,9 @@ chrome.runtime.onInstalled.addListener(() => {
     // Never against the master switch (§ master): an upgrade of an install the
     // user had turned off must stay off rather than silently arm a fresh alarm.
     if (settings.enabled !== false) await ensureAlarmExists(settings);
+    // The collector's alarm is armed either way — an install carrying records
+    // from a prior version needs pruning whether or not scanning is on.
+    await ensureGcAlarm();
   })();
 });
 
@@ -843,5 +988,6 @@ chrome.runtime.onStartup.addListener(() => {
     // Honour the master switch across a relaunch (§ master): a browser the user
     // left with scanning off comes back up off, no alarm armed.
     if (settings.enabled !== false) await ensureAlarmExists(settings);
+    await ensureGcAlarm();
   })();
 });

@@ -97,8 +97,26 @@ export function beginScan(
   const pages = state.pendingCatchUp ? catchUpPages : pagesPerScan;
   return {
     pages,
-    state: { isScanning: true, startedAt: now, openTabIds: [], pendingCatchUp: false },
+    state: { ...holdLock(state, now), openTabIds: [], pendingCatchUp: false },
   };
+}
+
+/**
+ * Take the lock, and *only* take the lock.
+ *
+ * The lock is what serialises access to `seen` and `jobs` — a cycle is simply
+ * its longest-running holder. "Delete all job history" (§7) writes both keys and
+ * so has to hold it too, or it can interleave with a cycle's read-dedupe-write
+ * tail and have the records it just deleted written straight back.
+ *
+ * What it deliberately does *not* do is the rest of what starting a cycle means:
+ * the catch-up flag is left pending, because a delete is not the deep scan that
+ * flag was set for and swallowing it would quietly downgrade the next round; and
+ * `openTabIds` is left alone, because this holder opens no tabs and the ids in
+ * there are someone else's to sweep. {@link endScan} releases it either way.
+ */
+export function holdLock(state: ScanLifecycleState, now: number): ScanLifecycleState {
+  return { ...state, isScanning: true, startedAt: now };
 }
 
 /**

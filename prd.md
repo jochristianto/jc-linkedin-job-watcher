@@ -292,9 +292,10 @@ async function collectGarbage() {
     if (now - job.foundAt < limit) keptJobs[id] = job;
   }
 
-  // Seen IDs: the long-lived record
+  // Seen IDs: the long-lived record — and never shorter-lived than the job
+  // record it belongs to (see "The lifetimes cross", below)
   let keptSeen = Object.entries(seen).filter(
-    ([, ts]) => now - ts < r.seenDays * DAY,
+    ([id, ts]) => now - ts < r.seenDays * DAY || id in keptJobs,
   );
 
   // Backstop against a date bug silently defeating the age check
@@ -320,6 +321,44 @@ async function collectGarbage() {
 | `seenHardCap`     | 50,000  | Trims to 40,000 when breached. Pure safety net.                                                                            |
 
 All four are configurable from the options page.
+
+### The lifetimes cross
+
+`seenDays` (15) is shorter than `unopenedJobDays` (30), so for a fortnight an unopened record outlives the memory of it. §6 states the split one way round — "drop its full record but keep the `seen` entry" — and the filter above, taken literally, allows the reverse: the id expiring while the record it belongs to is still stored.
+
+A posting still live on LinkedIn in that window then comes back as new. It notifies and it pushes — and it shows *nothing*, because `mergeJobs` keeps the record already held rather than replacing it. An alert with nothing behind it is worse than no alert.
+
+So **a surviving job record holds its own seen id back** (`|| id in keptJobs`). It is the one addition to §7's algorithm, it only ever keeps more, and the hard cap still applies afterwards. The defaults are untouched: the invariant is what the two lifetimes always meant, rather than a new number.
+
+### The alarm it runs on
+
+A **periodic** alarm (`ljw-gc`, 1440 minutes), not the re-armed one-shot the scan cadence uses. The scan alarm is re-armed each cycle because jitter, back-off and the quiet-hours jump have to be recomputed every time; a daily prune decides none of those, so there is nothing for a re-arm to do that a period doesn't.
+
+Created on install and on browser startup, but only **if it does not already exist**. A periodic alarm outlives the service worker, and re-creating one that is already ticking restarts its period — on a browser that is restarted daily, that is a collector that never runs. The first run is a minute after creation rather than a day: pruning isn't worth putting in front of the first scan, but a full day's delay would mean an install that only ever runs an hour at a time never collects at all.
+
+**A run that finds a scan in progress skips its turn.** A cycle reads `seen` and writes it back at its end, immediately either side of its dedupe; a prune landing between those two is either overwritten by the cycle — harmless, tomorrow collects again — or overwrites the ids the cycle just recorded, which would re-announce every job it had just found. The window is short, but a daily run will eventually find it, and skipping costs a day. This is the operational half of "never on the scan path".
+
+The lock is read through `recoverStaleLock`, the same reading the two scan paths take, never off the raw `isScanning` flag. A worker torn down mid-cycle leaves that flag true indefinitely, and a collector that trusted it would then skip *every* day — silently, and worst of all with the master switch off, where no scan tick ever comes along to clear the lock. The recovery is read-only here: releasing the lock and sweeping the tabs the dead cycle orphaned belongs to the scan paths.
+
+**A key nothing aged out of is not written.** Per the caveat below, writing re-serialises the whole map; a run with nothing to prune should cost three reads, not two full rewrites of storage, every day, forever.
+
+**The master switch does not gate it.** Switching scanning off stops the extension *doing* things; it does not freeze the clock, and a job found six weeks ago is equally stale whether or not anything has scanned since.
+
+### Delete all job history
+
+The same thing on demand and without limits, in the options page's Retention section: empty `jobs` and `seen` outright.
+
+**Settings are not part of it.** Starting the collection over and un-configuring the extension are two different things to want, and one button for both would make it impossible to do either on its own. There is no factory reset; deleting `jobs`, `seen` and nothing else is the whole feature.
+
+`ui.pendingApplyId` goes with the jobs. It names the job whose "Did you apply for this job?" is still unanswered (§ the apply question), and a question about a record that no longer exists can only hang there. The rest of the view state — chip, mode — is about the page rather than the data, so it survives.
+
+**Not while a cycle is running**, for the reason the daily collector skips one — only more so. A cycle dedupes against `seen` at its end, so emptying it mid-round makes every job that round found new again: it would write the records straight back and announce them, which is the exact opposite of what the button was pressed for.
+
+Guarding that with a check in the page is not enough, because a round can start between the check and the write. **The delete therefore runs in the worker, holding the scan lock** — the lock is what serialises access to `seen` and `jobs`, a cycle is simply its longest-running holder, and only the worker can take it. It is taken with `holdLock`, not `beginScan`: a delete is not the deep round a pending catch-up flag was set for, and consuming that flag would quietly downgrade the next round.
+
+The page keeps a check of its own, but only as a *hint* — the button greys out with a line saying why. That hint is derived against a ticking clock rather than stored as a flag: a worker torn down mid-cycle writes nothing further, so a lock read once as "scanning" would disable the control for as long as the page stayed open. Re-judging it through `recoverStaleLock` each tick is what lets a stuck lock age out of the way.
+
+**It names the quantity before it asks.** "Delete all data?" asks you to confirm a number you have not been told, so the section carries the live count and the dialog repeats it. The consequence is spelled out too: with the seen ids gone, the next round finds everything still live on LinkedIn and announces it as new. That is the cost of the button, and it is the one thing about it nobody predicts.
 
 ### One caveat
 
@@ -626,10 +665,10 @@ Every piece of **pure logic** — a function of its inputs, no `chrome.*`, no DO
 | Telegram HTML escaping + message build + `sendPush` (injectable `fetch`) | 09 | **Done** — `src/push.ts` + `src/push.test.ts` |
 | Company + keyword blocklist matching, the reposted rule | 07 | **Reference example** — `src/filter.ts` + `src/filter.test.ts` |
 | Dedupe against the seen set (dedupe on job ID alone, §5) | 02 | Same shape as `filter.ts` |
-| Garbage collection — two lifetimes + hard cap (§7) | 08 | §7 is already pure; lift it verbatim into a `collectGarbage(state, now)` that takes `{seen, jobs, retention, now}` and returns `{seen, jobs}` |
+| Garbage collection — two lifetimes + hard cap, what a run removed, and delete-all (§7) | 08 | **Done** — `src/gc.ts` + `src/gc.test.ts`. §7 lifted verbatim into `collectGarbage(state, now)`; `removedCounts` decides whether the daily run writes at all, `clearHistory` decides what "delete all job history" empties |
 | Scheduling — jitter, quiet hours, in-cycle pauses, back-off (§15) | 03/10 | **Reference example** — `src/schedule.ts` + `src/schedule.test.ts` |
 | Failure diagnosis & surfacing — page classification, health reducer, stale-lock, push-fail, partial-parse (§16) | 08 | **Reference example** — `src/health.ts` + `src/health.test.ts` |
-| Worker lifecycle — keepalive constant, catch-up flag, orphan-tab tracking, stale-lock recovery (§17) | 10 | **Reference example** — `src/lifecycle.ts` + `src/lifecycle.test.ts` |
+| Worker lifecycle — keepalive constant, catch-up flag, orphan-tab tracking, stale-lock recovery, taking the lock for something that is not a scan (§17/§7) | 10 | **Reference example** — `src/lifecycle.ts` + `src/lifecycle.test.ts` |
 | Card parser — DOM → `Job` | 01 | Fixture-driven, see below |
 | What the list view shows — badge count, which empty state, which banner, the scan status, the applied record (§19) | 09/UI | **Done** — `src/view.ts` + `src/view-model.ts`, with their tests. `selectView` returns it all as data; the components only map it to JSX |
 | What the settings page derives — dirty sections, watch-URL chips, the header summary, the load estimate and its tier | UI | **Done** — `src/settings-view.ts` + `src/settings-view.test.ts`, above `options-form.ts`'s validation and storage round-trip |

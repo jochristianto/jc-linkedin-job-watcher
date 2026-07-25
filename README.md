@@ -210,8 +210,28 @@ finds something resets it.
 ### Retention
 
 How long records are kept: seen IDs `15` days, jobs you have opened or read `7`
-days, untouched jobs `30` days, with a hard cap of `50,000` seen IDs. **Not yet
-enforced** — see [Known limitations](#known-limitations).
+days, untouched jobs `30` days, with a hard cap of `50,000` seen IDs. A clean-up
+runs once a day and drops whatever has passed its limit — never during a scan,
+so a round in flight is left alone.
+
+The limits are enforced daily rather than the moment you save them, so shortening
+one takes effect at the next clean-up rather than immediately. The memory always
+outlives the record: a seen ID is not dropped on age while its job is still in
+your list, even though 15 days is the shorter number — otherwise a posting still
+live on LinkedIn would be announced to you a second time. (The `50,000` cap is
+the one thing that overrides this; it is a safety net, not a schedule.)
+
+**Delete all job history** is the same thing on demand, taken to its limit: every
+job and every seen ID goes, and the section says how many that is before you
+confirm. Your settings — watches, filters, times, Telegram — are untouched. There
+is no undo, and because the memory of what has already been shown goes with it,
+the next round announces postings still live on LinkedIn as if they were new.
+
+The button is unavailable while a round is running, and says so. A delete landing
+in the middle of a round would be half-undone by it: the round finishes by
+comparing what it found against the seen IDs you just deleted, decides all of it
+is new, and writes it straight back. Wait for the round to finish — a minute or
+two — and press it then.
 
 ### Notifications
 
@@ -313,13 +333,10 @@ the extension card in `chrome://extensions`.
 
 Real gaps in the current build, not misconfiguration:
 
-1. **Retention is not enforced yet.** The pruning logic exists and is tested, but
-   nothing runs it on a schedule. The Retention settings are saved and currently
-   have no effect, so stored records grow without bound. Nothing will break
-   because of it any time soon.
-2. **Nothing runs while Chrome is closed.** Not a bug, and not fixable — browser
-   extensions have no background process of their own. One deeper catch-up round
-   runs when Chrome starts again.
+**Nothing runs while Chrome is closed.** Not a bug, and not fixable — browser
+extensions have no background process of their own. One deeper catch-up round
+runs when Chrome starts again, and a daily clean-up whose turn came up while the
+browser was shut runs shortly after it comes back.
 
 ---
 

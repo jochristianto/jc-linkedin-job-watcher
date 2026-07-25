@@ -137,7 +137,8 @@ Six sections, in reading order: **Watches** (add/edit/toggle/remove, each row
 reading its own URL back as chips), **Filters** (company + title-keyword
 blocklists, hide-reposted), **Scanning** (manual-only, interval, jitter, pages,
 catch-up, quiet hours, and the Gentle/Heavy/Risky load estimate),
-**Retention** (the four PRD §7 day settings + hard cap), **Notifications**
+**Retention** (the four PRD §7 day settings + hard cap, and **Delete all job
+history** — the page's one destructive control, behind a confirm), **Notifications**
 (desktop toggle, Telegram enable/token/chat ID, **Send test message** with inline
 pass/fail — the fix for silent-failure in PRD §8), and **How this works** (prose,
 no fields).

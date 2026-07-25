@@ -143,12 +143,27 @@ Two records with two different lifetimes:
 
 Once you have opened or read a job and some time has passed, the full record is
 dropped and only the seen ID remains. That split is what keeps storage from
-growing without limit.
+growing without limit, and it only ever runs that way round: the memory outlives
+the record, never the reverse. A seen ID whose job is still in your list is held
+back even once it is older than the seen limit — dropping it first would let a
+posting still live on LinkedIn be announced to you a second time, and show you
+nothing new when you looked.
 
-> **Retention is not enforced yet.** The pruning logic exists and is tested
-> ([src/gc.ts](../src/gc.ts)) but nothing runs it on a schedule, so the Retention
-> settings are saved and currently have no effect. `unlimitedStorage` means this
-> will not break anything soon. See [Known limitations](../README.md#known-limitations).
+The pruning itself ([src/gc.ts](../src/gc.ts)) runs on its own daily alarm, never
+on the scan path — writing the seen map re-serialises the whole thing, which is
+not work to put in the middle of a round. A clean-up that finds a scan in progress
+skips its turn and collects the next day.
+
+Settings → **Retention** → **Delete all job history** does the same job by hand
+and without limits: every record and every seen ID, gone. It leaves your settings
+alone, and it cannot be undone — with the seen IDs gone, the next round treats
+everything still live on LinkedIn as new.
+
+It is unavailable while a round is running, for the same reason the clean-up
+skips one, only more so: the round ends by comparing what it found against the
+seen IDs, so deleting them underneath it would have it decide everything is new
+and write the lot straight back. The delete runs in the background worker and
+holds the scan lock while it works, so a round cannot start underneath it either.
 
 ---
 

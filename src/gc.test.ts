@@ -1,9 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { collectGarbage, type GcState } from "./gc.ts";
+import {
+  clearHistory,
+  collectGarbage,
+  historyCounts,
+  historyPhrase,
+  removedCounts,
+  type GcState,
+} from "./gc.ts";
 import type { Job } from "./types.ts";
 import type { SeenMap } from "./dedupe.ts";
-import type { JobsMap } from "./storage.ts";
+import type { JobsMap, UiState } from "./storage.ts";
 
 // The reaper for PRD §7 — pure (§14): no chrome.*, no clock read (the caller
 // passes `now`), so `node --test` proves each retention boundary with plain
@@ -117,6 +124,27 @@ test("dropping a job's full record keeps its seen entry — the memory not to re
   assert.ok("1" in keptSeen, "the seen id is kept so it is never re-alerted");
 });
 
+test("a seen id past seenDays is kept while its own job record is still stored", () => {
+  // The §7 lifetimes can cross: seenDays (15) is shorter than unopenedJobDays
+  // (30), so between the two an unopened record outlives the memory of it. Left
+  // alone, a posting still live on LinkedIn would come back as "new", fire a
+  // notification and a push — and then show nothing, because mergeJobs keeps the
+  // record already held. The memory always outlives the record it belongs to.
+  const jobs: JobsMap = { "1": job({ id: "1", opened: false, foundAt: NOW - 20 * DAY }) };
+  const seen: SeenMap = { "1": NOW - 20 * DAY }; // past seenDays
+  const { seen: keptSeen, jobs: keptJobs } = collectGarbage(state({ jobs, seen }), NOW);
+  assert.ok("1" in keptJobs, "the record is inside unopenedJobDays");
+  assert.ok("1" in keptSeen, "so its seen id is held back too");
+});
+
+test("a seen id past seenDays goes once its job record has gone with it", () => {
+  const jobs: JobsMap = { "1": job({ id: "1", opened: false, foundAt: NOW - 40 * DAY }) };
+  const seen: SeenMap = { "1": NOW - 20 * DAY };
+  const { seen: keptSeen, jobs: keptJobs } = collectGarbage(state({ jobs, seen }), NOW);
+  assert.ok(!("1" in keptJobs));
+  assert.ok(!("1" in keptSeen), "nothing is holding it back now");
+});
+
 // ── The hard cap: a backstop against a date bug defeating the age check ───────
 
 test("the hard cap trims to 80% of seenHardCap when breached, keeping the newest", () => {
@@ -159,4 +187,104 @@ test("collectGarbage does not mutate the input seen or jobs", () => {
   collectGarbage(state({ seen, jobs }), NOW);
   assert.ok("old" in seen, "input seen is untouched");
   assert.ok("old" in jobs, "input jobs is untouched");
+});
+
+// ── Counting what is stored ──────────────────────────────────────────────────
+
+test("historyCounts counts each key separately", () => {
+  const counts = historyCounts(
+    { a: NOW, b: NOW },
+    { a: job({ id: "a" }), b: job({ id: "b" }), c: job({ id: "c" }) },
+  );
+  assert.deepEqual(counts, { jobs: 3, seen: 2 });
+});
+
+test("historyCounts of empty storage is zero on both keys", () => {
+  assert.deepEqual(historyCounts({}, {}), { jobs: 0, seen: 0 });
+});
+
+// ── What a run actually removed: the daily alarm's write-or-skip decision ─────
+
+test("removedCounts is zero on both keys when nothing aged out", () => {
+  const before = state({
+    seen: { "1": NOW },
+    jobs: { "1": job({ foundAt: NOW }) },
+  });
+  assert.deepEqual(removedCounts(before, collectGarbage(before, NOW)), {
+    jobs: 0,
+    seen: 0,
+  });
+});
+
+test("removedCounts counts the dropped entries of each key separately", () => {
+  const before = state({
+    // Two ids past seenDays, one inside it.
+    seen: { a: NOW - 20 * DAY, b: NOW - 16 * DAY, c: NOW },
+    // One record past unopenedJobDays, one inside it.
+    jobs: {
+      a: job({ id: "a", foundAt: NOW - 40 * DAY }),
+      c: job({ id: "c", foundAt: NOW }),
+    },
+  });
+  assert.deepEqual(removedCounts(before, collectGarbage(before, NOW)), {
+    jobs: 1,
+    seen: 2,
+  });
+});
+
+test("removedCounts reports the hard-cap trim, which the age filter alone would have missed", () => {
+  const seen: SeenMap = {};
+  for (let i = 0; i < 150; i++) seen[`id${i}`] = NOW - i * 1000; // all within seenDays
+  const before = state({
+    seen,
+    retention: { seenDays: 15, openedJobDays: 7, unopenedJobDays: 30, seenHardCap: 100 },
+  });
+  assert.deepEqual(removedCounts(before, collectGarbage(before, NOW)), {
+    jobs: 0,
+    seen: 70, // 150 kept by age, trimmed to floor(100 * 0.8) = 80
+  });
+});
+
+// ── Delete all job history: retention taken to its limit, by hand ─────────────
+
+const ui: UiState = { activeWatchId: "w1", mode: "all", pendingApplyId: "1" };
+
+test("clearHistory empties both jobs and seen", () => {
+  const cleared = clearHistory(ui);
+  assert.deepEqual(cleared.jobs, {});
+  assert.deepEqual(cleared.seen, {});
+});
+
+test("clearHistory drops the pending apply question — the job it asks about is gone", () => {
+  assert.equal(clearHistory(ui).ui.pendingApplyId, null);
+});
+
+test("clearHistory keeps the rest of the view state — which chip and mode you left it on", () => {
+  const cleared = clearHistory(ui);
+  assert.equal(cleared.ui.activeWatchId, "w1");
+  assert.equal(cleared.ui.mode, "all");
+});
+
+test("clearHistory does not mutate the ui it is given", () => {
+  clearHistory(ui);
+  assert.equal(ui.pendingApplyId, "1");
+});
+
+// ── Saying how much there is to lose ─────────────────────────────────────────
+
+test("historyPhrase names both keys, pluralised, with thousands separated", () => {
+  assert.equal(historyPhrase({ jobs: 42, seen: 1203 }), "42 jobs and 1,203 seen ids");
+});
+
+test("historyPhrase reads as singular for one of each", () => {
+  assert.equal(historyPhrase({ jobs: 1, seen: 1 }), "1 job and 1 seen id");
+});
+
+test("historyPhrase leaves out a key that holds nothing rather than saying 0", () => {
+  assert.equal(historyPhrase({ jobs: 0, seen: 5 }), "5 seen ids");
+  assert.equal(historyPhrase({ jobs: 3, seen: 0 }), "3 jobs");
+});
+
+test("historyPhrase says nothing when there is nothing", () => {
+  assert.equal(historyPhrase({ jobs: 0, seen: 0 }), "nothing");
 });

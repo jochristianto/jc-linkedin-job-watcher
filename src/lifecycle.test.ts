@@ -6,6 +6,7 @@ import {
   requestCatchUp,
   beginScan,
   endScan,
+  holdLock,
   trackTab,
   untrackTab,
   recoverStaleLock,
@@ -69,6 +70,34 @@ test("beginScan starts every cycle with a fresh, empty tab list", () => {
   const dirty = state({ openTabIds: [7, 8], pendingCatchUp: true });
   const { state: next } = beginScan(dirty, 1_000, 4, 1);
   assert.deepEqual(next.openTabIds, []);
+});
+
+// ── holding the lock for something that is not a scan ───────────────────────
+
+test("holdLock takes the lock", () => {
+  const held = holdLock(state(), 1_000);
+  assert.equal(held.isScanning, true);
+  assert.equal(held.startedAt, 1_000);
+});
+
+test("holdLock does not consume a pending catch-up — it is not a cycle", () => {
+  // The delete-all-history path holds the lock for a moment to keep a cycle out
+  // (§7). If that swallowed the flag, the deep scan owed after a restart would
+  // silently become a shallow one.
+  const held = holdLock(requestCatchUp(state()), 1_000);
+  assert.equal(held.pendingCatchUp, true);
+  assert.equal(beginScan(endScan(held), 2_000, 4, 1).pages, 4);
+});
+
+test("holdLock leaves the tab list alone — it opens none and orphans none", () => {
+  const held = holdLock(state({ openTabIds: [7] }), 1_000);
+  assert.deepEqual(held.openTabIds, [7]);
+});
+
+test("endScan releases a held lock the same way it releases a cycle's", () => {
+  const released = endScan(holdLock(state(), 1_000));
+  assert.equal(released.isScanning, false);
+  assert.equal(released.startedAt, null);
 });
 
 test("endScan releases the lock and clears the tab list", () => {
