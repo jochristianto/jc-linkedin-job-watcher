@@ -8,7 +8,7 @@ import {
   parseSettingsForm,
   settingsToForm,
   applyPushPrefill,
-  hasUnsavedChanges,
+  changedFormKeys,
   type OptionsFormValues,
 } from "./options-form.ts";
 import { DEFAULT_SETTINGS, type Settings } from "./types.ts";
@@ -31,6 +31,7 @@ function validForm(overrides: Partial<OptionsFormValues> = {}): OptionsFormValue
     quietHoursEnabled: true,
     quietStart: "23:00",
     quietEnd: "07:00",
+    notifyDesktop: true,
     seenDays: "15",
     openedJobDays: "7",
     unopenedJobDays: "30",
@@ -176,11 +177,11 @@ test("parseSettingsForm reports every bad field at once, not just the first", ()
 
 // ── unsaved edits (what Reset would throw away) ──────────────────────────────
 
-test("hasUnsavedChanges: a form straight out of storage has nothing to discard", () => {
-  assert.equal(hasUnsavedChanges(settingsToForm(DEFAULT_SETTINGS), DEFAULT_SETTINGS), false);
+test("changedFormKeys: a form straight out of storage has nothing to discard", () => {
+  assert.deepEqual(changedFormKeys(settingsToForm(DEFAULT_SETTINGS), DEFAULT_SETTINGS), []);
 });
 
-test("hasUnsavedChanges spots an edit in every kind of field", () => {
+test("changedFormKeys spots an edit in every kind of field", () => {
   const stored = settingsToForm(DEFAULT_SETTINGS);
   const edits: Partial<OptionsFormValues>[] = [
     { intervalMinutes: "45" }, // a number typed over
@@ -192,11 +193,15 @@ test("hasUnsavedChanges spots an edit in every kind of field", () => {
     { watches: [{ id: "w1", name: "Indonesia", url: "https://x", enabled: true }] },
   ];
   for (const edit of edits) {
-    assert.equal(hasUnsavedChanges({ ...stored, ...edit }, DEFAULT_SETTINGS), true, JSON.stringify(edit));
+    assert.deepEqual(
+      changedFormKeys({ ...stored, ...edit }, DEFAULT_SETTINGS),
+      Object.keys(edit),
+      JSON.stringify(edit),
+    );
   }
 });
 
-test("hasUnsavedChanges compares list contents, not identity", () => {
+test("changedFormKeys compares list contents, not identity", () => {
   const saved: Settings = {
     ...DEFAULT_SETTINGS,
     watches: [{ id: "w1", name: "Indonesia", url: "https://x", enabled: true }],
@@ -211,32 +216,34 @@ test("hasUnsavedChanges compares list contents, not identity", () => {
     blockedCompanies: [{ display: "Acme", normalized: "acme" }],
     blockedTitleKeywords: ["Intern"],
   };
-  assert.equal(hasUnsavedChanges(rebuilt, saved), false);
+  assert.deepEqual(changedFormKeys(rebuilt, saved), []);
 
   // One field of one record differs, and the lengths still match.
   const toggled = { ...rebuilt, watches: [{ ...rebuilt.watches[0]!, enabled: false }] };
-  assert.equal(hasUnsavedChanges(toggled, saved), true);
+  assert.deepEqual(changedFormKeys(toggled, saved), ["watches"]);
 
   // A removed entry, and an added one.
-  assert.equal(hasUnsavedChanges({ ...rebuilt, blockedTitleKeywords: [] }, saved), true);
-  assert.equal(
-    hasUnsavedChanges({ ...rebuilt, blockedTitleKeywords: ["Intern", "Junior"] }, saved),
-    true,
+  assert.deepEqual(changedFormKeys({ ...rebuilt, blockedTitleKeywords: [] }, saved), [
+    "blockedTitleKeywords",
+  ]);
+  assert.deepEqual(
+    changedFormKeys({ ...rebuilt, blockedTitleKeywords: ["Intern", "Junior"] }, saved),
+    ["blockedTitleKeywords"],
   );
 });
 
-test("hasUnsavedChanges counts a text-only edit that would parse to the same number", () => {
+test("changedFormKeys counts a text-only edit that would parse to the same number", () => {
   const stored = settingsToForm(DEFAULT_SETTINGS);
-  assert.equal(
-    hasUnsavedChanges({ ...stored, intervalMinutes: `0${stored.intervalMinutes}` }, DEFAULT_SETTINGS),
-    true,
+  assert.deepEqual(
+    changedFormKeys({ ...stored, intervalMinutes: `0${stored.intervalMinutes}` }, DEFAULT_SETTINGS),
+    ["intervalMinutes"],
   );
 });
 
-test("hasUnsavedChanges: a .env prefill is an unsaved edit", () => {
+test("changedFormKeys: a .env prefill is an unsaved edit", () => {
   const stored = settingsToForm(DEFAULT_SETTINGS);
   const seeded = applyPushPrefill(stored, { botToken: "123:ABC", chatId: "999" });
-  assert.equal(hasUnsavedChanges(seeded, DEFAULT_SETTINGS), true);
+  assert.deepEqual(changedFormKeys(seeded, DEFAULT_SETTINGS), ["pushBotToken", "pushChatId"]);
 });
 
 // ── round-trip ───────────────────────────────────────────────────────────────

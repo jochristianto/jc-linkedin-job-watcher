@@ -1,17 +1,27 @@
 // Options page — PRD §11 step 7. The §14 side-effect wrapper for the settings
-// form: it reads/writes the `settings` storage key, renders the five section
-// cards (Searches, Filters, Scanning, Telegram push, Retention) beside the
-// how-it-works explainer, and wires every control.
+// form: it reads/writes the `settings` storage key, renders the six sections
+// (Watches, Filters, Scanning, Retention, Notifications, How this works) beside
+// the rail that navigates them, and wires every control.
 //
-// Every DECISION lives tested in options-form.ts — validation, the quiet-hours
-// time mapping, and the §6 normalize-on-write rule. This file only moves values
-// between React state and that pure layer, so it is not unit-tested (the pattern
-// the list view follows too). Save is explicit; a form that fails validation
-// shows its errors inline and writes nothing.
+// Every DECISION lives tested elsewhere — validation, the quiet-hours time
+// mapping and the §6 normalize-on-write rule in options-form.ts; the derived
+// values the redesign added (the URL chips, the header summary, the per-section
+// dirty dots, the daily load estimate) in settings-view.ts. This file only moves
+// values between React state and those pure layers, so it is not unit-tested (the
+// pattern the list view follows too). Save is explicit; a form that fails
+// validation shows its errors inline and writes nothing.
+//
+// The shell is the list view's: header pinned, footer pinned, and only the
+// settings between them scroll. On a page this long that is the difference
+// between Save being where you left it and Save being something you scroll to
+// find — and the header's summary line stays readable while you change the very
+// numbers it describes.
 
-import { useEffect, useState } from "react";
+import { Clock, Eye, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { HowItWorks } from "@/components/how-it-works.tsx";
+import { SettingsNav } from "@/components/settings-nav.tsx";
 import { TagInput } from "@/components/tag-input.tsx";
 import { WatchList } from "@/components/watch-list.tsx";
 import {
@@ -25,24 +35,36 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { HealthBanner } from "@/components/health-banner.tsx";
 import { cn } from "@/lib/utils";
 import { OK_PUSH_HEALTH, PUSH_FAILING_MESSAGE } from "@/health.ts";
 import {
   applyPushPrefill,
-  hasUnsavedChanges,
+  changedFormKeys,
   makeBlockedCompany,
   parseSettingsForm,
-  parseWatchInput,
   settingsToForm,
   type FormErrors,
   type OptionsFormValues,
 } from "@/options-form.ts";
+import {
+  dirtySections,
+  estimateLoad,
+  headerSummary,
+  loadEstimateLine,
+  SECTION_LABELS,
+  SETTINGS_SECTIONS,
+  unsavedLabel,
+  type LoadTier,
+  type SettingsSection,
+} from "@/settings-view.ts";
 import { sendPush, type PushJob } from "@/push.ts";
 import * as storage from "@/storage.ts";
 import type { Settings } from "@/types.ts";
@@ -59,9 +81,77 @@ const TEST_PUSH_JOBS: PushJob[] = [
   },
 ];
 
+/**
+ * Shut the settings tab the header's Close button sits in.
+ *
+ * `window.close()` alone is not enough: Chrome refuses it for a tab the script
+ * did not open itself, and the options page is opened by the browser. So the tab
+ * asks for its own id and removes itself, and `window.close()` stays only as the
+ * fallback for a context that has no tab of its own to remove.
+ */
+async function closeSettingsTab(): Promise<void> {
+  const tab = await chrome.tabs.getCurrent();
+  if (tab?.id !== undefined) await chrome.tabs.remove(tab.id);
+  else window.close();
+}
+
 type Status = { message: string; kind: "ok" | "err" | "" };
 
 const NO_STATUS: Status = { message: "", kind: "" };
+
+/** How far above a section's top the scroll stops when the rail jumps to it, and
+ *  how far into the viewport the spy looks for "the section you are reading". */
+const SCROLL_MARGIN = 16;
+const SPY_OFFSET = 80;
+
+/** The rendered card for a section, found by the id {@link Section} gives it.
+ *  Read only from the scroll handler and the rail, both of which run long after
+ *  the page has mounted. */
+const sectionEl = (id: SettingsSection): HTMLElement | null =>
+  document.getElementById(`section-${id}`);
+
+/**
+ * One section card: the title the rail names it by, an optional badge, the
+ * paragraph saying what the section is for, and the controls.
+ *
+ * Defined at module level rather than inside `OptionsPage` — a component
+ * declared during render is a new type on every render, which would tear down
+ * and rebuild every field in it on each keystroke and take the caret with it.
+ */
+function Section({
+  id,
+  badge,
+  description,
+  children,
+}: {
+  id: SettingsSection;
+  badge?: ReactNode;
+  description: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <Card id={`section-${id}`} className="gap-4 py-5">
+      <CardHeader className="gap-1.5 px-5">
+        <CardTitle className="flex flex-wrap items-center gap-2 text-[15px] tracking-tight">
+          {SECTION_LABELS[id]}
+          {badge}
+        </CardTitle>
+        <CardDescription className="text-[12.5px] leading-relaxed text-pretty">
+          {description}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="px-5">{children}</CardContent>
+    </Card>
+  );
+}
+
+/** The badge tone for each load tier — green for a pace that looks like a person
+ *  browsing, amber past that, red where it stops being defensible (PRD §12). */
+const LOAD_TIER_STYLE: Record<LoadTier, { label: string; className: string }> = {
+  gentle: { label: "Gentle", className: "border-ok/30 bg-ok/10 text-ok" },
+  heavy: { label: "Heavy", className: "border-warn/30 bg-warn-weak/70 text-warn" },
+  risky: { label: "Risky", className: "border-destructive/30 bg-destructive-weak/70 text-destructive" },
+};
 
 export function OptionsPage() {
   // `base` holds the fields the page doesn't edit (pacing/backoff/…) so a save
@@ -73,8 +163,13 @@ export function OptionsPage() {
   const [pushWarn, setPushWarn] = useState(false);
   const [saveStatus, setSaveStatus] = useState<Status>(NO_STATUS);
   const [testStatus, setTestStatus] = useState<Status>(NO_STATUS);
-  const [newWatch, setNewWatch] = useState({ name: "", url: "" });
-  const [newWatchError, setNewWatchError] = useState("");
+  const [showToken, setShowToken] = useState(false);
+  const [section, setSection] = useState<SettingsSection>("watches");
+
+  // The scroll container. The sections themselves are found by id rather than by
+  // ref: they are read only from the two event handlers below, and a ref per
+  // section would mean a fresh ref callback on every keystroke for no gain.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -87,21 +182,26 @@ export function OptionsPage() {
       setBase(settings);
       setForm(seeded);
       setPrefilled(seeded !== stored);
-      // The §16.7 soft warning, read once at load: shown in the Telegram card when
-      // push has failed the threshold times in a row. A good Send-test resets it in
-      // storage; not repainting mid-session (that would drop unsaved edits) means
-      // the banner clears on the next open, which is enough.
+      // The §16.7 soft warning, read once at load: shown in the Notifications
+      // section when push has failed the threshold times in a row. A good
+      // Send-test resets it in storage; not repainting mid-session (that would
+      // drop unsaved edits) means the banner clears on the next open, which is
+      // enough.
       setPushWarn((await storage.get("pushHealth")).warn);
     })();
   }, []);
 
+  // Which fields differ from storage, and so: whether Reset has anything to throw
+  // away, what the header badge counts, and which rail entries wear a dot.
+  const changed = useMemo(() => (form && base ? changedFormKeys(form, base) : []), [form, base]);
+  const dirty = changed.length > 0;
+  const dirtyIn = useMemo(() => dirtySections(changed), [changed]);
+
+  const estimate = useMemo(() => (form ? estimateLoad(form) : null), [form]);
+
   if (!form || !base) return null;
 
-  // What Reset would throw away, recomputed on every render: it drives both the
-  // button's enabled state and whether the confirmation is worth asking for.
-  const dirty = hasUnsavedChanges(form, base);
-
-  const set =<K extends keyof OptionsFormValues>(key: K, value: OptionsFormValues[K]): void =>
+  const set = <K extends keyof OptionsFormValues>(key: K, value: OptionsFormValues[K]): void =>
     setForm({ ...form, [key]: value });
 
   async function onSave(): Promise<void> {
@@ -123,7 +223,7 @@ export function OptionsPage() {
     // Any .env prefill is now real stored state, so the "not saved yet" notice
     // has served its purpose and should not reappear.
     setPrefilled(false);
-    setSaveStatus({ message: "Saved.", kind: "ok" });
+    setSaveStatus({ message: "Saved — the next round uses these settings.", kind: "ok" });
   }
 
   /** Only reached through the confirmation dialog, and only when there is
@@ -154,7 +254,7 @@ export function OptionsPage() {
       setTestStatus({ message: "Enter a bot token and chat id first.", kind: "err" });
       return;
     }
-    setTestStatus({ message: "Sending…", kind: "" });
+    setTestStatus({ message: "Contacting api.telegram.org…", kind: "" });
     if (await sendPush(TEST_PUSH_JOBS, cfg)) {
       setTestStatus({ message: "Sent — check your phone.", kind: "ok" });
       await storage.set("pushHealth", OK_PUSH_HEALTH); // one good send resets §16.7
@@ -167,24 +267,37 @@ export function OptionsPage() {
     }
   }
 
-  function onAddSearch(): void {
-    const parsed = parseWatchInput(newWatch.name, newWatch.url);
-    if (!parsed.ok) {
-      setNewWatchError(parsed.errors.name ?? parsed.errors.url ?? "Invalid search.");
-      return;
-    }
-    setNewWatchError("");
-    set("watches", [
-      ...form!.watches,
-      { id: crypto.randomUUID(), name: parsed.value.name, url: parsed.value.url, enabled: true },
-    ]);
-    setNewWatch({ name: "", url: "" });
+  /** Jump the scroll container to a section. The rail highlights it immediately
+   *  rather than waiting for the scroll handler, so a click on a section already
+   *  in view still moves the marker. */
+  function goTo(next: SettingsSection): void {
+    setSection(next);
+    const el = sectionEl(next);
+    const container = scrollRef.current;
+    if (el && container) container.scrollTop = Math.max(0, el.offsetTop - SCROLL_MARGIN);
   }
 
-  /** One whole-number field, with its inline error. */
-  const numField = (key: keyof OptionsFormValues, label: string, min: number) => (
-    <div className="flex flex-1 flex-col gap-1.5">
-      <Label htmlFor={key}>{label}</Label>
+  /** Which section is being read: the last one whose top has passed a line a
+   *  little below the header. Cheap enough to run on every scroll event — six
+   *  `offsetTop` reads — and it only calls `setSection` when the answer changes. */
+  function onScroll(): void {
+    const container = scrollRef.current;
+    if (!container) return;
+    const line = container.scrollTop + SPY_OFFSET;
+    let current: SettingsSection = SETTINGS_SECTIONS[0];
+    for (const key of SETTINGS_SECTIONS) {
+      const el = sectionEl(key);
+      if (el && el.offsetTop <= line) current = key;
+    }
+    setSection((prev) => (prev === current ? prev : current));
+  }
+
+  /** One whole-number field, with its hint and its inline error. */
+  const numField = (key: keyof OptionsFormValues, label: string, min: number, hint: string) => (
+    <div className="flex flex-col gap-1.5">
+      <Label htmlFor={key} className="text-xs">
+        {label}
+      </Label>
       <Input
         id={key}
         type="number"
@@ -193,92 +306,117 @@ export function OptionsPage() {
         aria-invalid={Boolean(errors[key])}
         onChange={(e) => set(key, e.target.value as OptionsFormValues[typeof key])}
       />
-      {errors[key] && (
-        <p data-err={key} className="text-xs text-destructive">
+      {errors[key] ? (
+        <p data-err={key} className="text-[11.5px] text-destructive">
           {errors[key]}
         </p>
+      ) : (
+        <span className="text-[11.5px] leading-snug text-muted-foreground">{hint}</span>
       )}
     </div>
   );
 
+  const activeWatches = form.watches.filter((w) => w.enabled).length;
+  const tier = estimate ? LOAD_TIER_STYLE[estimate.tier] : null;
+
   return (
-    <div>
-      {/* The title sticks too, mirroring the save bar: the page is a long scroll
-          and the two edges should stay put rather than one holding and the other
-          sliding away. Same opaque treatment and full-width gutters, with the
-          shadow cast downwards. */}
-      <div className="sticky top-0 border-b bg-background shadow-[0_4px_12px_-6px_rgb(0_0_0/0.15)]">
-        <div className="flex w-full items-center px-4 py-3">
-          <h1 className="text-xl font-semibold">LinkedIn Job Watcher — Settings</h1>
+    <div className="flex h-screen flex-col overflow-hidden bg-background">
+      {/* Pinned. It carries the one-line summary of the whole configuration, so
+          it is worth the two lines it costs at every scroll position: change the
+          interval down the page and this is what tells you what you just did. */}
+      <header className="flex shrink-0 items-center gap-3.5 border-b bg-background px-4 py-2.5 md:px-6">
+        {/* The app mark: the watching eye, the one thing this extension does. */}
+        <span
+          aria-hidden="true"
+          className="flex size-6.5 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground"
+        >
+          <Eye className="size-3.5" />
+        </span>
+
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-[15px] font-semibold tracking-tight whitespace-nowrap">
+              LinkedIn Job Watcher{" "}
+              <span className="font-medium text-muted-foreground">— Settings</span>
+            </h1>
+            {dirty && (
+              <Badge
+                id="unsaved-badge"
+                variant="outline"
+                className="border-warn/30 bg-warn-weak/70 px-2 py-0 text-[10.5px] text-warn"
+              >
+                {unsavedLabel(changed.length)}
+              </Badge>
+            )}
+          </div>
+          {/* Derived from the form rather than from storage, so it describes what
+              you are about to save, not what you saved last. */}
+          <span id="header-summary" className="truncate text-xs text-muted-foreground">
+            {headerSummary(form)}
+          </span>
         </div>
-      </div>
 
-      <div className="flex w-full flex-col gap-4 px-4 py-6">
-        {/* Full window width on a twelve-column grid: this only ever opens on a
-            desktop browser, and a single centred column left most of it empty
-            while the page ran several screens deep. The settings take nine
-            columns, the explainer sits alongside in three — it is reference text
-            you read while changing a knob, not something to scroll past first.
-            Below lg the two stack, settings first. */}
-        <div className="grid grid-cols-12 items-start gap-4">
-          <div className="col-span-12 grid grid-cols-1 items-start gap-4 lg:col-span-9 xl:grid-cols-2">
-            <Card className="xl:col-span-2">
-              <CardHeader>
-                <CardTitle>Searches</CardTitle>
-                <CardDescription>
-                  Saved LinkedIn job-search URLs with your filters already applied. Each runs on the
-                  same cycle; toggle any off to pause it.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-4">
-                <WatchList watches={form.watches} onChange={(w) => set("watches", w)} />
-                <div className="flex flex-col gap-3 border-t pt-4">
-                  <div className="flex flex-col gap-3 sm:flex-row">
-                    <div className="flex flex-col gap-1.5 sm:w-48">
-                      <Label htmlFor="new-name">Nickname</Label>
-                      <Input
-                        id="new-name"
-                        value={newWatch.name}
-                        placeholder="e.g. Singapore"
-                        onChange={(e) => setNewWatch({ ...newWatch, name: e.target.value })}
-                      />
-                    </div>
-                    <div className="flex flex-1 flex-col gap-1.5">
-                      <Label htmlFor="new-url">Search URL</Label>
-                      <Input
-                        id="new-url"
-                        value={newWatch.url}
-                        placeholder="https://www.linkedin.com/jobs/search/?…"
-                        onChange={(e) => setNewWatch({ ...newWatch, url: e.target.value })}
-                      />
-                    </div>
-                  </div>
-                  {newWatchError && (
-                    <p id="new-search-error" className="text-xs text-destructive">
-                      {newWatchError}
-                    </p>
-                  )}
-                  <Button type="button" id="add-search" onClick={onAddSearch} className="self-start">
-                    Add search
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+        {/* The way out: settings open in their own tab, so the way out is to shut
+            it rather than to travel somewhere else. */}
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          id="close-settings"
+          onClick={() => void closeSettingsTab()}
+          className="shrink-0"
+        >
+          <X className="size-3.5" />
+          Close
+        </Button>
+      </header>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Filters</CardTitle>
-                <CardDescription>Company names match partially, case-insensitive.</CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-5">
+      {/* The only thing that scrolls: one scrollbar, at the edge of the window,
+          for the whole body. `relative` because the spy measures each section's
+          `offsetTop` against this box. A shade darker than the header and footer,
+          so the cards read as things laid on a surface rather than as strips of
+          the page — the same treatment the job list uses. The rail scrolls with
+          it in markup only — it is stuck from the first pixel (see
+          settings-nav.tsx), so it holds still while the settings move past it. */}
+      <div
+        ref={scrollRef}
+        onScroll={onScroll}
+        className="relative flex-1 overflow-y-auto bg-[color-mix(in_oklab,var(--muted)_45%,var(--background))]"
+      >
+        <div className="mx-auto flex w-full max-w-275 flex-wrap items-start gap-4 p-4 md:p-6">
+          <SettingsNav active={section} dirty={dirtyIn} onSelect={goTo} />
+
+          <main className="flex min-w-0 flex-1 basis-115 flex-col gap-3.5">
+            <Section
+              id="watches"
+              badge={
+                <Badge variant="secondary" className="px-2 py-0 text-[10.5px] font-medium">
+                  {activeWatches} of {form.watches.length} active
+                </Badge>
+              }
+              description="A watch is a saved LinkedIn search with your filters already applied. Every watch runs on the same cycle — switch one off to pause it without losing the URL."
+            >
+              <WatchList watches={form.watches} onChange={(w) => set("watches", w)} />
+            </Section>
+
+            <Section
+              id="filters"
+              description="Anything matched here never reaches the list or the notification count. Matching is partial and case-insensitive, so “hire” also blocks “Quik Hire Staffing”."
+            >
+              <div className="flex flex-col gap-5">
                 <TagInput
                   id="company"
                   label="Blocked companies"
                   placeholder="Add a company to block, then Enter…"
                   values={form.blockedCompanies.map((c) => c.display)}
-                  onAdd={(v) => set("blockedCompanies", [...form.blockedCompanies, makeBlockedCompany(v)])}
+                  onAdd={(v) =>
+                    set("blockedCompanies", [...form.blockedCompanies, makeBlockedCompany(v)])
+                  }
                   onRemove={(i) =>
-                    set("blockedCompanies", form.blockedCompanies.filter((_, idx) => idx !== i))
+                    set(
+                      "blockedCompanies",
+                      form.blockedCompanies.filter((_, idx) => idx !== i),
+                    )
                   }
                 />
                 <TagInput
@@ -288,87 +426,187 @@ export function OptionsPage() {
                   values={form.blockedTitleKeywords}
                   onAdd={(v) => set("blockedTitleKeywords", [...form.blockedTitleKeywords, v])}
                   onRemove={(i) =>
-                    set("blockedTitleKeywords", form.blockedTitleKeywords.filter((_, idx) => idx !== i))
+                    set(
+                      "blockedTitleKeywords",
+                      form.blockedTitleKeywords.filter((_, idx) => idx !== i),
+                    )
                   }
                 />
                 <ToggleRow
                   id="hide-reposted"
                   label="Hide jobs marked “Reposted”"
+                  description="LinkedIn re-lists old postings; they arrive as new but rarely are."
                   checked={form.hideReposted}
                   onChange={(v) => set("hideReposted", v)}
                 />
-              </CardContent>
-            </Card>
+              </div>
+            </Section>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Scanning</CardTitle>
-                <CardDescription>
-                  Lower the depth if you don't need it — every page is a real load against LinkedIn
-                  (PRD §12).
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-4">
-                <div className="flex flex-col gap-4 sm:flex-row">
-                  {numField("intervalMinutes", "Interval (minutes)", 1)}
-                  {numField("jitterMinutes", "Jitter (± minutes)", 0)}
+            <Section
+              id="scanning"
+              description="Every page is a real load against LinkedIn, so the shipped depth is deliberately shallow. Raise it only if you find you are actually missing postings."
+            >
+              <div className="flex flex-col gap-4">
+                <div className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
+                  {numField(
+                    "intervalMinutes",
+                    "Interval (minutes)",
+                    1,
+                    "Gap between rounds. Under 15 gets noticed.",
+                  )}
+                  {numField(
+                    "jitterMinutes",
+                    "Jitter (± minutes)",
+                    0,
+                    "Random wobble, so rounds are not clockwork. 60 ± 30 lands anywhere in 30–90 min.",
+                  )}
+                  {numField(
+                    "pagesPerScan",
+                    "Pages per scan",
+                    1,
+                    "1 page ≈ 25 postings, newest first.",
+                  )}
+                  {numField(
+                    "catchUpPages",
+                    "Catch-up pages",
+                    1,
+                    "Deeper first round after Chrome starts.",
+                  )}
                 </div>
-                <div className="flex flex-col gap-4 sm:flex-row">
-                  {numField("pagesPerScan", "Pages per scan", 1)}
-                  {numField("catchUpPages", "Catch-up pages (on startup)", 1)}
-                </div>
+
+                {/* The four numbers above have a combined effect nothing else on
+                    the page states: halving the interval and adding a page is a
+                    fourfold increase. This is that, as one figure. */}
+                {estimate && tier && (
+                  <div
+                    id="load-estimate"
+                    className="flex flex-wrap items-center gap-2.5 rounded-xl border bg-muted/50 px-3 py-2.5"
+                  >
+                    <Badge
+                      variant="outline"
+                      className={cn("px-2 py-0 text-[10.5px]", tier.className)}
+                    >
+                      {tier.label}
+                    </Badge>
+                    <span className="min-w-0 flex-1 basis-60 text-[12.5px] leading-snug">
+                      {loadEstimateLine(estimate)}
+                    </span>
+                  </div>
+                )}
+
+                <Separator />
+
                 <ToggleRow
                   id="quiet-enabled"
-                  label="Pause scanning during quiet hours"
+                  label="Pause during quiet hours"
+                  description={
+                    form.quietHoursEnabled
+                      ? "No rounds between these times; one catch-up round runs when they end."
+                      : "Rounds keep running all night, which is the least human-looking pattern."
+                  }
                   checked={form.quietHoursEnabled}
                   onChange={(v) => set("quietHoursEnabled", v)}
-                />
-                <div className="flex flex-col gap-4 sm:flex-row">
-                  <div className="flex flex-1 flex-col gap-1.5">
-                    <Label htmlFor="quietStart">Quiet hours start</Label>
-                    <Input
-                      id="quietStart"
-                      type="time"
-                      value={form.quietStart}
-                      aria-invalid={Boolean(errors.quietStart)}
-                      onChange={(e) => set("quietStart", e.target.value)}
-                    />
-                    {errors.quietStart && (
-                      <p data-err="quietStart" className="text-xs text-destructive">
-                        {errors.quietStart}
-                      </p>
+                >
+                  {/* Dimmed and inert rather than hidden when quiet hours are off:
+                      the times you set are still the times you would go back to,
+                      and a control that vanishes takes its value with it. */}
+                  <div
+                    className={cn(
+                      "mt-2.5 flex flex-wrap gap-3",
+                      !form.quietHoursEnabled && "pointer-events-none opacity-50",
                     )}
+                  >
+                    <div className="flex w-37 flex-col gap-1.5">
+                      <Label htmlFor="quietStart" className="text-xs">
+                        Starts
+                      </Label>
+                      <Input
+                        id="quietStart"
+                        type="time"
+                        value={form.quietStart}
+                        disabled={!form.quietHoursEnabled}
+                        aria-invalid={Boolean(errors.quietStart)}
+                        onChange={(e) => set("quietStart", e.target.value)}
+                      />
+                      {errors.quietStart && (
+                        <p data-err="quietStart" className="text-[11.5px] text-destructive">
+                          {errors.quietStart}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex w-37 flex-col gap-1.5">
+                      <Label htmlFor="quietEnd" className="text-xs">
+                        Ends
+                      </Label>
+                      <Input
+                        id="quietEnd"
+                        type="time"
+                        value={form.quietEnd}
+                        disabled={!form.quietHoursEnabled}
+                        aria-invalid={Boolean(errors.quietEnd)}
+                        onChange={(e) => set("quietEnd", e.target.value)}
+                      />
+                      {errors.quietEnd && (
+                        <p data-err="quietEnd" className="text-[11.5px] text-destructive">
+                          {errors.quietEnd}
+                        </p>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex flex-1 flex-col gap-1.5">
-                    <Label htmlFor="quietEnd">Quiet hours end</Label>
-                    <Input
-                      id="quietEnd"
-                      type="time"
-                      value={form.quietEnd}
-                      aria-invalid={Boolean(errors.quietEnd)}
-                      onChange={(e) => set("quietEnd", e.target.value)}
-                    />
-                    {errors.quietEnd && (
-                      <p data-err="quietEnd" className="text-xs text-destructive">
-                        {errors.quietEnd}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+                </ToggleRow>
+              </div>
+            </Section>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Telegram push</CardTitle>
-                <CardDescription>
-                  Optional: also deliver new jobs to your phone via a Telegram bot, additive to the
-                  desktop notification (PRD §8). Nothing here is stored anywhere but this browser —
-                  never committed. Use <b>Send test message</b> to confirm the credentials before
-                  trusting it.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-4">
+            <Section
+              id="retention"
+              description="Seen ids are what stop a job coming back a second time — keep them longer than the age of the postings your searches return."
+            >
+              <div className="flex flex-col gap-3.5">
+                <div className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
+                  {numField(
+                    "seenDays",
+                    "Seen ids (days)",
+                    1,
+                    "How long a job stays “already shown”.",
+                  )}
+                  {numField(
+                    "openedJobDays",
+                    "Opened jobs (days)",
+                    1,
+                    "Rows you opened or ticked off.",
+                  )}
+                  {numField(
+                    "unopenedJobDays",
+                    "Unopened jobs (days)",
+                    1,
+                    "Rows you never touched.",
+                  )}
+                  {numField(
+                    "seenHardCap",
+                    "Seen hard cap",
+                    1,
+                    "A backstop; past it the oldest ids drop first.",
+                  )}
+                </div>
+                {/* Said out loud because the alternative is a section of controls
+                    that quietly does nothing — the collector is written and tested
+                    (gc.ts) but nothing calls it yet, so these values are stored and
+                    not yet acted on. See the README's known limitations. */}
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Clock aria-hidden="true" className="size-3.5 shrink-0" />
+                  <span>
+                    The daily clean-up is not wired up yet — these are saved, and take effect as
+                    soon as it is.
+                  </span>
+                </div>
+              </div>
+            </Section>
+
+            <Section
+              id="notifications"
+              description="One notification per round that found something — never one per job. The toolbar count always updates, whatever you switch off here."
+            >
+              <div className="flex flex-col gap-4">
                 {pushWarn && (
                   <HealthBanner
                     message={PUSH_FAILING_MESSAGE}
@@ -383,92 +621,118 @@ export function OptionsPage() {
                     className="rounded-md border"
                   />
                 )}
+
+                <ToggleRow
+                  id="notify-desktop"
+                  label="Desktop notification"
+                  description="Clicking it opens this extension's own list, not LinkedIn. Off silences the pop-up only — the toolbar count still moves."
+                  checked={form.notifyDesktop}
+                  onChange={(v) => set("notifyDesktop", v)}
+                />
+
+                <Separator />
+
                 <ToggleRow
                   id="push-enabled"
-                  label="Send new jobs to Telegram"
+                  label="Also push to Telegram"
+                  description="For when you are away from this machine. The token and chat id stay in this browser — they are only ever sent to Telegram, and never committed."
                   checked={form.pushEnabled}
                   onChange={(v) => set("pushEnabled", v)}
-                />
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="pushBotToken">Bot token</Label>
-                  <Input
-                    id="pushBotToken"
-                    type="password"
-                    autoComplete="off"
-                    value={form.pushBotToken}
-                    placeholder="123456:ABC-DEF…"
-                    onChange={(e) => set("pushBotToken", e.target.value)}
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="pushChatId">Chat id</Label>
-                  <Input
-                    id="pushChatId"
-                    type="text"
-                    autoComplete="off"
-                    value={form.pushChatId}
-                    placeholder="987654321"
-                    onChange={(e) => set("pushChatId", e.target.value)}
-                  />
-                </div>
-                <div className="flex items-center gap-3">
-                  <Button type="button" variant="outline" id="send-test" onClick={onSendTest}>
-                    Send test message
-                  </Button>
-                  <StatusText id="test-status" status={testStatus} />
-                </div>
-              </CardContent>
-            </Card>
+                >
+                  {/* The credentials stay reachable with the toggle off: Send test
+                      message works either way, so you can prove a token before
+                      you switch the pushes on. */}
+                  <div className="mt-3 flex flex-wrap items-end gap-3">
+                    <div className="flex min-w-0 flex-1 basis-65 flex-col gap-1.5">
+                      <Label htmlFor="pushBotToken" className="text-xs">
+                        Bot token
+                      </Label>
+                      <div className="flex items-center gap-1.5">
+                        <Input
+                          id="pushBotToken"
+                          type={showToken ? "text" : "password"}
+                          autoComplete="off"
+                          value={form.pushBotToken}
+                          placeholder="123456:ABC-DEF…"
+                          onChange={(e) => set("pushBotToken", e.target.value)}
+                        />
+                        {/* A token is long, pasted, and impossible to check by
+                            eye through dots — so it can be looked at. */}
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          id="toggle-token"
+                          aria-pressed={showToken}
+                          onClick={() => setShowToken((v) => !v)}
+                          className="shrink-0 text-muted-foreground"
+                        >
+                          {showToken ? "Hide" : "Show"}
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="flex w-44 flex-col gap-1.5">
+                      <Label htmlFor="pushChatId" className="text-xs">
+                        Chat id
+                      </Label>
+                      <Input
+                        id="pushChatId"
+                        type="text"
+                        autoComplete="off"
+                        value={form.pushChatId}
+                        placeholder="987654321"
+                        onChange={(e) => set("pushChatId", e.target.value)}
+                      />
+                    </div>
+                    <Button type="button" variant="outline" id="send-test" onClick={onSendTest}>
+                      Send test message
+                    </Button>
+                  </div>
+                  <StatusText id="test-status" status={testStatus} className="mt-2.5 block" />
+                </ToggleRow>
+              </div>
+            </Section>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Retention</CardTitle>
-                <CardDescription>
-                  How long records are kept before daily clean-up prunes them (PRD §7).
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-4">
-                <div className="flex flex-col gap-4 sm:flex-row">
-                  {numField("seenDays", "Seen IDs (days)", 1)}
-                  {numField("openedJobDays", "Opened jobs (days)", 1)}
-                </div>
-                <div className="flex flex-col gap-4 sm:flex-row">
-                  {numField("unopenedJobDays", "Unopened jobs (days)", 1)}
-                  {numField("seenHardCap", "Seen hard cap", 1)}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          <aside className="col-span-12 lg:col-span-3">
-            <HowItWorks />
-          </aside>
+            <Section
+              id="how"
+              description="It re-runs your saved searches in the background and tells you when something genuinely new turns up — so you can stop refreshing the tab yourself."
+            >
+              <HowItWorks />
+            </Section>
+          </main>
         </div>
       </div>
 
-      {/* The save bar sticks: the page is a long scroll and Save should never be
-          somewhere you have to hunt for. Opaque rather than the usual translucent
-          treatment — it passes over white section cards, and letting those bleed
-          through made it read as a rendering artefact instead of a bar. The bar
-          itself spans the window, and so does its content — the same full-width
-          gutters as everything above, so nothing shifts as the window resizes. */}
-      <div className="sticky bottom-0 border-t bg-background shadow-[0_-4px_12px_-6px_rgb(0_0_0/0.15)]">
-        <div className="flex w-full items-center justify-between gap-4 px-4 py-3">
-          <p className="max-w-lg text-xs text-faint">
-            Personal use only · Don't publish as extension, and lower the frequency as much as
-            possible to reduce the chance of getting blocked, and turn off when not needed.
-          </p>
-          <div className="flex shrink-0 items-center gap-3">
-            <StatusText id="save-status" status={saveStatus} />
+      {/* Pinned, for the same reason the header is: Save should never be
+          somewhere you have to hunt for. Opaque rather than translucent — it
+          passes over white cards, and letting those bleed through made it read
+          as a rendering artefact instead of a bar. */}
+      <footer className="flex shrink-0 flex-wrap items-center gap-3 border-t bg-background px-4 py-2.5 md:px-6 justify-between">
+        <p className="min-w-0 flex-1 basis-65 text-[11.5px] leading-snug text-faint text-pretty">
+          Personal use only · keep the frequency low, and switch watching off when you are not
+          looking for work.
+        </p>
+        {/* The save word and the buttons it belongs to read as one thing, so they
+            sit on one line — the message to the left of the button it describes,
+            not stacked over it. */}
+        <div className="flex min-w-0 shrink-0 items-center gap-3">
+          {/* Allowed to shrink and wrap, so a long message narrows itself rather
+              than shoving Save off the end of a narrow window. */}
+          <StatusText
+            id="save-status"
+            status={saveStatus}
+            className="min-w-0 shrink text-right text-balance"
+          />
+          <div className="flex shrink-0 items-center gap-2">
             {/* Reset throws away work with no undo, and it stands right next to
-                Save — so it asks first. A modal here, unlike the list view's
-                in-layout questions: this one is about the page it would change,
-                and there is nothing to go on looking at while you answer it.
-                With no unsaved edits it has nothing to throw away, so the button
-                is disabled rather than opening a dialog about nothing. */}
+              Save — so it asks first. A modal here, unlike the list view's
+              in-layout questions: this one is about the page it would change, and
+              there is nothing to go on looking at while you answer it. With no
+              unsaved edits it has nothing to throw away, so the button is
+              disabled rather than opening a dialog about nothing. */}
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button type="button" variant="outline" id="reset" disabled={!dirty}>
+                <Button type="button" variant="ghost" id="reset" disabled={!dirty}>
                   Reset
                 </Button>
               </AlertDialogTrigger>
@@ -476,14 +740,14 @@ export function OptionsPage() {
                 <AlertDialogHeader>
                   <AlertDialogTitle>Discard your unsaved changes?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    Every field goes back to the settings last saved. Anything typed since —
-                    searches added, filters, times, Telegram credentials — is lost, and there is
-                    no undo. Nothing already saved is deleted, and no jobs are touched.
+                    Every field goes back to the settings last saved. Anything typed since — watches
+                    added, filters, times, Telegram credentials — is lost, and there is no undo.
+                    Nothing already saved is deleted, and no jobs are touched.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   {/* The way out is the wide, safe one; the act that costs
-                      something wears destructive and sits under the thumb. */}
+                    something wears destructive and sits under the thumb. */}
                   <AlertDialogCancel id="reset-cancel">Keep editing</AlertDialogCancel>
                   <AlertDialogAction
                     id="reset-confirm"
@@ -495,49 +759,68 @@ export function OptionsPage() {
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
-            <Button type="button" id="save" onClick={onSave}>
-              Save settings
+            {/* Disabled with nothing to save, and saying so: a live Save on an
+              untouched form invites a click that does nothing and reports
+              success. */}
+            <Button type="button" id="save" onClick={onSave} disabled={!dirty}>
+              {dirty ? "Save settings" : "Saved"}
             </Button>
           </div>
         </div>
+      </footer>
+    </div>
+  );
+}
+
+/** A switch with its label and the sentence that says what switching it off
+ *  actually costs — the settings that used to be a bare label each needed one.
+ *  `children` is whatever the switch reveals or governs, laid under the text so
+ *  it reads as belonging to the row rather than following it. */
+function ToggleRow({
+  id,
+  label,
+  description,
+  checked,
+  onChange,
+  children,
+}: {
+  id: string;
+  label: string;
+  description: ReactNode;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="pt-0.5">
+        <Switch id={id} checked={checked} onCheckedChange={onChange} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <Label htmlFor={id} className="text-[13px] font-semibold">
+          {label}
+        </Label>
+        <p className="mt-0.5 max-w-[62ch] text-xs leading-snug text-muted-foreground">
+          {description}
+        </p>
+        {children}
       </div>
     </div>
   );
 }
 
-/** A switch with its label, laid out the way every toggle on this page is. */
-function ToggleRow({
-  id,
-  label,
-  checked,
-  onChange,
-}: {
-  id: string;
-  label: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-}) {
-  return (
-    <div className="flex items-center gap-2.5">
-      <Switch id={id} checked={checked} onCheckedChange={onChange} />
-      <Label htmlFor={id} className="font-normal">
-        {label}
-      </Label>
-    </div>
-  );
-}
-
-function StatusText({ id, status }: { id: string; status: Status }) {
+function StatusText({ id, status, className }: { id: string; status: Status; className?: string }) {
   if (!status.message) return null;
   return (
     <span
       id={id}
       role="status"
       className={cn(
-        "text-xs",
+        "shrink-0 text-xs",
         status.kind === "ok" && "text-ok",
         status.kind === "err" && "text-destructive",
         status.kind === "" && "text-muted-foreground",
+        className,
       )}
     >
       {status.message}

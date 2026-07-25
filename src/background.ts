@@ -145,8 +145,14 @@ async function updateBadge(severity: Severity): Promise<void> {
  *  nothing fires nothing; a non-empty batch is already deduped across every watch,
  *  so this is one notification per cycle, never one per watch. The fixed
  *  `SCAN_NOTIFICATION_ID` means a fresh cycle's notification replaces the prior
- *  one rather than stacking, and lets the click handler recognise ours. */
-async function fireNewJobsNotification(newJobs: Job[]): Promise<void> {
+ *  one rather than stacking, and lets the click handler recognise ours.
+ *
+ *  The Options switch is honoured here and only here: turning it off stops the
+ *  pop-up, while the badge (fired before this) and the Telegram push (after it)
+ *  carry on — the point of the switch is to stop being interrupted, not to stop
+ *  being told. Absent in settings written before it existed, which reads as on. */
+async function fireNewJobsNotification(settings: Settings, newJobs: Job[]): Promise<void> {
+  if (settings.notifyDesktop === false) return;
   const spec = buildScanNotification(newJobs);
   if (!spec) return;
   await chrome.notifications.create(SCAN_NOTIFICATION_ID, {
@@ -540,7 +546,7 @@ async function runCycle(settings: Settings, pages: number): Promise<void> {
     // One merged notification for the whole cycle's new jobs (PRD §3/§9), then the
     // hard-failure health alert if this cycle transitioned into one (§16.8). Both
     // fired after the badge so the surfaces agree.
-    await fireNewJobsNotification(newJobs);
+    await fireNewJobsNotification(settings, newJobs);
     await fireHealthNotification(health);
     // Additive Telegram push (PRD §8), after the badge and desktop notification so
     // its failure — swallowed by sendPush — can never affect either.

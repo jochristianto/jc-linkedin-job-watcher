@@ -12,6 +12,7 @@ import {
   type BackoffConfig,
   type Rand,
 } from "./schedule.ts";
+import { DEFAULT_SETTINGS } from "./types.ts";
 
 // Pure-logic reference for issue #8 (07 — scheduling). No chrome.*, no DOM, no
 // network; randomness is injected so every case is deterministic (prd.md §14).
@@ -46,6 +47,19 @@ test("jitteredDelayMs scatters ±jitter around the interval", () => {
   assert.equal(jitteredDelayMs(5, 1, () => 0), 4 * MIN);
   assert.equal(jitteredDelayMs(5, 1, () => 0.5), 5 * MIN);
   assert.equal(jitteredDelayMs(5, 1, () => 1), 6 * MIN);
+});
+
+test("the shipped defaults put every routine wake between 30 and 90 minutes", () => {
+  // §15, decisions 1 and 3: the point of a 60 ± 30 default is that consecutive
+  // rounds never land the same distance apart, so there is no fixed heartbeat to
+  // recognise. The two extremes are the band's edges, and nothing falls outside.
+  const { intervalMinutes, jitterMinutes } = DEFAULT_SETTINGS;
+  assert.equal(jitteredDelayMs(intervalMinutes, jitterMinutes, () => 0), 30 * MIN);
+  assert.equal(jitteredDelayMs(intervalMinutes, jitterMinutes, () => 1), 90 * MIN);
+  for (const r of [0.13, 0.37, 0.62, 0.81]) {
+    const mins = jitteredDelayMs(intervalMinutes, jitterMinutes, () => r) / MIN;
+    assert.ok(mins >= 30 && mins <= 90, `${mins} min outside the 30–90 band`);
+  }
 });
 
 test("jitteredDelayMs never returns below the 1-minute chrome.alarms floor", () => {

@@ -6,10 +6,12 @@
     <title>Options — LinkedIn Job Watcher</title>
   </head>
   <body>
-    <!-- The settings page (PRD §11 step 7). One long plain scroll of section
-         cards — Searches, Filters, Scanning, Retention — rendered and wired by
-         options.ts. Telegram push arrives with #22. tokens.css is imported by
-         the entry so Vite bundles it; light/dark follow the OS with no JS. -->
+    <!-- The settings page (PRD §11 step 7). A full-height shell: the header and
+         the save bar are pinned, and the six sections between them — Watches,
+         Filters, Scanning, Notifications, Retention, How this works — are the
+         only thing that scrolls, with a rail down the left to navigate them.
+         Rendered and wired by options.tsx. tokens.css is imported by the entry
+         so Vite bundles it; light/dark follow the OS with no JS. -->
     <main id="app"></main>
     <script type="module" src="/src/options.tsx"></script>
   </body>

@@ -88,11 +88,17 @@ export type Settings = {
   blockedCompanies: BlockedCompany[];
   blockedTitleKeywords: string[];
   hideReposted: boolean;
-  intervalMinutes: number; // default 5
-  jitterMinutes: number; // default 1 — ±this, randomised onto each interval (§15)
+  intervalMinutes: number; // default 60
+  jitterMinutes: number; // default 30 — ±this, randomised onto each interval (§15)
   pagesPerScan: number; // default 1 — routine depth (§15); page 2 is mostly stale
   catchUpPages: number; // default 4, used on startup and quiet-hours resume (§9/§15)
   quietHours: QuietHours;
+  /** The desktop pop-up that announces a cycle's new jobs (§3/§9). Off silences
+   *  that pop-up and nothing else — the toolbar count still moves and Telegram
+   *  still delivers, because those are how you find out later rather than now.
+   *  Settings written before this field existed have no `notifyDesktop`, which
+   *  reads as on, so an upgrade never goes quiet on its own. */
+  notifyDesktop: boolean; // default true
   pacing: PacingConfig;
   backoff: BackoffConfig;
   retention: RetentionConfig;
@@ -116,13 +122,16 @@ export const DEFAULT_SETTINGS: Settings = {
   blockedCompanies: [],
   blockedTitleKeywords: [],
   hideReposted: false,
-  intervalMinutes: 5,
-  jitterMinutes: 1,
+  intervalMinutes: 60,
+  jitterMinutes: 30,
   pagesPerScan: 1,
   catchUpPages: 4,
   quietHours: { enabled: true, startMinute: 1380, endMinute: 420 },
+  notifyDesktop: true,
   pacing: { pagePauseMs: [3000, 5000], watchPauseMs: [8000, 12000] },
-  backoff: { emptyScansBeforeBackoff: 3, maxIntervalMinutes: 60 },
+  // The ceiling has to sit above `intervalMinutes`, or the stopping rule is inert:
+  // a 60-minute base clamped to a 60-minute maximum can never double (§15, decision 6).
+  backoff: { emptyScansBeforeBackoff: 3, maxIntervalMinutes: 240 },
   retention: {
     seenDays: 15,
     openedJobDays: 7,
