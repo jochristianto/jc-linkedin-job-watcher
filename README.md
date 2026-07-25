@@ -22,11 +22,11 @@ open from there.
 
 ## Requirements
 
-| | |
-| --- | --- |
-| **Node.js** | `v24.18.0` — see [.nvmrc](.nvmrc). Needed once, to build |
-| **Chrome** | Any current Chrome or Chromium |
-| **LinkedIn** | You must be **signed in** in the same Chrome profile |
+| Software     | Requirement                                              |
+| ------------ | -------------------------------------------------------- |
+| **Node.js**  | `v24.18.0` — see [.nvmrc](.nvmrc). Needed once, to build |
+| **Chrome**   | Any current Chrome or Chromium                           |
+| **LinkedIn** | You must be **signed in** in the same Chrome profile     |
 
 ---
 
@@ -64,7 +64,7 @@ Pin the extension to your toolbar so you can see the count.
 4. Right-click the extension icon → **Options** (or click the gear in the popup).
 5. Under **Watches**, click **Add a watch**, give it a nickname (e.g. "SE @
    Japan") and paste the URL → **Add watch**.
-6. Click **Save settings** at the bottom. *Nothing is stored until you save.*
+6. Click **Save settings** at the bottom. _Nothing is stored until you save._
 
 Any URL that works in your browser works here — your keywords and filters are
 kept exactly as they are. The first round runs on the next scheduled tick, or
@@ -78,11 +78,11 @@ straight away if you open the popup and press **Scan now**.
 Opening a job takes it off the count; the card stays in the list until you mark
 it read.
 
-| Icon | Meaning |
-| --- | --- |
-| Grey number | Jobs you have not looked at (`99+` past 99) |
-| Amber | Something is off — LinkedIn's layout may have changed, or rounds have gone stale |
-| Red `!` | Stopped — you are signed out of LinkedIn, or LinkedIn asked for verification |
+| Icon        | Meaning                                                                          |
+| ----------- | -------------------------------------------------------------------------------- |
+| Grey number | Jobs you have not looked at (`99+` past 99)                                      |
+| Amber       | Something is off — LinkedIn's layout may have changed, or rounds have gone stale |
+| Red `!`     | Stopped — you are signed out of LinkedIn, or LinkedIn asked for verification     |
 
 **Click the icon** for the popup (a 380px panel, opens on **New**).
 **Click a notification** for the same list as a full tab (an 880px column, opens
@@ -123,16 +123,16 @@ waiting when you come back from LinkedIn.
 - **The on/off switch** in the header pauses the whole extension. Nothing is
   scanned — not even by **Scan now** — until you turn it back on.
 - **Scan now** runs a round immediately, ignoring the interval and quiet hours.
-  It says *Scanning…* from the moment you press it, not when the background gets
+  It says _Scanning…_ from the moment you press it, not when the background gets
   round to answering. The list repaints itself when the round finishes, and the
   next automatic round is a full interval away rather than stacked minutes
   behind. When LinkedIn has asked for verification the same button turns red and
   reads **Resume** — that is how you clear the halt.
-- **The status bar** along the bottom says what the loop is doing: *Scanning for
-  new jobs…* while a round runs, otherwise a live countdown (*Next scan in 4m
-  12s*). It reads the real armed alarm, so it cannot drift from the actual
-  schedule. Inside quiet hours it says so. Under manual-only it reads *Manual
-  only — press Scan now*, and when the extension is switched off, *Paused*.
+- **The status bar** along the bottom says what the loop is doing: _Scanning for
+  new jobs…_ while a round runs, otherwise a live countdown (_Next scan in 4m
+  12s_). It reads the real armed alarm, so it cannot drift from the actual
+  schedule. Inside quiet hours it says so. Under manual-only it reads _Manual
+  only — press Scan now_, and when the extension is switched off, _Paused_.
 - **Watch chips** filter the list to one search; the count still covers all of
   them. **New ⇄ All** switches between unread-only and everything. **Mark all as
   read** clears both at once.
@@ -156,7 +156,7 @@ The header and the save bar stay put while the sections between them scroll. The
 rail on the left jumps to any section and marks the ones holding unsaved edits.
 The line under the title summarises the whole configuration — how many watches,
 how often, when they stop, where a find is delivered — and it tracks what you are
-*about* to save, not what you saved last.
+_about_ to save, not what you saved last.
 
 ### Watches
 
@@ -179,20 +179,20 @@ Filtered jobs are still recorded as seen, so they never resurface later.
 
 ### Scanning
 
-| Setting | Default | What it does |
-| --- | --- | --- |
-| Only scan when I press Scan now | off | No automatic rounds at all — see below |
-| Interval | `60` min | Base time between rounds |
-| Jitter | `± 30` min | Randomised onto each interval, so every round lands somewhere in 30–90 minutes and there is no clockwork to recognise |
-| Pages per scan | `1` | Routine depth. One page is about 25 postings, newest first |
-| Catch-up pages | `4` | A deeper first round after Chrome restarts, or when quiet hours end |
-| Quiet hours | `23:00–07:00` | Scanning pauses overnight; resuming triggers one catch-up round |
+| Setting                         | Default       | What it does                                                                                                          |
+| ------------------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Only scan when I press Scan now | off           | No automatic rounds at all — see below                                                                                |
+| Interval                        | `60` min      | Base time between rounds                                                                                              |
+| Jitter                          | `± 30` min    | Randomised onto each interval, so every round lands somewhere in 30–90 minutes and there is no clockwork to recognise |
+| Pages per scan                  | `1`           | Routine depth. One page is about 25 postings, newest first                                                            |
+| Catch-up pages                  | `4`           | A deeper first round after Chrome restarts, or when quiet hours end                                                   |
+| Quiet hours                     | `23:00–07:00` | Scanning pauses overnight; resuming triggers one catch-up round                                                       |
 
 **Only scan when I press Scan now.** Switch this on and no round ever runs by
 itself — nothing is loaded from LinkedIn until you press **Scan now**. Everything
 else carries on as normal: your searches stay on, and a manual round updates the
 list, the count, the notification and Telegram exactly as a scheduled one would.
-It is *not* the same as the header's on/off switch, which pauses the whole
+It is _not_ the same as the header's on/off switch, which pauses the whole
 extension including the button; this one just hands the timing to you. Your
 interval, jitter and quiet hours are kept as you set them, greyed out while it is
 on, and go straight back into service when you switch it off.
@@ -218,7 +218,7 @@ enforced** — see [Known limitations](#known-limitations).
 - **Desktop notification** — the pop-up announcing a round that found something.
   One per round, never one per job. Switching it off silences the pop-up only:
   the toolbar count still moves and Telegram still delivers.
-- **Also push to Telegram** — optional, and *additive* to the desktop
+- **Also push to Telegram** — optional, and _additive_ to the desktop
   notification rather than a replacement. See below.
 
 ### How this works
@@ -245,6 +245,7 @@ Get new jobs on your phone.
    ```
 
    Read `result[0].message.chat.id` out of the JSON.
+
 3. In **Options → Notifications**, switch on **Also push to Telegram**, paste
    both values, and click **Send test message**. Success or failure is reported
    on the spot. It sends whatever is in the fields right now, so you can prove a
@@ -268,9 +269,9 @@ test message**.
 **The icon shows a red `!`**
 Open the popup — a one-line banner says which it is:
 
-- *"Signed out of LinkedIn — scanning paused."* Sign back in; scanning resumes on
+- _"Signed out of LinkedIn — scanning paused."_ Sign back in; scanning resumes on
   its own at the next round.
-- *"LinkedIn asked for verification — scanning stopped."* Open LinkedIn and clear
+- _"LinkedIn asked for verification — scanning stopped."_ Open LinkedIn and clear
   the challenge, then press **Resume** in the popup. Nothing else clears this,
   because a stopped extension never runs the successful round that would clear it
   by itself. If the challenge is still there, the next round simply stops again.
@@ -324,9 +325,9 @@ Real gaps in the current build, not misconfiguration:
 
 ## More
 
-| | |
-| --- | --- |
-| [docs/how-it-works.md](docs/how-it-works.md) | What a round actually does, why the scan window is visible, what each permission is for |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Building, testing, and the rules the code follows |
-| [prd.md](prd.md) | The full specification, and the argument behind every decision |
-| [LICENSE.md](LICENSE.md) | **Personal use only.** Free to use, change and share — never to publish as an extension or sell |
+| Document                                     | Description                                                                                     |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| [docs/how-it-works.md](docs/how-it-works.md) | What a round actually does, why the scan window is visible, what each permission is for         |
+| [CONTRIBUTING.md](CONTRIBUTING.md)           | Building, testing, and the rules the code follows                                               |
+| [prd.md](prd.md)                             | The full specification, and the argument behind every decision                                  |
+| [LICENSE.md](LICENSE.md)                     | **Personal use only.** Free to use, change and share — never to publish as an extension or sell |
