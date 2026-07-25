@@ -1,6 +1,8 @@
 # LinkedIn Job Watcher
 
-![The list view as a full tab: watch chips across the top, one row per posting with company, location and how long ago it was posted, and Block / mark-read buttons on each row.](docs/images/preview.png)
+![The list view as a full tab: watch chips across the top, one row per posting with company, location and how long ago it was posted, and Block / mark-read buttons on each row.](docs/images/preview-1.png)
+
+![Another view of the extension](docs/images/preview-2.png)
 
 A personal Chrome extension (MV3) that watches your saved LinkedIn job searches on a background alarm and tells you about **genuinely new** postings — a badge count, one merged desktop notification per scan, and optionally a Telegram message on your phone.
 
@@ -12,11 +14,11 @@ It reads the page while you're logged in, in your own browser, in a small window
 
 ## Requirements
 
-| | |
-|---|---|
-| **Node.js** | `v24.18.0` (see [.nvmrc](.nvmrc)) — needs ≥ 22.6 for `--experimental-strip-types` |
-| **Chrome** | Any current Chrome/Chromium with Manifest V3 |
-| **LinkedIn** | You must be **signed in** to LinkedIn in the same Chrome profile |
+|              |                                                                                   |
+| ------------ | --------------------------------------------------------------------------------- |
+| **Node.js**  | `v24.18.0` (see [.nvmrc](.nvmrc)) — needs ≥ 22.6 for `--experimental-strip-types` |
+| **Chrome**   | Any current Chrome/Chromium with Manifest V3                                      |
+| **LinkedIn** | You must be **signed in** to LinkedIn in the same Chrome profile                  |
 
 ---
 
@@ -64,7 +66,7 @@ Pin the extension to your toolbar so you can see the badge.
 3. Copy the full URL from the address bar.
 4. Right-click the extension icon → **Options** (or click the gear in the popup).
 5. Under **Watches**, click **Add a watch**, give it a nickname (e.g. "Indonesia") and paste the URL → **Add watch**.
-6. Click **Save settings** at the bottom. *Nothing is stored until you save.*
+6. Click **Save settings** at the bottom. _Nothing is stored until you save._
 
 The first scan fires on the next alarm tick — or immediately, if you open the popup and click **Scan now**. Any URL that works in your browser works here — the query string (keywords, filters, `sortBy=DD`) is preserved verbatim; only `&start=` is rewritten for pagination.
 
@@ -74,11 +76,11 @@ The first scan fires on the next alarm tick — or immediately, if you open the 
 
 **Badge on the toolbar icon** — how many jobs you haven't dealt with yet. Opening a job doesn't change it; marking it read does.
 
-| Badge | Meaning |
-|---|---|
-| Slate number | Unread count (`99+` past 99) |
-| Amber | Soft warning — layout may have changed, or scans have gone stale |
-| Red `!` | Hard failure — signed out of LinkedIn, or a verification challenge |
+| Badge        | Meaning                                                            |
+| ------------ | ------------------------------------------------------------------ |
+| Slate number | Unread count (`99+` past 99)                                       |
+| Amber        | Soft warning — layout may have changed, or scans have gone stale   |
+| Red `!`      | Hard failure — signed out of LinkedIn, or a verification challenge |
 
 **Click the icon** → the popup list (380px, opens on **New**).
 **Click a notification** → the same list as a full tab (720px, opens on **All**). An already-open jobs tab is focused rather than duplicated.
@@ -88,8 +90,8 @@ In both views:
 - **Click a job** → opens the posting in a new tab and **highlights the row**, which stays in the list. Nothing disappears because you looked at it. Cmd/Ctrl/middle-click opens it in the background.
 - **The tick on a row** → marks that one job read: the row greys out, drops out of **New**, and the badge falls by one. This is the only thing that clears a job. Press it again (it flips to an undo arrow) to bring the job back.
 - **Block on a row** → adds that job's company to your blocklist, without a trip to Options. Future scans stop surfacing it. Jobs from that company already in your list stay on screen, greyed and tagged **Blocked**, and stop counting towards the badge. It asks first: the button reads **Sure?** after one press and only blocks on the second — click anywhere else, or wait five seconds, and the question goes away. The button then reads **Unblock**, which takes just the one press.
-- **Scan now** runs a cycle immediately, ignoring the interval and quiet hours. It flips to *Scanning…* (greyed out, with the status bar below it saying the same) **the moment you press it** — not when the background gets round to answering, which can take a second or two if Chrome had put the extension to sleep. The list repaints on its own when the cycle finishes. After a manual scan the next automatic one is a full interval away, not stacked minutes behind. When a verification challenge has halted scanning, the same button turns red and reads **Resume** — that is how you clear the halt.
-- **The status bar** along the bottom says what the loop is doing: *Scanning for new jobs…* with a spinning icon while a cycle is running, otherwise a live countdown to the next one (*Next scan in 4m 12s*). Inside quiet hours it says so, which is why that number is hours rather than minutes. It reads the armed alarm itself, so it can't drift from the real schedule — and with no search enabled there is nothing to scan, so the bar disappears entirely. Under **Only scan when I press Scan now** there is no schedule to report, so it reads *Manual only — press Scan now* instead of counting down.
+- **Scan now** runs a cycle immediately, ignoring the interval and quiet hours. It flips to _Scanning…_ (greyed out, with the status bar below it saying the same) **the moment you press it** — not when the background gets round to answering, which can take a second or two if Chrome had put the extension to sleep. The list repaints on its own when the cycle finishes. After a manual scan the next automatic one is a full interval away, not stacked minutes behind. When a verification challenge has halted scanning, the same button turns red and reads **Resume** — that is how you clear the halt.
+- **The status bar** along the bottom says what the loop is doing: _Scanning for new jobs…_ with a spinning icon while a cycle is running, otherwise a live countdown to the next one (_Next scan in 4m 12s_). Inside quiet hours it says so, which is why that number is hours rather than minutes. It reads the armed alarm itself, so it can't drift from the real schedule — and with no search enabled there is nothing to scan, so the bar disappears entirely. Under **Only scan when I press Scan now** there is no schedule to report, so it reads _Manual only — press Scan now_ instead of counting down.
 - **Watch chips** filter the list to one search. The badge still counts across all of them.
 - **New ⇄ All** toggles between unread-only and everything.
 - **Mark all as read** clears the badge and empties New in one action.
@@ -105,9 +107,11 @@ A row therefore has three looks: plain (untouched), highlighted with a blue bar 
 The page is a fixed shell: the header and the save bar stay put, only the sections between them scroll, and a rail down the left jumps to any section and marks the ones holding unsaved edits. The header carries a one-line summary of the whole configuration — how many watches, how often, when they stop, where a find is delivered — and it tracks what you're about to save, not what you saved last.
 
 ### Watches
+
 Add, edit, remove, and individually pause saved searches. Enabled watches all run on the same cycle, strictly one after another — never in parallel. Each row reads its own URL back as chips (keywords, place, date posted, job type, remote/hybrid/on-site), so two saved searches are tellable apart without parsing 200 characters of query string.
 
 ### Filters
+
 - **Blocked companies** — matched case-insensitively; normalised once when saved. The **Block** button on any job row adds and removes entries here too
 - **Blocked title keywords** — e.g. "Intern", "Senior"
 - **Hide reposted** — drop anything LinkedIn marks as "Reposted"
@@ -116,29 +120,32 @@ Filtered jobs are still recorded as seen, so they never resurface later.
 
 ### Scanning
 
-| Setting | Default | What it does |
-|---|---|---|
-| Only scan when I press Scan now | off | No automatic rounds at all — see below |
-| Interval | `5` min | Base time between scans |
-| Jitter | `±1` min | Randomised onto each interval so traffic isn't a fixed heartbeat |
-| Pages per scan | `1` | Routine depth. Page 2 is mostly stale when sorted by date |
-| Catch-up pages | `4` | Deeper scan after a browser restart or when quiet hours end |
-| Quiet hours | `23:00–07:00` | Scanning pauses overnight; resuming triggers a catch-up scan |
+| Setting                         | Default       | What it does                                                     |
+| ------------------------------- | ------------- | ---------------------------------------------------------------- |
+| Only scan when I press Scan now | off           | No automatic rounds at all — see below                           |
+| Interval                        | `5` min       | Base time between scans                                          |
+| Jitter                          | `±1` min      | Randomised onto each interval so traffic isn't a fixed heartbeat |
+| Pages per scan                  | `1`           | Routine depth. Page 2 is mostly stale when sorted by date        |
+| Catch-up pages                  | `4`           | Deeper scan after a browser restart or when quiet hours end      |
+| Quiet hours                     | `23:00–07:00` | Scanning pauses overnight; resuming triggers a catch-up scan     |
 
-**Only scan when I press Scan now.** Switch this on and no round ever runs by itself: no alarm is armed, so nothing is loaded from LinkedIn until you press **Scan now** in the popup. Everything else carries on as normal — your searches stay enabled, and a manual round updates the list, the toolbar count, the desktop notification and Telegram exactly as a scheduled one would. It is *not* the same as the header's on/off switch: that one pauses the whole extension including the button, while this one just hands the timing to you. The interval, jitter and quiet hours are kept as you set them, greyed out while it's on, and go straight back into service when you switch it off.
+**Only scan when I press Scan now.** Switch this on and no round ever runs by itself: no alarm is armed, so nothing is loaded from LinkedIn until you press **Scan now** in the popup. Everything else carries on as normal — your searches stay enabled, and a manual round updates the list, the toolbar count, the desktop notification and Telegram exactly as a scheduled one would. It is _not_ the same as the header's on/off switch: that one pauses the whole extension including the button, while this one just hands the timing to you. The interval, jitter and quiet hours are kept as you set them, greyed out while it's on, and go straight back into service when you switch it off.
 
 The section shows what those four numbers add up to: a running estimate of the page loads a day they cause, tiered Gentle / Heavy / Risky, with the arithmetic spelled out. It's deliberately a ceiling — it ignores the back-off and assumes Chrome is open the whole time. Raise the depth only if you find you're actually missing things.
 
 There's also automatic back-off: after **3** consecutive empty scans, the interval stretches out toward a 60-minute ceiling; one scan that finds something resets it.
 
 ### Notifications
+
 - **Desktop notification** — the pop-up announcing a round that found something. One per round, never one per job. Switching it off silences the pop-up only: the toolbar count still moves, and Telegram still delivers
-- **Also push to Telegram** — optional, and *additive* to the desktop notification rather than a replacement. See [Telegram push](#telegram-push-optional)
+- **Also push to Telegram** — optional, and _additive_ to the desktop notification rather than a replacement. See [Telegram push](#telegram-push-optional)
 
 ### Retention
+
 How long records are kept: seen IDs `15` days, jobs you've opened or read `7` days, untouched jobs `30` days, seen hard cap `50,000`. **Not yet enforced** — see [Known limitations](#known-limitations).
 
 ### How this works
+
 The last section: what a scan round actually does, in plain English, plus the things worth knowing before you trust a background scraper (nothing runs while Chrome is closed, it slows itself down when nothing turns up, the ToS caveat). It links back here for the rest.
 
 > **Save settings** writes your changes. **Reset** reverts the form to the last-saved values — it is not a factory reset. It asks before discarding, and is greyed out while there's nothing unsaved to discard.
@@ -248,21 +255,21 @@ A few things worth knowing:
 - **One notification per cycle**, not per watch. A role surfacing under two searches notifies once.
 - **Opened state survives re-scans** — reopening a search never re-inflates the badge.
 - **Your own LinkedIn tabs are never scraped.** Each scan window is stamped with a one-time token; the content script refuses to read any page that doesn't carry a matching one.
-- **The scan window is visible, and that is deliberate.** It used to be a hidden tab, which was never verified and turns out not to work: Chrome gives a tab you can't see no animation frames and throttled timers, so LinkedIn's results column never finishes drawing. Measured on the same page, a visible tab rendered 25 of 25 postings and a hidden one 7 of 25 — the missing postings were never on screen to be read. Since it has to be seen, it's made as small a thing to see as possible: one unfocused window per *scan* rather than per page, tucked into the corner of whichever screen your browser is on, and always closed afterwards even if parsing throws.
+- **The scan window is visible, and that is deliberate.** It used to be a hidden tab, which was never verified and turns out not to work: Chrome gives a tab you can't see no animation frames and throttled timers, so LinkedIn's results column never finishes drawing. Measured on the same page, a visible tab rendered 25 of 25 postings and a hidden one 7 of 25 — the missing postings were never on screen to be read. Since it has to be seen, it's made as small a thing to see as possible: one unfocused window per _scan_ rather than per page, tucked into the corner of whichever screen your browser is on, and always closed afterwards even if parsing throws.
 - **It only takes focus as a last resort.** Chrome also throttles a window it considers fully covered, so if a scan comes back short it retries that page once with the window focused, then hands focus straight back to where you were.
 - **A short read tells you.** If a page yields far fewer postings than it advertised, the badge turns amber and the popup says so, rather than a partial scan passing as a quiet day.
 - **Nothing runs while Chrome is closed.** This is a hard platform limit — extensions have no background process independent of the browser. On relaunch, a catch-up-depth scan runs exactly once.
 
 ### Permissions, and why
 
-| Permission | Why |
-|---|---|
-| `storage`, `unlimitedStorage` | Settings, seen IDs, job records |
-| `alarms` | The scan cadence — survives service-worker teardown |
-| `notifications` | New-job and health alerts |
-| `tabs`, `scripting` | Open/close the scan window and message it |
-| `https://www.linkedin.com/*` | The pages being read |
-| `https://api.telegram.org/*` | Telegram push (only used if you enable it) |
+| Permission                    | Why                                                 |
+| ----------------------------- | --------------------------------------------------- |
+| `storage`, `unlimitedStorage` | Settings, seen IDs, job records                     |
+| `alarms`                      | The scan cadence — survives service-worker teardown |
+| `notifications`               | New-job and health alerts                           |
+| `tabs`, `scripting`           | Open/close the scan window and message it           |
+| `https://www.linkedin.com/*`  | The pages being read                                |
+| `https://api.telegram.org/*`  | Telegram push (only used if you enable it)          |
 
 No data leaves your browser except the Telegram message you explicitly configure.
 
@@ -273,14 +280,14 @@ No data leaves your browser except the Telegram message you explicitly configure
 **Badge shows a red `!`**
 Open the popup — a one-line banner says which it is:
 
-- *"Signed out of LinkedIn — scanning paused."* Sign back in; scanning resumes automatically on the next tick.
-- *"LinkedIn asked for verification — scanning stopped."* Open LinkedIn and clear the challenge, then click **Resume** in the popup header — nothing else clears this state, because a halted extension never runs the successful scan that would clear it on its own. If the challenge is still there, the next cycle simply halts again.
+- _"Signed out of LinkedIn — scanning paused."_ Sign back in; scanning resumes automatically on the next tick.
+- _"LinkedIn asked for verification — scanning stopped."_ Open LinkedIn and clear the challenge, then click **Resume** in the popup header — nothing else clears this state, because a halted extension never runs the successful scan that would clear it on its own. If the challenge is still there, the next cycle simply halts again.
 
 **Badge is amber**
-Either the parser found no results list (LinkedIn may have changed its layout — check `chrome://extensions` → *service worker* → Console for a `[ljw]` selector-drift warning), or scans have gone stale.
+Either the parser found no results list (LinkedIn may have changed its layout — check `chrome://extensions` → _service worker_ → Console for a `[ljw]` selector-drift warning), or scans have gone stale.
 
 **Nothing ever gets scanned**
-Click **Scan now** in the popup first — it bypasses the interval and quiet hours, so it tells you straight away whether the problem is the schedule or the scan itself. If that finds nothing either, check, in order: at least one search is **enabled**; you're signed in to LinkedIn in this profile; and the alarm exists — `chrome://extensions` → *service worker* → Console → `await chrome.alarms.getAll()`. An empty list is expected, not a fault, if **Only scan when I press Scan now** is switched on: that setting is exactly "arm no alarm".
+Click **Scan now** in the popup first — it bypasses the interval and quiet hours, so it tells you straight away whether the problem is the schedule or the scan itself. If that finds nothing either, check, in order: at least one search is **enabled**; you're signed in to LinkedIn in this profile; and the alarm exists — `chrome://extensions` → _service worker_ → Console → `await chrome.alarms.getAll()`. An empty list is expected, not a fault, if **Only scan when I press Scan now** is switched on: that setting is exactly "arm no alarm".
 
 Note the default quiet hours are **23:00–07:00**, so an extension installed late at night genuinely won't scan until morning. That's the schedule working, not a fault.
 
@@ -323,10 +330,10 @@ No environment setup is needed for any of the above. The one optional extra is `
 
 The architecture rule (PRD §14): **every decision lives in a pure, tested module; the `chrome.*` wrappers hold no logic and are not unit-tested.**
 
-| | |
-|---|---|
-| **Pure & tested** | [parse.ts](src/parse.ts) · [filter.ts](src/filter.ts) · [dedupe.ts](src/dedupe.ts) · [schedule.ts](src/schedule.ts) · [health.ts](src/health.ts) · [lifecycle.ts](src/lifecycle.ts) · [scan.ts](src/scan.ts) · [view.ts](src/view.ts) · [view-model.ts](src/view-model.ts) · [gc.ts](src/gc.ts) · [options-form.ts](src/options-form.ts) · [push.ts](src/push.ts) |
-| **Side-effect wrappers** | [background.ts](src/background.ts) · [content.ts](src/content.ts) · [storage.ts](src/storage.ts) · [jobs-tab.ts](src/jobs-tab.ts) · [components/](src/components/) · [hooks/](src/hooks/) |
+|                          |                                                                                                                                                                                                                                                                                                                                                                   |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Pure & tested**        | [parse.ts](src/parse.ts) · [filter.ts](src/filter.ts) · [dedupe.ts](src/dedupe.ts) · [schedule.ts](src/schedule.ts) · [health.ts](src/health.ts) · [lifecycle.ts](src/lifecycle.ts) · [scan.ts](src/scan.ts) · [view.ts](src/view.ts) · [view-model.ts](src/view-model.ts) · [gc.ts](src/gc.ts) · [options-form.ts](src/options-form.ts) · [push.ts](src/push.ts) |
+| **Side-effect wrappers** | [background.ts](src/background.ts) · [content.ts](src/content.ts) · [storage.ts](src/storage.ts) · [jobs-tab.ts](src/jobs-tab.ts) · [components/](src/components/) · [hooks/](src/hooks/)                                                                                                                                                                         |
 
 Two Vite builds run in sequence: [vite.config.ts](vite.config.ts) emits the service worker + three HTML pages, then [vite.content.config.ts](vite.content.config.ts) appends `content.js` as an IIFE — an MV3 content script can't be an ES module.
 
@@ -338,7 +345,7 @@ React components; the registry components live unmodified in
 them, and app styling goes in the components that use them.
 
 The §14 rule holds across the change: `selectView` in [view.ts](src/view.ts)
-decides *everything* the list view shows — badge count, which empty state, which
+decides _everything_ the list view shows — badge count, which empty state, which
 banners, the scan status — as plain data, and the components only map that to
 JSX. That is why the suite stayed at ~300 tests without needing a DOM: component
 tests render to a string with `react-dom/server`, and the assembly logic is
@@ -349,8 +356,8 @@ Two notes for anyone editing the styles:
 - Tailwind is configured **in CSS** ([src/tokens.css](src/tokens.css)), not a JS
   config — there is no `tailwind.config.js` to look for. The palette is this
   project's own (warm grey page, LinkedIn blue) in OKLCH, under shadcn's
-  semantic names. `--primary` is the brand blue; `--accent` is shadcn's *subtle
-  tint* role, not the brand.
+  semantic names. `--primary` is the brand blue; `--accent` is shadcn's _subtle
+  tint_ role, not the brand.
 - Dark mode still follows the OS with **zero JS**. shadcn ships `dark:` as a
   `.dark` class variant that needs a toggle, so `@custom-variant dark` re-binds
   it to `prefers-color-scheme`.
