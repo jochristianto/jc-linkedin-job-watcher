@@ -712,8 +712,17 @@ export function OptionsPage() {
           Personal use only · keep the frequency low, and switch watching off when you are not
           looking for work.
         </p>
-        <div>
-          <StatusText id="save-status" status={saveStatus} />
+        {/* The save word and the buttons it belongs to read as one thing, so they
+            sit on one line — the message to the left of the button it describes,
+            not stacked over it. */}
+        <div className="flex min-w-0 shrink-0 items-center gap-3">
+          {/* Allowed to shrink and wrap, so a long message narrows itself rather
+              than shoving Save off the end of a narrow window. */}
+          <StatusText
+            id="save-status"
+            status={saveStatus}
+            className="min-w-0 shrink text-right text-balance"
+          />
           <div className="flex shrink-0 items-center gap-2">
             {/* Reset throws away work with no undo, and it stands right next to
               Save — so it asks first. A modal here, unlike the list view's
