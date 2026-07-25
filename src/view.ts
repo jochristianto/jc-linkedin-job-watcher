@@ -41,11 +41,15 @@ function toJobView(job: Job, watches: Watch[], blockedNormalized: string[]): Job
     postedText: job.postedText,
     watchName: watch?.name ?? "",
     url: job.url,
+    foundAt: job.foundAt,
     opened: job.opened,
     read: job.read,
     blocked: isCompanyBlocked(job.company, blockedNormalized),
     // Absent on records written before applying was tracked, which reads as "no".
     applied: job.applied === true,
+    // Same vintage, same rule: no note recorded reads as an empty one, so the
+    // row simply renders no note block rather than a box with nothing in it.
+    notes: job.applyNotes ?? "",
   };
 }
 
@@ -60,21 +64,33 @@ export function toJobViews(
     .map((j) => toJobView(j, watches, blockedNormalized));
 }
 
-/** The badge number: how many jobs are still unread and not blocked — the same
- *  rule the toolbar badge uses (see `unreadCount` in scan.ts). Opening a job
- *  doesn't move this; only the row's tick does. */
+/** The badge number: how many jobs you have not looked at yet and are not
+ *  blocked — the same rule the toolbar badge uses (see `unreadCount` in scan.ts).
+ *  Both clicking a row and ticking it read take it off this count; the New list
+ *  is the looser filter that only the tick empties (see `visibleJobs`). */
 export function unreadCount(jobs: Job[], blockedNormalized: string[] = []): number {
-  return jobs.filter((j) => !j.read && !isCompanyBlocked(j.company, blockedNormalized)).length;
+  return jobs.filter(
+    (j) => !j.read && !j.opened && !isCompanyBlocked(j.company, blockedNormalized),
+  ).length;
 }
 
 /**
  * Mark one job opened at `now`, immutably — the trace of "you clicked this and
- * we opened the posting". It highlights the row and nothing else: the job stays
- * in the list, stays unread, stays on the badge. Returns a new map with just
- * that entry replaced; the original is untouched and an unknown id is a no-op
- * (the same reference comes back). The storage write that persists this happens
- * in mount.ts **before** the tab opens (PRD §9). Re-opening a job keeps the
- * first `openedAt` — it records when you first looked, not most recently.
+ * we opened the posting".
+ *
+ * Opening is looking, not dismissing, and the two now split the difference: the
+ * job comes **off the badge and loses its unread dot** (you have seen it — that
+ * is what the count is for), but it **stays on the New list**, greyed with an
+ * "Opened" chip, until the row's tick files it away. An inbox works the same way:
+ * read mail is still in the inbox, it just stops counting. Dropping it from the
+ * list here instead was a reported bug — a click in the popup made the job vanish
+ * as the popup closed, with nowhere to get it back from but "All".
+ *
+ * Returns a new map with just that entry replaced; the original is untouched and
+ * an unknown id is a no-op (the same reference comes back). The storage write that
+ * persists this happens in `<ListView>` **before** the tab opens (PRD §9).
+ * Re-opening a job keeps the first `openedAt` — it records when you first looked,
+ * not most recently.
  */
 export function markJobOpened(jobs: JobsMap, id: string, now: number): JobsMap {
   const job = jobs[id];
@@ -343,6 +359,11 @@ export type ViewProps = {
   chips: ChipWatch[];
   activeWatchId: string | null;
   mode: ListMode;
+  /** How many rows the current chip + mode actually put on screen. The footer's
+   *  end-of-list line counts these — the number you can see — while `badge`
+   *  above keeps counting unread across every watch, which is a different
+   *  number on purpose. */
+  visibleCount: number;
   /** Every row the list could show, already ordered and mapped. `<JobList>`
    *  applies the mode filter itself so an "all caught up" list still knows how
    *  many rows it is hiding. */
@@ -398,6 +419,7 @@ export function selectView(ctx: ViewContext): ViewProps {
     chips: ctx.watches.map((w) => ({ id: w.id, name: w.name })),
     activeWatchId,
     mode: ctx.mode,
+    visibleCount: visible.length,
     jobs,
     emptyKind: visible.length ? null : pickEmptyKind(ctx, jobs.length),
     scanButton: scanButtonState(ctx),

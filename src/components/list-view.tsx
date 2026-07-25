@@ -14,10 +14,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { ApplyPrompt } from "@/components/apply-prompt.tsx";
-import { EmptyState } from "@/components/empty-state.tsx";
+import { EmptyState, type EmptyStateAction } from "@/components/empty-state.tsx";
 import { HealthBanner } from "@/components/health-banner.tsx";
 import { JobList } from "@/components/job-list.tsx";
 import { ListHeader } from "@/components/list-header.tsx";
+import { ScanningBar, ScanSkeletons } from "@/components/scanning.tsx";
 import { ScanStatusBar } from "@/components/scan-status.tsx";
 import { Toolbar } from "@/components/toolbar.tsx";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -258,8 +259,10 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
   }, [closeApplyQuestion, refreshBadge, reload]);
 
   /** Mark the job opened *before* the tab opens (PRD §9 — a closing popup can cut
-   *  off a write in flight). The badge does NOT move: opening is not dismissing,
-   *  and the job is still in the list waiting for you to come back to it. */
+   *  off a write in flight). The badge drops by one: you have looked at the job,
+   *  which is all the badge ever claimed to count. The row itself stays put, still
+   *  on the New list waiting for you to come back to it — see `markJobOpened` for
+   *  why those two are not the same thing. */
   const onOpen = useCallback(
     async (id: string, background: boolean) => {
       disarm();
@@ -276,12 +279,15 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
         setPendingApplyId(id);
         await persistUi({ pendingApplyId: id });
       }
+      // Opening takes the job off the count, so the toolbar has to be repainted
+      // from here — nothing else would notice until the next scan.
+      await refreshBadge();
       await reload();
       // A background click already opened the tab natively; only the foreground
       // click needs us to open it.
       if (!background) chrome.tabs.create({ url: job.url, active: true });
     },
-    [disarm, persistUi, reload],
+    [disarm, persistUi, refreshBadge, reload],
   );
 
   /**
@@ -490,15 +496,49 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
 
   const onOpenOptions = useCallback(() => chrome.runtime.openOptionsPage(), []);
 
+  /**
+   * The one thing to do about the empty state currently on screen.
+   *
+   * Every one of these messages used to be a dead end — "add a search in Options"
+   * with no way to reach Options, "switch to All to see everything" with the
+   * switch two controls away and unmentioned. Each situation has exactly one
+   * obvious way out, and this is it, wired to the handler that already existed
+   * for the control the user would otherwise have had to go and find.
+   *
+   * `scanning` gets none on purpose: waiting is the action.
+   */
+  const emptyAction = useMemo((): EmptyStateAction | undefined => {
+    switch (view?.emptyKind) {
+      case "no-watches":
+        return { label: "Create your first watch", onClick: onOpenOptions };
+      case "no-jobs-yet":
+        return { label: "Scan now", onClick: onScan };
+      // Not broken, just filtered — a sideways move, so the quieter button.
+      case "no-new":
+        return { label: "Show all jobs", onClick: () => onModeChange("all"), variant: "outline" };
+      case "scan-error":
+        return { label: "Open Options", onClick: onOpenOptions };
+      default:
+        return undefined;
+    }
+  }, [view?.emptyKind, onModeChange, onOpenOptions, onScan]);
+
+  // How long a job you have opened survives before the garbage collector takes
+  // it (PRD §7). The list's closing line says so, because "where did last week's
+  // jobs go?" is otherwise a question the UI never answers.
+  const openedJobDays = state?.settings.retention.openedJobDays ?? 7;
+
   return (
     <TooltipProvider delayDuration={400}>
+      {/* Header and footer are pinned; the list between them is the only thing
+          that scrolls, at every width. In the tab that means the page itself
+          never scrolls — the countdown in the footer stays where you can see it
+          however far down the list you are. */}
       <div
         data-variant={variant}
         className={cn(
-          "flex flex-col bg-background",
-          variant === "popup"
-            ? "h-[600px] min-h-[480px] w-[380px]"
-            : "mx-auto min-h-screen max-w-[720px] border-x",
+          "flex flex-col overflow-hidden bg-background",
+          variant === "popup" ? "h-150 min-h-120 w-95" : "h-screen",
         )}
       >
         {view && (
@@ -545,30 +585,68 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
                     banner tier — none of those cases is an error. */}
                 {notice && <HealthBanner message={notice} severity="warn" />}
 
-                {/* The list scrolls; the header above and the status bar below stay put. */}
-                <div className="flex flex-1 flex-col overflow-y-auto px-2 pb-2">
-                  {view.emptyKind ? (
-                    <EmptyState kind={view.emptyKind} />
-                  ) : (
-                    <JobList
-                      jobs={view.jobs}
-                      mode={view.mode}
-                      armedBlockId={view.armedBlockId}
-                      applyPromptJobId={applyPromptInRow ? pendingApplyJob?.id : null}
-                      applyPrompt={applyPromptInRow ? applyPrompt : null}
-                      onOpen={onOpen}
-                      onToggleRead={onToggleRead}
-                      onBlock={onBlock}
-                      onUnapply={onUnapply}
-                    />
-                  )}
+                {/* The list scrolls; the header above and the status bar below stay
+                    put. It sits a shade darker than the header and footer so the
+                    white cards read as things laid on a surface rather than as
+                    strips of the page, and the column stops at 880px — a job title
+                    stretched across a 27" monitor is unreadable, not spacious. */}
+                <div className="flex-1 overflow-y-auto bg-[color-mix(in_oklab,var(--muted)_45%,var(--background))]">
+                  <div className="mx-auto w-full max-w-220 p-2.5 md:p-3.5">
+                    {/* A scan running over a list you are already reading. The
+                        empty case gets skeletons below instead — replacing rows
+                        you were reading with grey boxes would be worse than
+                        leaving them alone. */}
+                    {view.status.kind === "scanning" && view.emptyKind !== "scanning" && (
+                      <ScanningBar />
+                    )}
+
+                    {view.emptyKind === "scanning" ? (
+                      <ScanSkeletons />
+                    ) : view.emptyKind ? (
+                      <EmptyState kind={view.emptyKind} action={emptyAction} />
+                    ) : (
+                      <>
+                        <JobList
+                          jobs={view.jobs}
+                          mode={view.mode}
+                          variant={variant}
+                          now={now}
+                          armedBlockId={view.armedBlockId}
+                          applyPromptJobId={applyPromptInRow ? pendingApplyJob?.id : null}
+                          applyPrompt={applyPromptInRow ? applyPrompt : null}
+                          onOpen={onOpen}
+                          onToggleRead={onToggleRead}
+                          onBlock={onBlock}
+                          onUnapply={onUnapply}
+                        />
+                        {/* The end of the list, said out loud. Without it a list
+                            that stops has two readings — "that's everything" and
+                            "the rest hasn't loaded" — and the retention rule is
+                            the answer to where last month's jobs went. Only worth
+                            saying once there is enough list to scroll. */}
+                        {view.visibleCount > 2 && (
+                          <div className="px-1 pt-3.5 pb-1 text-center text-xs text-muted-foreground">
+                            {view.visibleCount} shown · opened jobs are cleared after{" "}
+                            {openedJobDays} days
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
                 </div>
 
-                <ScanStatusBar status={view.status} />
+                <ScanStatusBar
+                  status={view.status}
+                  unread={view.badge}
+                  watchCount={view.chips.length}
+                />
               </>
             ) : (
-              <div className="flex flex-1 flex-col">
-                <EmptyState kind="paused" />
+              <div className="flex flex-1 flex-col overflow-y-auto">
+                <EmptyState
+                  kind="paused"
+                  action={{ label: "Turn watching on", onClick: () => onToggleEnabled(true) }}
+                />
               </div>
             )}
           </>

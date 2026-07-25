@@ -26,11 +26,28 @@ function statusFace(status: ScanStatus): { icon: LucideIcon; text: string } {
   }
 }
 
+export type ScanStatusBarProps = {
+  status: ScanStatus;
+  /** Unread across every watch — the same number the header badge shows. */
+  unread?: number;
+  /** How many watches are configured. */
+  watchCount?: number;
+};
+
+/** `1 watch` / `4 watches`, because "1 watches" in a status bar reads as a bug. */
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
 /**
- * The footer status bar: what the scan loop is doing, and how long until it does
- * it again. It answers the question the rest of the view can't — a list that
- * hasn't changed in ten minutes looks identical whether the loop is healthy,
- * asleep for quiet hours, or dead.
+ * The footer status bar: what the scan loop is doing, how long until it does it
+ * again, and — on the right — the standing count the header badge also carries.
+ *
+ * It answers the question the rest of the view can't: a list that hasn't changed
+ * in ten minutes looks identical whether the loop is healthy, asleep for quiet
+ * hours, or dead. The counts opposite are the other half of that: with a watch
+ * chip filtering the list, the number of rows on screen is not the number of jobs
+ * waiting for you, and this is where the real total stays visible.
  *
  * Renders nothing at all for `off`: with no enabled search there is no scan to
  * promise, and a bar saying so would be a bar saying nothing.
@@ -39,24 +56,39 @@ function statusFace(status: ScanStatus): { icon: LucideIcon; text: string } {
  * announcing, whereas a live region wrapped around a ticking countdown would
  * read the whole sentence out loud every second.
  */
-export function ScanStatusBar({ status }: { status: ScanStatus }) {
+export function ScanStatusBar({ status, unread, watchCount }: ScanStatusBarProps) {
   if (status.kind === "off") return null;
   const { icon: Icon, text } = statusFace(status);
   const scanning = status.kind === "scanning";
+
+  // Paused is a state, not a tally: counting down jobs "new" under a switch the
+  // user deliberately turned off invites the reading that scanning is continuing.
+  const counts =
+    status.kind === "disabled"
+      ? "Paused"
+      : unread === undefined || watchCount === undefined
+        ? null
+        : `${unread} new · ${plural(watchCount, "watch", "watches")}`;
+
   return (
     <div
       data-kind={status.kind}
       {...(scanning ? { role: "status" } : {})}
       className={cn(
-        "flex items-center gap-1.5 border-t bg-card/60 px-3 py-1.5 text-[11px] text-muted-foreground",
+        "flex shrink-0 items-center gap-2.5 border-t bg-background px-3 py-2 text-xs text-muted-foreground md:px-4",
         status.kind === "halted" && "text-destructive",
       )}
     >
-      <Icon
-        className={cn("size-3 shrink-0", scanning && "animate-spin")}
-        aria-hidden="true"
-      />
-      <span className="truncate">{text}</span>
+      <span className="inline-flex min-w-0 items-center gap-1.5">
+        <Icon
+          className={cn("size-3.5 shrink-0", scanning && "animate-spin")}
+          aria-hidden="true"
+        />
+        <span className="truncate">{text}</span>
+      </span>
+      {counts && (
+        <span className="ml-auto shrink-0 tabular-nums">{counts}</span>
+      )}
     </div>
   );
 }

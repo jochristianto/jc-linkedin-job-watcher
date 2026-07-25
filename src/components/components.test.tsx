@@ -19,7 +19,7 @@ import { EmptyState } from "./empty-state.tsx";
 import { HowItWorks } from "./how-it-works.tsx";
 import { JobList } from "./job-list.tsx";
 import { JobRow } from "./job-row.tsx";
-import { ListHeader } from "./list-header.tsx";
+import { HeaderMenu, ListHeader } from "./list-header.tsx";
 import { ScanButton } from "./scan-button.tsx";
 import { ScanStatusBar } from "./scan-status.tsx";
 import { Toolbar } from "./toolbar.tsx";
@@ -33,6 +33,10 @@ import type { ChipWatch, EmptyKind, JobView } from "../view-model.ts";
 const html = (node: React.ReactElement): string =>
   renderToStaticMarkup(<TooltipProvider>{node}</TooltipProvider>);
 
+/** A frozen clock, so the "Found …" chip is a fixed string rather than whatever
+ *  the machine's wall clock says when the suite runs. */
+const NOW = Date.UTC(2026, 0, 15, 9, 0, 0);
+
 function job(overrides: Partial<JobView> = {}): JobView {
   return {
     id: "3901",
@@ -42,22 +46,38 @@ function job(overrides: Partial<JobView> = {}): JobView {
     postedText: "2 hours ago",
     watchName: "Indonesia",
     url: "https://www.linkedin.com/jobs/view/3901/",
+    foundAt: NOW - 41 * 60_000,
     opened: false,
     read: false,
     blocked: false,
     applied: false,
+    notes: "",
     ...overrides,
   };
 }
 
 const noop = () => {};
 
-/** A row on its own, with its three callbacks stubbed. */
-const row = (j: JobView, armed = false): string =>
+/** The Block and read buttons' own opening tags, out of a rendered row. Just the
+ *  tags: everything between one `<button` and the next is most of the row after
+ *  it, so asking "does this button carry class X?" of that would answer about the
+ *  anchor beside it too. Slicing at the first `>` is safe — React escapes the one
+ *  inside class names like `has-[>svg]:px-2.5`. */
+const actionTags = (html: string): string[] =>
+  html
+    .split("<button")
+    .filter((c) => /data-action="(block|read)"/.test(c))
+    .map((c) => c.slice(0, c.indexOf(">")));
+
+/** A row on its own, with its three callbacks stubbed. Defaults to the tab's
+ *  layout; pass "popup" for the stacked one. */
+const row = (j: JobView, armed = false, variant: "tab" | "popup" = "tab"): string =>
   html(
     <JobRow
       job={j}
+      variant={variant}
       armed={armed}
+      now={NOW}
       onOpen={noop}
       onToggleRead={noop}
       onBlock={noop}
@@ -84,15 +104,147 @@ test("JobRow shows the title and a company/location meta line", () => {
   const h = row(job());
   assert.match(h, /Senior Software Engineer/);
   assert.match(h, /Acme Corp · Jakarta, Indonesia/);
-  assert.match(h, /2 hours ago/);
   assert.match(h, /Indonesia/);
+});
+
+test("JobRow separates the posting's own age from when the watcher found it", () => {
+  // Two facts, not one. A 12-hour-old posting found four minutes ago is the loop
+  // working; the same posting found eleven hours late is not, and a single
+  // "2 hours ago" cannot tell those apart.
+  const h = row(job({ postedText: "12 hours ago" }));
+  assert.match(h, /Posted 12h ago/);
+  assert.match(h, /Found 41m ago/);
+  assert.match(h, /lucide-history/);
+});
+
+test("JobRow leads with the employer monogram, blocking being an employer choice", () => {
+  assert.match(row(job({ company: "Acme Corp" })), />A</);
+  // The Japanese corporate prefix is stripped, or every third employer wears
+  // an identical 株 tile.
+  assert.match(row(job({ company: "（株）テイルウィンド" })), />テ</);
+  assert.match(row(job()), /data-actions="inline"/);
+});
+
+test("JobRow in the popup drops the monogram and stacks the actions below", () => {
+  // 380px is not enough for a tile, a title and three buttons on one line: the
+  // decorations were costing ~100px and nearly every title wrapped to three
+  // lines because of it. The popup spends that width on the job instead.
+  const h = row(job({ company: "Acme Corp" }), false, "popup");
+  assert.match(h, /data-actions="below"/);
+  // No employer tile — the `size-7.5` box is the tab layout's alone.
+  assert.doesNotMatch(h, /size-7\.5/);
+  assert.match(row(job()), /size-7\.5/);
+  // The unread marker survives it, in a column of its own so read and unread
+  // titles still start on the same vertical line.
+  assert.match(h, /bg-unread/);
+  assert.doesNotMatch(row(job({ read: true }), false, "popup"), /bg-unread/);
+});
+
+test("JobRow's popup actions take the whole line, split evenly between them", () => {
+  // Two buttons on a line of their own at 380px: half a card each is a target
+  // you hit without aiming, and two equal halves read as one control rather
+  // than as buttons trailing off the right edge.
+  const h = row(job(), false, "popup");
+  const buttons = actionTags(h);
+  assert.equal(buttons.length, 2);
+  // `flex-1` off a zero basis is what makes it 50:50 regardless of the two
+  // labels' different lengths — the line itself is full width.
+  for (const b of buttons) assert.match(b, /\bflex-1\b/);
+  assert.match(h, /data-actions="below"[\s\S]*?<div class="[^"]*\bborder-t\b[^"]*\bpy-1\.5\b/);
+});
+
+test("JobRow fences the popup's action line off from the posting with a rule", () => {
+  // Without it the buttons sat straight under "Found 4h ago · Opened" — grey,
+  // small, the same size as the labels beside them — and the chips read as the
+  // start of the action line rather than the end of the posting.
+  const h = row(job(), false, "popup");
+  // Inset from the card's edges (`mx-3`) rather than run wall to wall, so the
+  // rule starts where the posting's text starts and reads as dividing the
+  // card's contents rather than as a second card boundary.
+  assert.match(h, /<div class="[^"]*\bborder-t\b[^"]*\bmx-3\b/);
+  // The rule is the popup's alone: in the tab the buttons are beside the
+  // posting, so there are no two halves to separate.
+  assert.doesNotMatch(row(job()), /border-t/);
+});
+
+test("JobRow leaves the tab's actions their natural size, centred on the row", () => {
+  // Beside the posting they are a margin, not a line: stretching them there
+  // would take width off the job itself, which is the whole point of the tab.
+  const h = row(job());
+  const buttons = actionTags(h);
+  assert.equal(buttons.length, 2);
+  for (const b of buttons) assert.doesNotMatch(b, /\bflex-1\b/);
+  // The card is as tall as its chips and its note; buttons pinned to the top of
+  // that read as belonging to the title alone.
+  assert.match(h, /data-actions="inline"[\s\S]*?<span class="[^"]*\bself-center\b/);
+});
+
+test("JobRow keeps all three controls, and their order, in both layouts", () => {
+  for (const variant of ["tab", "popup"] as const) {
+    const h = row(job({ applied: true }), false, variant);
+    assert.match(h, /data-action="unapply"/, variant);
+    assert.match(h, /data-action="block"/, variant);
+    assert.match(h, /data-action="read"/, variant);
+    // Moving them to their own line must not reshuffle them: the tick stays
+    // last, out at the edge where a one-tap dismiss belongs.
+    assert.ok(
+      h.indexOf('data-action="unapply"') < h.indexOf('data-action="block"'),
+      `${variant}: the Applied undo comes before Block`,
+    );
+    assert.ok(
+      h.indexOf('data-action="block"') < h.indexOf('data-action="read"'),
+      `${variant}: Block comes before the tick`,
+    );
+    // And they stay outside the anchor in both — a <button> inside <a> is invalid.
+    const anchor = h.slice(h.indexOf("<a "), h.indexOf("</a>"));
+    assert.doesNotMatch(anchor, /<button/, variant);
+  }
+});
+
+test("JobRow gives the work mode its own tinted chip, split off the location", () => {
+  const h = row(job({ location: "Tokyo, Japan (Remote)" }));
+  assert.match(h, />Remote</);
+  // The full location still reads as one line above it — the chip is a second
+  // view of the same field, not a replacement for it.
+  assert.match(h, /Acme Corp · Tokyo, Japan \(Remote\)/);
+});
+
+test("JobRow marks a job you clicked through to without dismissing it", () => {
+  const h = row(job({ opened: true }));
+  assert.match(h, />Opened</);
+  assert.doesNotMatch(row(job({ opened: false })), />Opened</);
+});
+
+test("JobRow shows the note an applied job was logged with", () => {
+  // The whole reason the note is stored is reading it back off the list months
+  // later, and until this redesign nothing ever displayed it.
+  const h = row(job({ applied: true, notes: "Referred by Mika" }));
+  assert.match(h, /Referred by Mika/);
+  // No empty note box on a job answered Yes with nothing typed.
+  assert.doesNotMatch(row(job({ applied: true, notes: "" })), />Note</);
 });
 
 test("JobRow marks read jobs read — and opening one does NOT read it", () => {
   assert.match(row(job({ read: false })), /data-read="false"/);
   assert.match(row(job({ read: true })), /data-read="true"/);
   // The bug this whole split exists to fix: clicking a row used to dismiss it.
+  // It clears the unread dot (see below) but the row is not read, not greyed,
+  // and — the part that was the bug — not gone from the New list.
   assert.match(row(job({ opened: true })), /data-read="false"/);
+});
+
+test("JobRow drops the unread dot on a job you clicked, not just one you ticked", () => {
+  // The dot means "not looked at yet", so it answers to the same rule the badge
+  // counts by — otherwise the header says 2 new over a list showing no dots.
+  assert.match(row(job({ opened: false, read: false })), /bg-unread/);
+  assert.doesNotMatch(row(job({ opened: true, read: false })), /bg-unread/);
+  assert.doesNotMatch(row(job({ opened: false, read: true })), /bg-unread/);
+  // What survives on a clicked row is the "Opened" chip: the dot is gone, but
+  // the row still says which of the two ways it got that way.
+  assert.match(row(job({ opened: true, read: false })), />Opened</);
+  // Blocked never carries one either way — it is off the badge count, so a dot
+  // would be claiming a job that isn't.
+  assert.doesNotMatch(row(job({ blocked: true })), /bg-unread/);
 });
 
 test("JobRow flags an opened job so its row can be highlighted, not hidden", () => {
@@ -111,6 +263,17 @@ test("JobRow's read button is a toggle: mark as read, then back to unread", () =
   assert.match(row(job({ read: false })), /title="Mark as read"/);
   assert.match(row(job({ read: true })), /data-action="read"[^>]*aria-pressed="true"/);
   assert.match(row(job({ read: true })), /title="Mark as unread"/);
+});
+
+test("JobRow spells the tick out in the popup and leaves it bare in the tab", () => {
+  // On its own half-width line there is room for the word, and a lone icon in a
+  // button that size is a lot of target for no explanation. Beside a three-line
+  // posting it is one label too many, so the tab keeps only the tooltip and the
+  // accessible name — which is where the word is actually wanted.
+  assert.match(row(job(), false, "popup"), />Mark as read</);
+  assert.doesNotMatch(row(job()), />Mark as read</);
+  assert.match(row(job()), /data-action="read"[^>]*aria-label="Mark as read"/);
+  assert.match(row(job({ read: true })), /data-action="read"[^>]*aria-label="Mark as unread"/);
 });
 
 test("JobRow's block button names the company and flips to Unblock", () => {
@@ -148,9 +311,9 @@ test("JobRow leaves the block button unarmed by default", () => {
   assert.doesNotMatch(row(job()), /Sure\?/);
 });
 
-test("JobRow's row actions are Lucide icons, and the read one flips", () => {
-  assert.match(row(job({ read: false })), /lucide-check/);
-  assert.match(row(job({ read: true })), /lucide-rotate-ccw/);
+test("JobRow's row actions are Lucide icons, never a font glyph", () => {
+  assert.match(row(job({ read: false })), /lucide-eye-off/);
+  assert.match(row(job({ read: true })), /lucide-eye-off/);
   assert.match(row(job()), /lucide-ban/);
   // The icon is decorative; the button's own aria-label is what gets announced.
   assert.match(row(job()), /aria-label="Mark as read"[^>]*>\s*<svg[^>]*aria-hidden="true"/);
@@ -261,11 +424,14 @@ test("JobList in 'new' mode hides jobs already read", () => {
 });
 
 test("JobList in 'new' mode KEEPS a job you merely opened", () => {
-  // The reported bug: clicking a row made it vanish from New for good. Opening
-  // now only highlights it — it stays until you tick it read.
+  // The reported bug: clicking a row made it vanish from New for good — and in
+  // the popup it vanished as the popup closed, so you never saw it go. Opening
+  // takes the job off the badge count and clears its dot, but the row itself
+  // stays put until you tick it read.
   const h = list([job({ id: "1", opened: true, read: false })], "new");
   assert.match(h, /data-job-id="1"/);
   assert.match(h, /data-opened="true"/);
+  assert.doesNotMatch(h, /bg-unread/);
 });
 
 test("JobList in 'all' mode keeps read jobs (they stay on screen, greyed)", () => {
@@ -439,13 +605,29 @@ test("ApplyNote opens the box the note is typed in, empty and enabled", () => {
   assert.match(h, /Notes \(optional\)/);
 });
 
-test("ApplyNote commits with Submit, and takes the Yes back with Cancel", () => {
+test("ApplyNote commits with Save, and takes the Yes back with Cancel", () => {
   const h = note();
-  assert.match(buttonWith(h, 'data-action="apply-submit"'), />Submit</);
-  // Nothing to fill in first — the note is optional, so Submit is live on arrival.
+  assert.match(buttonWith(h, 'data-action="apply-submit"'), />Save</);
+  // Nothing to fill in first — the note is optional, so Save is live on arrival.
   assert.doesNotMatch(buttonWith(h, 'data-action="apply-submit"'), DISABLED_ATTR);
   // The way out of a Yes that was a misclick: it dismisses, so nothing is recorded.
   assert.match(buttonWith(h, 'data-action="apply-dismiss"'), />Cancel</);
+});
+
+test("ApplyNote offers the common notes as one tap each", () => {
+  // A Yes with no note is a record you can do nothing with in three months, and
+  // an empty box asked for a sentence. These are the four cases pre-typed.
+  const h = note();
+  const chips = h.split("<button").filter((c) => c.includes('data-action="apply-quick-note"'));
+  assert.equal(chips.length, 4);
+  assert.match(h, /Referral/);
+  assert.match(h, /Take-home sent/);
+});
+
+test("ApplyNote says how to commit and back out from the keyboard", () => {
+  // The box swallows Enter, so the shortcut that saves has to be written down —
+  // and spelled out rather than drawn with a ⌘ glyph that tofu-boxes off macOS.
+  assert.match(note(), /Cmd\/Ctrl \+ Enter saves · Esc cancels/);
 });
 
 // ── Toolbar: the watch chips and the New⇄All toggle ──────────────────────────
@@ -576,13 +758,15 @@ test("nothing in the rendered markup falls back to an emoji or a bare glyph", ()
 
 // ── ListHeader ───────────────────────────────────────────────────────────────
 
+/** The header. Defaults to the tab, which is the view that still lays its
+ *  controls out in a row — the popup's are behind {@link menu} now. */
 const header = (over: Partial<React.ComponentProps<typeof ListHeader>> = {}): string =>
   html(
     <ListHeader
       title="New jobs"
       badge={0}
       scanButton="idle"
-      variant="popup"
+      variant="tab"
       enabled={true}
       onToggleEnabled={noop}
       onScan={noop}
@@ -593,13 +777,31 @@ const header = (over: Partial<React.ComponentProps<typeof ListHeader>> = {}): st
     />,
   );
 
+/** The popup menu's contents, rendered on their own. A Radix dialog renders
+ *  nothing until it opens and nothing through `renderToStaticMarkup` even then —
+ *  its portal has no DOM to portal into — which is exactly why `HeaderMenu` is
+ *  exported apart from the dialog that holds it. */
+const menu = (over: Partial<React.ComponentProps<typeof HeaderMenu>> = {}): string =>
+  html(
+    <HeaderMenu
+      scanButton="idle"
+      enabled={true}
+      onToggleEnabled={noop}
+      onScan={noop}
+      onMarkAllRead={noop}
+      onOpenOptions={noop}
+      {...over}
+    />,
+  );
+
 test("ListHeader renders a Mark all as read control", () => {
   assert.match(header(), /id="mark-all-read"/);
+  assert.match(menu(), /id="mark-all-read"/);
 });
 
 test("ListHeader's Options control is a labelled gear icon, not a glyph", () => {
   const h = header();
-  // Icon-only, so the label lives on the button — the <svg> is aria-hidden.
+  // Icon-only in the tab, so the label lives on the button — the <svg> is aria-hidden.
   assert.match(h, /id="open-options"[^>]*aria-label="Options"/);
   assert.match(h, /lucide-settings/);
   assert.doesNotMatch(h, /⚙/);
@@ -614,27 +816,80 @@ test("ListHeader escapes the title", () => {
   assert.match(header({ title: "A & B" }), /A &amp; B/);
 });
 
-test("ListHeader offers to open the popup's list as a full page", () => {
+test("ListHeader folds the popup's control cluster into a hamburger", () => {
+  // 380px could not hold a title and five controls on one line, so the header
+  // wrapped to two. Two buttons fit beside the title; the four fold in.
   const h = header({ variant: "popup" });
-  // Icon-only, so the label lives on the button — the <svg> is aria-hidden.
+  assert.match(h, /id="header-menu"/);
+  assert.match(h, /lucide-menu/);
+  for (const id of ["scan-now", "mark-all-read", "open-options", "master-switch"]) {
+    assert.doesNotMatch(h, new RegExp(`id="${id}"`), id);
+  }
+});
+
+test("ListHeader keeps the way out of the popup out of the popup's menu", () => {
+  // "Open as a full page" is the escape from the cramped surface; putting the
+  // exit inside the thing you are escaping is a click too many. It sits beside
+  // the hamburger, and before it — the menu is the last thing on the row.
+  const h = header({ variant: "popup" });
   assert.match(h, /id="open-tab"[^>]*aria-label="Open as a full page"/);
-  assert.match(h, /lucide-external-link/);
+  assert.ok(
+    h.indexOf('id="open-tab"') < h.indexOf('id="header-menu"'),
+    "the expand button should render before the menu button",
+  );
+  // And it is not duplicated inside the menu.
+  assert.doesNotMatch(menu(), /id="open-tab"/);
+});
+
+test("ListHeader leaves the tab's controls in a row, with no menu button", () => {
+  // The tab has the width the popup does not, so nothing is worth hiding here.
+  const h = header({ variant: "tab" });
+  assert.doesNotMatch(h, /id="header-menu"/);
+  for (const id of ["scan-now", "mark-all-read", "open-options", "master-switch"]) {
+    assert.match(h, new RegExp(`id="${id}"`), id);
+  }
+});
+
+test("ListHeader's menu button admits when watching is paused", () => {
+  // A shut menu says nothing about the state of what is inside it, and "the loop
+  // is off" is the one thing you must not have to open a menu to find out.
+  assert.match(header({ variant: "popup", enabled: false }), /id="header-menu"[^>]*aria-label="Menu — watching is paused"/);
+  assert.match(header({ variant: "popup", enabled: true }), /id="header-menu"[^>]*aria-label="Menu"/);
+});
+
+test("HeaderMenu spells every control out in words, not icons alone", () => {
+  // The reason for folding them in here at all: as a row of icons in a 380px
+  // header, most of them were a guess until you hovered. A list has the room.
+  const h = menu();
+  for (const label of ["Scan now", "Mark all as read", "Options"]) {
+    assert.match(h, new RegExp(`>${label}<`), label);
+  }
 });
 
 test("ListHeader renders the master on/off switch, checked while watching", () => {
-  const h = header({ enabled: true });
-  assert.match(h, /id="master-switch"/);
-  assert.match(h, /data-state="checked"/);
+  for (const h of [header({ enabled: true }), menu({ enabled: true })]) {
+    assert.match(h, /id="master-switch"/);
+    assert.match(h, /data-state="checked"/);
+  }
 });
 
 test("ListHeader hides Scan now while the master switch is off", () => {
   // Nothing to scan while paused, so the manual trigger goes away with the loop;
   // the switch itself is the way back on.
-  const off = header({ enabled: false });
-  assert.doesNotMatch(off, /id="scan-now"/);
-  assert.match(off, /data-state="unchecked"/);
+  for (const off of [header({ enabled: false }), menu({ enabled: false })]) {
+    assert.doesNotMatch(off, /id="scan-now"/);
+    assert.match(off, /data-state="unchecked"/);
+  }
   // ...and it comes back the moment watching resumes.
   assert.match(header({ enabled: true }), /id="scan-now"/);
+  assert.match(menu({ enabled: true }), /id="scan-now"/);
+});
+
+test("HeaderMenu says what the master switch is currently doing", () => {
+  // The header only ever had a tooltip for this. A list row has room to say it
+  // outright, and the switch is the one control here worth a sentence.
+  assert.match(menu({ enabled: true }), />Watching for jobs</);
+  assert.match(menu({ enabled: false }), />Paused</);
 });
 
 test("ListHeader omits the expand control in the tab, which already is one", () => {

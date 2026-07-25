@@ -23,9 +23,17 @@ const SCAN_BUTTON: Record<ScanButtonState, { label: string; title: string }> = {
 export function ScanButton({
   state,
   onScan,
+  compact = false,
+  className,
 }: {
   state: ScanButtonState;
   onScan: () => void;
+  compact?: boolean;
+  /** Layout imposed by wherever it is standing — the popup's menu stretches it
+   *  to a full-width row. Applied last, so a caller that has to override the
+   *  resting look can; `halted` is the one state worth leaving alone, since a
+   *  filled button is how it asks to be pressed. */
+  className?: string;
 }) {
   const { label, title } = SCAN_BUTTON[state];
   const scanning = state === "scanning";
@@ -39,10 +47,17 @@ export function ScanButton({
       title={title}
       disabled={scanning}
       onClick={onScan}
-      className={cn("h-7 gap-1.5 px-2 text-xs", state === "idle" && "text-muted-foreground")}
+      className={cn(
+        "h-7 gap-1.5 px-2 text-xs",
+        state === "idle" && "text-muted-foreground",
+        className,
+      )}
     >
-      <RefreshCw className={cn("size-3.5", scanning && "animate-spin")} aria-hidden="true" />
-      {label}
+      <RefreshCw
+        className={cn("size-3.5", scanning && "animate-spin")}
+        aria-hidden="true"
+      />
+      {!compact && label}
     </Button>
   );
 }

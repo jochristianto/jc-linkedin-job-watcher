@@ -201,19 +201,25 @@ export function mergeJobs(existing: JobsMap, newJobs: Job[]): JobsMap {
 }
 
 /**
- * The unread-job count the badge shows (PRD §7). Unread, not unopened: opening a
- * job only highlights its row, so the badge drops when you actually dismiss one
- * with the row's tick (or "Mark all read").
+ * The count of jobs you have not looked at, which is what the badge shows (PRD
+ * §7). Either way of looking clears it: clicking through to the posting, or
+ * ticking the row read without opening it (or "Mark all read"). The badge is the
+ * "anything I haven't seen?" number, so a job you clicked has done its job even
+ * though it stays on the New list until the tick — `visibleJobs` filters on
+ * `read` alone, deliberately.
  *
  * Jobs from a blocked company never count. Blocking from a row leaves the
  * already-found rows on screen (greyed) rather than deleting them, so without
  * this the badge would keep nagging about a company you just told it to stop
  * showing you. `blockedNormalized` is the already-lowercased fragment list from
  * `settings.blockedCompanies` — same form `passesFilters` takes.
+ *
+ * Kept byte-for-byte in step with `unreadCount` in view.ts, which counts the same
+ * rule over a `Job[]` for the header badge.
  */
 export function unreadCount(jobs: JobsMap, blockedNormalized: string[] = []): number {
   return Object.values(jobs).filter(
-    (j) => !j.read && !isCompanyBlocked(j.company, blockedNormalized),
+    (j) => !j.read && !j.opened && !isCompanyBlocked(j.company, blockedNormalized),
   ).length;
 }
 

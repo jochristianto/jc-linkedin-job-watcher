@@ -1,11 +1,14 @@
 import type { ReactNode } from "react";
 
 import { JobRow } from "@/components/job-row.tsx";
-import { visibleJobs, type JobView, type ListMode } from "@/view-model.ts";
+import { visibleJobs, type JobView, type ListMode, type ViewVariant } from "@/view-model.ts";
 
 export type JobListProps = {
   jobs: JobView[];
   mode: ListMode;
+  /** Which surface these rows are in. Handed straight to `JobRow`, which lays
+   *  itself out differently in the popup's 380px than in the tab. */
+  variant?: ViewVariant;
   /** The at-most-one row whose Block button is mid-question. One id rather than
    *  a set: arming a second button disarms the first, so two rows can never be
    *  asking at once. */
@@ -17,6 +20,10 @@ export type JobListProps = {
    *  out by the mode and a job that never existed look the same. */
   applyPromptJobId?: string | null;
   applyPrompt?: ReactNode;
+  /** The clock, handed down to every row so the whole list agrees on what "Found
+   *  41m ago" means. One value rather than a `Date.now()` per row: rows rendered
+   *  in the same paint should not disagree by a minute at the boundary. */
+  now?: number;
   onOpen: (id: string, background: boolean) => void;
   onToggleRead: (id: string) => void;
   onBlock: (id: string) => void;
@@ -33,20 +40,24 @@ export type JobListProps = {
 export function JobList({
   jobs,
   mode,
+  variant = "tab",
   armedBlockId = null,
   applyPromptJobId = null,
   applyPrompt = null,
+  now = Date.now(),
   onOpen,
   onToggleRead,
   onBlock,
   onUnapply,
 }: JobListProps) {
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-2">
       {visibleJobs(jobs, mode).map((job) => (
         <JobRow
           key={job.id}
           job={job}
+          variant={variant}
+          now={now}
           armed={job.id === armedBlockId}
           footer={job.id === applyPromptJobId ? applyPrompt : null}
           onOpen={(background) => onOpen(job.id, background)}

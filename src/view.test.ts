@@ -14,6 +14,7 @@ import {
   scanStatus,
 } from "./view.ts";
 import { PUSH_FAILING_MESSAGE } from "./health.ts";
+import { visibleJobs } from "./view-model.ts";
 import { minutesOfDay } from "./schedule.ts";
 import type { ViewContext } from "./view.ts";
 import type { Job, Watch, BlockedCompany, QuietHours } from "./types.ts";
@@ -86,11 +87,12 @@ test("toJobViews derives blocked from the blocklist, so unblocking un-greys rows
   assert.equal(toJobViews(jobs, watches, [])[0]!.blocked, false);
 });
 
-test("unreadCount counts unread jobs — opening one does not decrement it", () => {
+test("unreadCount counts the jobs you have not looked at — either way of looking clears one", () => {
   const jobs = [job({ id: "1" }), job({ id: "2", read: true }), job({ id: "3" })];
   assert.equal(unreadCount(jobs), 2);
-  // Opened but not read still counts: it's still sitting in your list.
-  assert.equal(unreadCount([job({ id: "1", opened: true, read: false })]), 1);
+  // Clicking through counts as looking, even though the row stays on the New
+  // list — the badge answers "anything I haven't seen?", not "anything left?".
+  assert.equal(unreadCount([job({ id: "1", opened: true, read: false })]), 0);
 });
 
 test("unreadCount ignores blocked companies, so blocking quiets the badge", () => {
@@ -328,9 +330,13 @@ test("selectView badge counts unread regardless of the view mode", () => {
   assert.equal(selectView(ctx({ jobs, mode: "all" })).badge, 1);
 });
 
-test("selectView badge ignores a job you merely opened — it is still waiting", () => {
+test("selectView badge drops a job you opened, though the row stays on the list", () => {
   const jobs = [job({ id: "1", opened: true, read: false })];
-  assert.equal(selectView(ctx({ jobs })).badge, 1);
+  const v = selectView(ctx({ jobs }));
+  // Off the count — you have looked at it, which is what the count is about…
+  assert.equal(v.badge, 0);
+  // …but still on the New list, because you have not said you are done with it.
+  assert.equal(visibleJobs(v.jobs, v.mode).length, 1);
 });
 
 test("selectView flags a blocked company's rows and drops them off the badge", () => {

@@ -133,14 +133,16 @@ test("mergeJobs preserves an existing job's read state too — a re-scan can't u
   assert.equal(merged["1"]!.readAt, 500);
 });
 
-test("unreadCount counts jobs not yet marked read — opening one doesn't count", () => {
+test("unreadCount counts the jobs you have not looked at — clicked or ticked, both clear", () => {
   const jobs: JobsMap = {
     "1": job({ id: "1", read: false }),
     "2": job({ id: "2", read: true }),
-    // Opened but never dismissed: still sitting in the list, still counted.
+    // Clicked open but never ticked: off the badge, still on the New list. The
+    // badge counts what you have not seen, `visibleJobs` keeps what you have not
+    // finished with, and those are two different questions.
     "3": job({ id: "3", opened: true, read: false }),
   };
-  assert.equal(unreadCount(jobs), 2);
+  assert.equal(unreadCount(jobs), 1);
 });
 
 test("unreadCount skips blocked companies so blocking a row quiets the badge", () => {

@@ -22,7 +22,8 @@ import { EmptyState } from "../src/components/empty-state.tsx";
 import { HealthBanner } from "../src/components/health-banner.tsx";
 import { HowItWorks } from "../src/components/how-it-works.tsx";
 import { JobList } from "../src/components/job-list.tsx";
-import { ListHeader } from "../src/components/list-header.tsx";
+import { HeaderMenu, ListHeader } from "../src/components/list-header.tsx";
+import { ScanningBar } from "../src/components/scanning.tsx";
 import { ScanStatusBar } from "../src/components/scan-status.tsx";
 import { Toolbar } from "../src/components/toolbar.tsx";
 import { TooltipProvider } from "../src/components/ui/tooltip";
@@ -52,19 +53,26 @@ function compileCss(): string {
 
 // ── Fake data ───────────────────────────────────────────────────────────────
 
+/** A frozen clock, so "Found 41m ago" is the same string on every build and the
+ *  generated files only change when a component does. */
+const NOW = Date.UTC(2026, 0, 15, 9, 0, 0);
+const minsAgo = (m: number) => NOW - m * 60_000;
+
 function job(over: Partial<JobView> = {}): JobView {
   return {
     id: "3901",
     title: "Senior Software Engineer",
     company: "Acme Corp",
-    location: "Jakarta, Indonesia",
+    location: "Jakarta, Indonesia (Hybrid)",
     postedText: "2 hours ago",
     watchName: "Indonesia",
     url: "https://www.linkedin.com/jobs/view/3901/",
+    foundAt: minsAgo(41),
     opened: false,
     read: false,
     blocked: false,
     applied: false,
+    notes: "",
     ...over,
   };
 }
@@ -77,19 +85,32 @@ const WATCHES = [
 /** The popup's list: unread rows, one already opened, one whose location never
  *  parsed (the field-missing case), one blocked company still on screen. */
 const POPUP_JOBS: JobView[] = [
-  job({ id: "1", title: "Senior Backend Engineer (Go)", company: "Tokopedia", postedText: "12 minutes ago" }),
-  job({ id: "2", title: "Staff Engineer, Platform", company: "GoTo Financial", location: "Jakarta", postedText: "1 hour ago", opened: true }),
+  job({ id: "1", title: "Senior Backend Engineer (Go)", company: "Tokopedia", postedText: "12 minutes ago", foundAt: minsAgo(4) }),
+  job({ id: "2", title: "Staff Engineer, Platform", company: "GoTo Financial", location: "Jakarta (On-site)", postedText: "1 hour ago", foundAt: minsAgo(23), opened: true }),
   // Location never parsed — the meta line must not leave a dangling separator.
-  job({ id: "3", title: "Principal Engineer", company: "Momo Financial", location: "", postedText: "3 hours ago" }),
-  job({ id: "4", title: "Engineering Manager", company: "Blocked Recruiters Ltd", location: "Remote", postedText: "5 hours ago", blocked: true }),
+  job({ id: "3", title: "Principal Engineer", company: "Momo Financial", location: "", postedText: "3 hours ago", foundAt: minsAgo(58) }),
+  job({ id: "4", title: "Engineering Manager", company: "Blocked Recruiters Ltd", location: "Remote", postedText: "5 hours ago", foundAt: minsAgo(94), blocked: true }),
 ];
 
 /** The tab's list: everything the popup shows plus the states only "All" mode
  *  reaches — a read row still on screen, and a Block button mid-question. */
 const TAB_JOBS: JobView[] = [
   ...POPUP_JOBS,
-  job({ id: "5", title: "Distinguished Engineer", company: "Grab", location: "Singapore", postedText: "yesterday", watchName: "Japan", read: true }),
-  job({ id: "6", title: "Head of Engineering", company: "Sea Group", location: "Singapore", postedText: "yesterday", watchName: "Japan" }),
+  job({ id: "5", title: "Distinguished Engineer", company: "Grab", location: "Singapore (Hybrid)", postedText: "yesterday", foundAt: minsAgo(1_100), watchName: "Japan", read: true }),
+  job({ id: "6", title: "Head of Engineering", company: "Sea Group", location: "Singapore (Remote)", postedText: "yesterday", foundAt: minsAgo(1_240), watchName: "Japan" }),
+  // The applied record, with the note it was logged against — the one row that
+  // shows the list doubling as a record of what you sent.
+  job({
+    id: "7",
+    title: "Director of Engineering",
+    company: "PT Acme Indonesia",
+    location: "Jakarta, Indonesia (On-site)",
+    postedText: "1 day ago",
+    foundAt: minsAgo(1_380),
+    opened: true,
+    applied: true,
+    notes: "Referral · Cover letter v3, asked about the platform team",
+  }),
 ];
 
 // ── Page shells ─────────────────────────────────────────────────────────────
@@ -135,8 +156,8 @@ function listView(opts: {
         data-variant={opts.variant}
         className={
           opts.variant === "popup"
-            ? "flex h-[600px] min-h-[480px] w-[380px] flex-col bg-background"
-            : "mx-auto flex min-h-screen max-w-[720px] flex-col border-x bg-background"
+            ? "flex h-150 min-h-120 w-95 flex-col overflow-hidden bg-background"
+            : "flex h-screen flex-col overflow-hidden bg-background"
         }
       >
         <ListHeader
@@ -161,18 +182,66 @@ function listView(opts: {
         {opts.banner && (
           <HealthBanner message={opts.banner.message} severity={opts.banner.severity} />
         )}
-        <div className="flex flex-1 flex-col overflow-y-auto px-2 pb-2">
-          <JobList
-            jobs={opts.jobs}
-            mode={opts.mode}
-            armedBlockId={opts.armedBlockId ?? null}
-            onOpen={noop}
-            onToggleRead={noop}
-            onBlock={noop}
-            onUnapply={noop}
+        <div className="flex-1 overflow-y-auto bg-[color-mix(in_oklab,var(--muted)_45%,var(--background))]">
+          <div className="mx-auto w-full max-w-220 p-2.5 md:p-3.5">
+            {opts.status.kind === "scanning" && <ScanningBar />}
+            <JobList
+              jobs={opts.jobs}
+              mode={opts.mode}
+              variant={opts.variant}
+              now={NOW}
+              armedBlockId={opts.armedBlockId ?? null}
+              onOpen={noop}
+              onToggleRead={noop}
+              onBlock={noop}
+              onUnapply={noop}
+            />
+            <div className="px-1 pt-3.5 pb-1 text-center text-xs text-muted-foreground">
+              {opts.jobs.length} shown · opened jobs are cleared after 7 days
+            </div>
+          </div>
+        </div>
+        <ScanStatusBar
+          status={opts.status}
+          unread={opts.badge}
+          watchCount={WATCHES.length}
+        />
+      </div>
+    </TooltipProvider>,
+  );
+}
+
+/**
+ * The popup's header menu, as the dialog panel it opens into.
+ *
+ * Its own frame rather than part of the popup frame, because a Radix dialog
+ * cannot be rendered here at all: it draws nothing until it is open, and its
+ * portal has no DOM to portal into under `renderToStaticMarkup`. Rendering
+ * `HeaderMenu` directly is what keeps these five controls visible in the
+ * mockups — the alternative is a picture of the popup with its whole right-hand
+ * side reduced to one anonymous button.
+ */
+function headerMenuFrame(): string {
+  return renderToStaticMarkup(
+    <TooltipProvider>
+      <div className="flex flex-col gap-2 p-4">
+        <p className="font-mono text-xs text-muted-foreground">
+          popup header menu — behind the one header button
+        </p>
+        <div className="flex w-87 flex-col gap-4 rounded-lg border bg-background p-4 shadow-lg">
+          <div className="flex flex-col gap-0.5">
+            <h2 className="text-sm font-semibold">Job Watcher</h2>
+            <p className="text-xs text-muted-foreground">Everything this popup can do.</p>
+          </div>
+          <HeaderMenu
+            scanButton="idle"
+            enabled={true}
+            onToggleEnabled={noop}
+            onScan={noop}
+            onMarkAllRead={noop}
+            onOpenOptions={noop}
           />
         </div>
-        <ScanStatusBar status={opts.status} />
       </div>
     </TooltipProvider>,
   );
@@ -210,7 +279,10 @@ const files: Record<string, string> = {
   "popup.html": page(
     "Popup — LinkedIn Job Watcher",
     css,
-    listView({
+    // The popup as it opens, and beside it the menu its one header button leads
+    // to. Two frames because the second cannot be rendered inside the first —
+    // see `headerMenuFrame`.
+    `<div class="flex flex-wrap items-start gap-2">${listView({
       variant: "popup",
       title: "New jobs",
       badge: 3,
@@ -218,7 +290,7 @@ const files: Record<string, string> = {
       mode: "new",
       activeWatchId: null,
       status: { kind: "waiting", remainingMs: 252_000, quiet: false },
-    }),
+    })}${headerMenuFrame()}</div>`,
   ),
   "jobs.html": page(
     "Jobs tab — LinkedIn Job Watcher",

@@ -49,9 +49,9 @@ New jobs surface in two places: a badge count on the extension icon, and a deskt
 ### List view
 
 - Shows unread jobs, newest first: title, company, location, posted time, source watch
-- Badge on the extension icon shows unread count
-- Click a job → opens it in a new tab and **highlights** the row. Opening is not dismissing: the row stays in the list, so a job you clicked into is still there when you come back to it
-- Each row has its own "mark as read" button — the only action that greys a row, drops it out of "New" and decrements the badge. It toggles, so a mis-click is one press back
+- Badge on the extension icon counts the jobs you have not looked at yet
+- Click a job → opens it in a new tab, clears the row's unread dot and takes it off the badge, and tags the row "Opened". Looking is not dismissing, though: the row itself **stays in the list**, so a job you clicked into is still there when you come back to it
+- Each row has its own "mark as read" button — the only action that greys a row and drops it out of "New". It toggles, so a mis-click is one press back, and un-ticking a row you had opened puts its dot back
 - Each row has its own "block this company" button, so a bad company can be blocklisted from where you see it rather than from Options. Already-listed jobs from that company stay on screen, greyed and tagged, and stop counting towards the badge; it's future scans that stop surfacing it. It toggles too
 - Filter chips to show only one watch's results
 - Toggle between "New" and "All"
@@ -109,7 +109,7 @@ type Job = {
   url: string;
   foundAt: number;
   watchId: string; // which saved search surfaced it
-  opened: boolean; // you clicked through to the posting — highlights the row
+  opened: boolean; // you clicked through — clears the dot and the badge count, keeps the row
   openedAt: number | null;
   read: boolean; // you dismissed it — greys the row, drops it out of "New"
   readAt: number | null;

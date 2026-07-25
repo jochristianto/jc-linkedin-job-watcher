@@ -68,6 +68,25 @@
   --faint: oklch(0.6488 0.0146 262.36);
   /* The unread dot and the accent bar down the side of an unread row. */
   --unread: oklch(0.5156 0.1632 254.73);
+
+  /* The two roles the redesigned row's chips introduced. `--success` is the
+   * Applied badge and the strip that manages it — the same green as `--ok`,
+   * named for the role a badge variant asks for rather than for the sentence
+   * the Send-test result uses it in. `--info` is the third work-mode tone:
+   * Remote is success, Hybrid is info, On-site is plain foreground. */
+  --success: oklch(0.467 0.1247 148.2);
+  --info: oklch(0.5156 0.1632 254.73);
+
+  /* Employer monogram tones. A company's first letter is tinted by a stable
+   * hash of its name (see `companyTone`), so the same employer wears the same
+   * colour in every scan and repeat senders are recognisable before the name is
+   * read. Five hues, deliberately low-chroma: they sit behind a letter, not in
+   * front of it. */
+  --chart-1: oklch(0.5156 0.1632 254.73);
+  --chart-2: oklch(0.5502 0.1274 172.55);
+  --chart-3: oklch(0.5713 0.1516 39.51);
+  --chart-4: oklch(0.5289 0.1655 305.42);
+  --chart-5: oklch(0.5698 0.1201 132.19);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -105,6 +124,15 @@
     --destructive-weak: oklch(0.2749 0.0425 24.74);
     --faint: oklch(0.5555 0.0216 255.6);
     --unread: oklch(0.6929 0.1647 253.96);
+
+    --success: oklch(0.7204 0.1625 149.39);
+    --info: oklch(0.6929 0.1647 253.96);
+
+    --chart-1: oklch(0.6929 0.1647 253.96);
+    --chart-2: oklch(0.7217 0.1179 173.36);
+    --chart-3: oklch(0.7413 0.1421 51.86);
+    --chart-4: oklch(0.7127 0.1439 306.51);
+    --chart-5: oklch(0.7434 0.1359 134.87);
   }
 }
 
@@ -138,6 +166,8 @@
   --color-ok: var(--ok);
   --color-faint: var(--faint);
   --color-unread: var(--unread);
+  --color-success: var(--success);
+  --color-info: var(--info);
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);

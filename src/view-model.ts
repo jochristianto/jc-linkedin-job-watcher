@@ -20,6 +20,13 @@ export type JobView = {
   postedText: string;
   watchName: string;
   url: string;
+  /** When *your watcher* first saw this posting (`Job.foundAt`), as an epoch ms.
+   *  The row shows it next to the posting's own age because the two answer
+   *  different questions: "Posted 6h ago" is how old the job is, "Found 41m ago"
+   *  is how long it has been sitting here unread. A scan that picks up a 12-hour-old
+   *  posting minutes after it appeared is the loop working; one that finds it
+   *  eleven hours late is not, and only the second number says which happened. */
+  foundAt: number;
   /** You clicked this row and we opened the posting. Highlights the row; it
    *  stays in the list either way. */
   opened: boolean;
@@ -34,6 +41,11 @@ export type JobView = {
    *  row so the list is also a record of what you have applied to, and stops the
    *  question being asked about this job a second time. */
   applied: boolean;
+  /** The note typed alongside that Yes (`Job.applyNotes`), or "" when the box was
+   *  left empty. Rendered under the posting on an applied row: the whole reason
+   *  the note is worth storing is being able to read it back off the list weeks
+   *  later, and until now nothing ever showed it. */
+  notes: string;
 };
 
 /** The answer to "Did you apply for this job?". `null` is a real third state, not
@@ -71,10 +83,16 @@ export type ListMode = "new" | "all";
  * The rows a mode actually puts on screen: "new" drops the *read* ones, "all"
  * keeps everything.
  *
- * Read, not opened — a job you clicked open stays here highlighted so you can go
- * back to it, and only the row's tick removes it. Blocked jobs stay in both modes
- * too, greyed: the blocklist governs what future scans surface, and silently
- * deleting rows you can already see would be a second, unasked-for action.
+ * Read, not opened — a job you clicked open stays here, dot cleared and "Opened"
+ * chipped, so you can go back to it; only the row's tick removes it. That is the
+ * one place this filter and the badge count part company on purpose: `unreadCount`
+ * drops a job the moment you look at it, this keeps it until you say you are done
+ * with it. An inbox draws the same line, and the alternative — a click in the popup
+ * making the row vanish as the popup closes — was a reported bug.
+ *
+ * Blocked jobs stay in both modes too, greyed: the blocklist governs what future
+ * scans surface, and silently deleting rows you can already see would be a second,
+ * unasked-for action.
  *
  * Here rather than inside `JobList` because two callers need the same answer: the
  * list renders these, and the apply prompt has to know whether the row it belongs
@@ -173,4 +191,119 @@ export function formatCountdown(ms: number): string {
   if (hours > 0) return `${hours}h ${minutes}m`;
   if (minutes > 0) return `${minutes}m ${seconds}s`;
   return `${seconds}s`;
+}
+
+// ── Row formatters ───────────────────────────────────────────────────────────
+// The four things the redesigned row derives from a job rather than stores. All
+// pure, all here rather than inside `JobRow`, for the same reason `metaLine` is:
+// they are rules about scraped text, and `node --test` can hold them to plain
+// strings without rendering anything.
+
+/** Which unit letter each LinkedIn age word abbreviates to. `month` is the one
+ *  that cannot take its own first letter — `m` is already minutes — and a row
+ *  that said "Posted 3m ago" about a three-month-old posting would be a lie in
+ *  the direction that matters most. */
+const AGE_UNITS: Record<string, string> = {
+  second: "s",
+  minute: "m",
+  hour: "h",
+  day: "d",
+  week: "w",
+  month: "mo",
+  year: "y",
+};
+
+/**
+ * LinkedIn's posted text as the short form the row's chip has room for:
+ * `"12 hours ago"` → `"12h"`, `"3 minutes ago"` → `"3m"`, `"1 month ago"` → `"1mo"`.
+ *
+ * Anything that doesn't parse — a localised string, a phrasing LinkedIn changed —
+ * falls back to the text with its trailing "ago" dropped, so the row still says
+ * *something* true rather than a number invented from a failed match (PRD §12,
+ * fields fail independently). An empty input stays empty and the chip is dropped.
+ */
+export function shortAge(postedText: string): string {
+  const text = postedText.trim();
+  if (!text) return "";
+  const m = /(\d+)\s*(second|minute|hour|day|week|month|year)/i.exec(text);
+  const unit = m ? AGE_UNITS[m[2]!.toLowerCase()] : undefined;
+  // A match with a unit this table doesn't carry is the same situation as no
+  // match at all: better the original words than a number with no unit on it.
+  if (!m || !unit) return text.replace(/\s*ago\s*$/i, "").trim();
+  return m[1]! + unit;
+}
+
+/**
+ * An elapsed duration as one coarse unit: `"41m"`, `"6h"`, `"3d"`.
+ *
+ * Unlike {@link formatCountdown} this is looking backwards, at something that
+ * already happened, so a second unit would be false precision — "found 41m 12s
+ * ago" is not a fact anyone acts on. Floors below an hour and rounds above it,
+ * and never returns "0m": something found this second was still found, and a
+ * chip reading "Found 0m ago" looks like a bug rather than like news.
+ */
+export function formatAgo(ms: number): string {
+  const minutes = Math.max(1, Math.floor(Math.max(0, ms) / 60_000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
+}
+
+/**
+ * Split LinkedIn's location into the place and the work mode it carries in
+ * brackets: `"Tokyo, Japan (Hybrid)"` → `{ place: "Tokyo, Japan", mode: "Hybrid" }`.
+ *
+ * The mode gets its own tinted chip in the row because it is the one part of a
+ * location people filter on by eye — Remote and On-site are different jobs, and
+ * buried at the end of a grey line they read as punctuation. Only a trailing
+ * bracket counts: `"Do, Shizuoka (Japan), Japan"` is a place name, not a mode.
+ * A location with no bracket keeps the whole string as the place and returns an
+ * empty mode, and the chip is simply not rendered.
+ */
+export function splitLocation(location: string): { place: string; mode: string } {
+  const text = location.trim();
+  const m = /\(([^()]+)\)\s*$/.exec(text);
+  if (!m) return { place: text, mode: "" };
+  return {
+    place: text.slice(0, m.index).replace(/[,\s]+$/, "").trim(),
+    mode: (m[1] ?? "").trim(),
+  };
+}
+
+/**
+ * The employer monogram: the first character of the company name, upper-cased.
+ *
+ * A leading Japanese corporate prefix is stripped first — `（株）テイルウィンド`
+ * is not the "株" company, and every third Japanese employer would otherwise
+ * wear the identical tile. Non-Latin scripts keep their character as-is (there
+ * is no upper case to apply), and a blank company yields "" so the caller can
+ * fall back rather than render an empty box.
+ */
+export function monogram(company: string): string {
+  const clean = company
+    .replace(/^[（(]\s*(株|有|合|同)\s*[）)]\s*/, "")
+    .replace(/^(株式会社|有限会社)\s*/, "")
+    .trim();
+  const first = [...clean][0] ?? "";
+  return first.toUpperCase();
+}
+
+/** How many monogram tones there are (`--chart-1` … `--chart-N` in tokens.css). */
+export const COMPANY_TONES = 5;
+
+/**
+ * A stable tone index (1…{@link COMPANY_TONES}) for a company, from a plain
+ * character-sum hash of its name.
+ *
+ * Stable is the whole requirement: the same employer has to wear the same colour
+ * in this scan and the next one, across both surfaces, with no stored field to
+ * keep in sync — that is what turns the tile into something you recognise before
+ * you have read the name. Collisions are fine and expected; the tile carries the
+ * letter too, and this is decoration, not identity.
+ */
+export function companyTone(company: string): number {
+  let sum = 0;
+  for (let i = 0; i < company.length; i++) sum += company.charCodeAt(i);
+  return (sum % COMPANY_TONES) + 1;
 }
