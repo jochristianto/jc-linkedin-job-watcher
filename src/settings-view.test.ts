@@ -41,6 +41,10 @@ test("sectionOfField: every field is edited in the section that shows it", () =>
   assert.equal(sectionOfField("seenHardCap"), "retention");
 });
 
+test("sectionOfField: the manual-only switch is edited beside the cadence it replaces", () => {
+  assert.equal(sectionOfField("manualOnly"), "scanning");
+});
+
 test("dirtySections: collapses changed fields onto the sections holding them", () => {
   const sections = dirtySections(["quietStart", "pagesPerScan", "hideReposted"]);
   assert.deepEqual([...sections].sort(), ["filters", "scanning"]);
@@ -132,6 +136,17 @@ test("headerSummary: a zero-width quiet window runs around the clock, not 23:00 
     headerSummary(form({ quietHoursEnabled: true, quietStart: "23:00", quietEnd: "23:00" })),
     /around the clock/,
   );
+});
+
+test("headerSummary: manual-only replaces the cadence AND the hours, not just the band", () => {
+  // The interval is still stored, so quoting it would describe a schedule that
+  // isn't running — and quiet hours restrict rounds that no longer happen, so
+  // "from 07:00 to 23:00" would invent a limit a manual scan does not have.
+  const line = headerSummary(
+    form({ watches: [watch()], manualOnly: true, quietHoursEnabled: true }),
+  );
+  assert.match(line, /1 watch · Only when you press Scan now · /);
+  assert.doesNotMatch(line, /Every|min|07:00|around the clock/);
 });
 
 test("headerSummary: no watch switched on says so in words, not as a zero", () => {
@@ -240,6 +255,36 @@ test("estimateLoad: a 24-hour quiet window still leaves an hour awake", () => {
   );
   assert.equal(est.awakeHours, 1);
   assert.ok(est.rounds >= 1);
+});
+
+test("estimateLoad: manual-only is zero rounds a day, however tight the interval", () => {
+  // A daily figure would be a guess about how often the user presses the button.
+  const est = estimateLoad(
+    form({ watches: [watch(), watch({ id: "b" })], manualOnly: true, intervalMinutes: "1" }),
+  );
+  assert.equal(est.manual, true);
+  assert.equal(est.rounds, 0);
+  assert.equal(est.loads, 0);
+  assert.equal(est.tier, "gentle");
+  // The inputs a press still costs are kept, because the line below prices them.
+  assert.equal(est.activeWatches, 2);
+  assert.equal(est.pagesPerScan, 1);
+});
+
+test("loadEstimateLine: manual-only prices a press, not a day", () => {
+  const est = estimateLoad(
+    form({ watches: [watch(), watch({ id: "b" })], manualOnly: true, pagesPerScan: "2" }),
+  );
+  assert.equal(
+    loadEstimateLine(est),
+    "≈ 4 LinkedIn page loads each time you press Scan now — " +
+      "2 active watches × 2 pages. Nothing is loaded until you do.",
+  );
+});
+
+test("loadEstimateLine: manual-only with no watch on still says the plain thing", () => {
+  const line = loadEstimateLine(estimateLoad(form({ watches: [], manualOnly: true })));
+  assert.match(line, /No watches are switched on/);
 });
 
 test("loadEstimateLine: spells the arithmetic out, and handles no watches", () => {

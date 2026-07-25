@@ -73,9 +73,14 @@ export function WatchList({ watches, onChange }: WatchListProps) {
     }
     const { name, url } = parsed.value;
     if (form?.mode === "edit") {
-      onChange(watches.map((w) => (w.id === form.id ? { ...w, name, url } : w)));
+      onChange(
+        watches.map((w) => (w.id === form.id ? { ...w, name, url } : w)),
+      );
     } else {
-      onChange([...watches, { id: crypto.randomUUID(), name, url, enabled: true }]);
+      onChange([
+        ...watches,
+        { id: crypto.randomUUID(), name, url, enabled: true },
+      ]);
     }
     close();
   };
@@ -98,19 +103,28 @@ export function WatchList({ watches, onChange }: WatchListProps) {
                 data-act="toggle"
                 aria-label={`${w.enabled ? "Pause" : "Resume"} ${w.name}`}
                 onCheckedChange={(checked) =>
-                  onChange(watches.map((x) => (x.id === w.id ? { ...x, enabled: checked } : x)))
+                  onChange(
+                    watches.map((x) =>
+                      x.id === w.id ? { ...x, enabled: checked } : x,
+                    ),
+                  )
                 }
               />
             </div>
 
             <div className="flex min-w-0 flex-1 flex-col gap-1.5">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[13.5px] font-semibold tracking-tight">{w.name}</span>
+                <span className="text-[13.5px] font-semibold tracking-tight">
+                  {w.name}
+                </span>
                 {/* Said out loud as well as shown by the switch: a greyed row at
                     the bottom of a list of six is easy to read as "the last one"
                     rather than as "this one is off". */}
                 {!w.enabled && (
-                  <Badge variant="secondary" className="px-1.5 py-0 text-[10.5px] font-medium">
+                  <Badge
+                    variant="secondary"
+                    className="px-1.5 py-0 text-[10.5px] font-medium"
+                  >
                     Paused
                   </Badge>
                 )}
@@ -188,7 +202,10 @@ export function WatchList({ watches, onChange }: WatchListProps) {
           </span>
           <div className="flex flex-col gap-2.5 sm:flex-row">
             <div className="flex flex-col gap-1.5 sm:w-44">
-              <Label htmlFor="watch-name" className="text-[11.5px] text-muted-foreground">
+              <Label
+                htmlFor="watch-name"
+                className="text-[11.5px] text-muted-foreground"
+              >
                 Nickname
               </Label>
               <Input
@@ -200,7 +217,10 @@ export function WatchList({ watches, onChange }: WatchListProps) {
               />
             </div>
             <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-              <Label htmlFor="watch-url" className="text-[11.5px] text-muted-foreground">
+              <Label
+                htmlFor="watch-url"
+                className="text-[11.5px] text-muted-foreground"
+              >
                 Search URL
               </Label>
               <Input
@@ -228,25 +248,38 @@ export function WatchList({ watches, onChange }: WatchListProps) {
               {error || HINT}
             </p>
             <div className="flex shrink-0 gap-1.5">
-              <Button type="button" size="sm" variant="ghost" data-act="cancel-edit" onClick={close}>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                data-act="cancel-edit"
+                onClick={close}
+              >
                 Cancel
               </Button>
-              <Button type="button" size="sm" data-act="save-edit" onClick={submit}>
+              <Button
+                type="button"
+                size="sm"
+                data-act="save-edit"
+                onClick={submit}
+              >
                 {form.mode === "edit" ? "Save watch" : "Add watch"}
               </Button>
             </div>
           </div>
         </div>
       ) : (
-        <button
+        <Button
           type="button"
           id="add-search"
           onClick={openAdd}
-          className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-foreground/20 py-2.5 text-[12.5px] font-semibold text-muted-foreground transition-colors hover:border-primary/45 hover:bg-primary/5 hover:text-primary"
+          variant="ghost"
+          className="w-full"
+          // className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-foreground/20 py-2.5 text-[12.5px] font-semibold text-muted-foreground transition-colors hover:border-primary/45 hover:bg-primary/5 hover:text-primary"
         >
           <Plus className="size-3.5" />
           Add a watch
-        </button>
+        </Button>
       )}
     </div>
   );

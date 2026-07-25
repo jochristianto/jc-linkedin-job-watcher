@@ -64,6 +64,12 @@ test("DEFAULT_SETTINGS ships with the master switch on (§ master)", () => {
   assert.equal(DEFAULT_SETTINGS.enabled, true);
 });
 
+test("DEFAULT_SETTINGS ships with manual-only off (§ manual-only)", () => {
+  // The shipped experience is the scheduled one; manual-only is a choice to make,
+  // not a default to discover after wondering why nothing ever scanned.
+  assert.equal(DEFAULT_SETTINGS.manualOnly, false);
+});
+
 test("DEFAULT_SETTINGS satisfies the Settings type it is declared as", () => {
   // A compile-time guarantee made a runtime assertion: if the shape drifted from
   // Settings, tsc would already have failed. This keeps the intent visible.

@@ -306,6 +306,11 @@ export type ViewContext = {
    *  header hides "Scan now". Absent (settings from before the switch existed)
    *  reads as on, so callers pass `settings.enabled !== false`. */
   enabled?: boolean;
+  /** `settings.manualOnly` (§ manual-only) — "Only scan when I press Scan now".
+   *  Nothing is armed while it is on, so the footer says so instead of counting
+   *  down. Only the status bar reads it: the button, the list and the badge are
+   *  deliberately unchanged, because a manual round is a full round. */
+  manualOnly?: boolean;
 };
 
 /**
@@ -354,7 +359,9 @@ export function scanButtonState(ctx: ViewContext): ScanButtonState {
  * there is nothing to scan either, so the bar goes away entirely rather than
  * promise a scan that would find nothing. Only then is it a countdown — and a
  * `nextScanAt` already in the past means the alarm has fired but its cycle hasn't
- * reached storage yet, which is `due`, not a negative number.
+ * reached storage yet, which is `due`, not a negative number. Between those two:
+ * the manual-only switch, which replaces the countdown with the standing state it
+ * is, because under it there is no next scan until a human asks for one.
  *
  * A `paused` (logged-out) loop deliberately gets a normal countdown: §16.1 keeps
  * scanning so a later `ok` scan can auto-resume it, so the next scan really is
@@ -368,6 +375,11 @@ export function scanStatus(ctx: ViewContext): ScanStatus {
   if (ctx.enabled === false) return { kind: "disabled" };
   if (ctx.scanMode === "halted") return { kind: "halted" };
   if (!ctx.watches.some((w) => w.enabled)) return { kind: "off" };
+  // Manual only (§ manual-only) outranks the countdown rather than falling through
+  // to `unscheduled`: it is a state the user chose, and it must win even in the
+  // seconds where an alarm armed before the switch was flipped is still around —
+  // counting down to a wake that will only clear itself would be a lie.
+  if (ctx.manualOnly === true) return { kind: "manual" };
   if (ctx.nextScanAt == null) return { kind: "unscheduled" };
 
   const now = ctx.now ?? Date.now();

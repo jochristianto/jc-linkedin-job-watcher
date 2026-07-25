@@ -37,7 +37,13 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -145,12 +151,29 @@ function Section({
   );
 }
 
-/** The badge tone for each load tier — green for a pace that looks like a person
- *  browsing, amber past that, red where it stops being defensible (PRD §12). */
-const LOAD_TIER_STYLE: Record<LoadTier, { label: string; className: string }> = {
-  gentle: { label: "Gentle", className: "border-ok/30 bg-ok/10 text-ok" },
-  heavy: { label: "Heavy", className: "border-warn/30 bg-warn-weak/70 text-warn" },
-  risky: { label: "Risky", className: "border-destructive/30 bg-destructive-weak/70 text-destructive" },
+/** The tone for each load tier — green for a pace that looks like a person
+ *  browsing, amber past that, red where it stops being defensible (PRD §12).
+ *  `block` tints the whole estimate row, not just its badge: past Gentle the
+ *  number is the warning, and a warning the size of a badge gets skimmed. */
+const LOAD_TIER_STYLE: Record<
+  LoadTier,
+  { label: string; className: string; block: string }
+> = {
+  gentle: {
+    label: "GENTLE",
+    className: "border-ok/30 bg-ok/10 text-ok",
+    block: "bg-muted/50",
+  },
+  heavy: {
+    label: "HEAVY",
+    className: "border-warn/40 bg-warn/15 text-warn",
+    block: "border-warn/40 bg-warn-weak/70",
+  },
+  risky: {
+    label: "RISKY",
+    className: "border-destructive/40 bg-destructive/15 text-destructive",
+    block: "border-destructive/40 bg-destructive-weak/70",
+  },
 };
 
 export function OptionsPage() {
@@ -193,7 +216,10 @@ export function OptionsPage() {
 
   // Which fields differ from storage, and so: whether Reset has anything to throw
   // away, what the header badge counts, and which rail entries wear a dot.
-  const changed = useMemo(() => (form && base ? changedFormKeys(form, base) : []), [form, base]);
+  const changed = useMemo(
+    () => (form && base ? changedFormKeys(form, base) : []),
+    [form, base],
+  );
   const dirty = changed.length > 0;
   const dirtyIn = useMemo(() => dirtySections(changed), [changed]);
 
@@ -201,8 +227,10 @@ export function OptionsPage() {
 
   if (!form || !base) return null;
 
-  const set = <K extends keyof OptionsFormValues>(key: K, value: OptionsFormValues[K]): void =>
-    setForm({ ...form, [key]: value });
+  const set = <K extends keyof OptionsFormValues>(
+    key: K,
+    value: OptionsFormValues[K],
+  ): void => setForm({ ...form, [key]: value });
 
   async function onSave(): Promise<void> {
     if (!form || !base) return;
@@ -210,7 +238,10 @@ export function OptionsPage() {
     const result = parseSettingsForm(form, base);
     if (!result.ok) {
       setErrors(result.errors);
-      setSaveStatus({ message: "Some values need fixing — nothing was saved.", kind: "err" });
+      setSaveStatus({
+        message: "Some values need fixing — nothing was saved.",
+        kind: "err",
+      });
       return;
     }
     await storage.set("settings", result.settings);
@@ -223,7 +254,10 @@ export function OptionsPage() {
     // Any .env prefill is now real stored state, so the "not saved yet" notice
     // has served its purpose and should not reappear.
     setPrefilled(false);
-    setSaveStatus({ message: "Saved — the next round uses these settings.", kind: "ok" });
+    setSaveStatus({
+      message: "Saved — the next round uses these settings.",
+      kind: "ok",
+    });
   }
 
   /** Only reached through the confirmation dialog, and only when there is
@@ -235,7 +269,10 @@ export function OptionsPage() {
     setForm(settingsToForm(base));
     setErrors({});
     setPrefilled(false);
-    setSaveStatus({ message: "Reverted to the last saved settings.", kind: "ok" });
+    setSaveStatus({
+      message: "Reverted to the last saved settings.",
+      kind: "ok",
+    });
   }
 
   /** Prove the Telegram config end-to-end (PRD §8): send one real message with the
@@ -251,7 +288,10 @@ export function OptionsPage() {
       chatId: form.pushChatId.trim(),
     };
     if (!cfg.botToken || !cfg.chatId) {
-      setTestStatus({ message: "Enter a bot token and chat id first.", kind: "err" });
+      setTestStatus({
+        message: "Enter a bot token and chat id first.",
+        kind: "err",
+      });
       return;
     }
     setTestStatus({ message: "Contacting api.telegram.org…", kind: "" });
@@ -274,7 +314,8 @@ export function OptionsPage() {
     setSection(next);
     const el = sectionEl(next);
     const container = scrollRef.current;
-    if (el && container) container.scrollTop = Math.max(0, el.offsetTop - SCROLL_MARGIN);
+    if (el && container)
+      container.scrollTop = Math.max(0, el.offsetTop - SCROLL_MARGIN);
   }
 
   /** Which section is being read: the last one whose top has passed a line a
@@ -292,9 +333,23 @@ export function OptionsPage() {
     setSection((prev) => (prev === current ? prev : current));
   }
 
-  /** One whole-number field, with its hint and its inline error. */
-  const numField = (key: keyof OptionsFormValues, label: string, min: number, hint: string) => (
-    <div className="flex flex-col gap-1.5">
+  /** One whole-number field, with its hint and its inline error. `governsCadence`
+   *  marks the fields only the automatic rounds read: the manual-only switch dims
+   *  and disables those, and leaves the rest (page depth, retention) alone —
+   *  a manual round is a full round and reads them exactly as a timed one does. */
+  const numField = (
+    key: keyof OptionsFormValues,
+    label: string,
+    min: number,
+    hint: string,
+    governsCadence = false,
+  ) => (
+    <div
+      className={cn(
+        "flex flex-col gap-1.5",
+        governsCadence && form.manualOnly && "opacity-50",
+      )}
+    >
       <Label htmlFor={key} className="text-xs">
         {label}
       </Label>
@@ -303,15 +358,20 @@ export function OptionsPage() {
         type="number"
         min={min}
         value={String(form[key])}
+        disabled={governsCadence && form.manualOnly}
         aria-invalid={Boolean(errors[key])}
-        onChange={(e) => set(key, e.target.value as OptionsFormValues[typeof key])}
+        onChange={(e) =>
+          set(key, e.target.value as OptionsFormValues[typeof key])
+        }
       />
       {errors[key] ? (
         <p data-err={key} className="text-[11.5px] text-destructive">
           {errors[key]}
         </p>
       ) : (
-        <span className="text-[11.5px] leading-snug text-muted-foreground">{hint}</span>
+        <span className="text-[11.5px] leading-snug text-muted-foreground">
+          {hint}
+        </span>
       )}
     </div>
   );
@@ -337,7 +397,9 @@ export function OptionsPage() {
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-[15px] font-semibold tracking-tight whitespace-nowrap">
               LinkedIn Job Watcher{" "}
-              <span className="font-medium text-muted-foreground">— Settings</span>
+              <span className="font-medium text-muted-foreground">
+                — Settings
+              </span>
             </h1>
             {dirty && (
               <Badge
@@ -351,7 +413,10 @@ export function OptionsPage() {
           </div>
           {/* Derived from the form rather than from storage, so it describes what
               you are about to save, not what you saved last. */}
-          <span id="header-summary" className="truncate text-xs text-muted-foreground">
+          <span
+            id="header-summary"
+            className="truncate text-xs text-muted-foreground"
+          >
             {headerSummary(form)}
           </span>
         </div>
@@ -390,13 +455,19 @@ export function OptionsPage() {
             <Section
               id="watches"
               badge={
-                <Badge variant="secondary" className="px-2 py-0 text-[10.5px] font-medium">
+                <Badge
+                  variant="secondary"
+                  className="px-2 py-0 text-[10.5px] font-medium"
+                >
                   {activeWatches} of {form.watches.length} active
                 </Badge>
               }
               description="A watch is a saved LinkedIn search with your filters already applied. Every watch runs on the same cycle — switch one off to pause it without losing the URL."
             >
-              <WatchList watches={form.watches} onChange={(w) => set("watches", w)} />
+              <WatchList
+                watches={form.watches}
+                onChange={(w) => set("watches", w)}
+              />
             </Section>
 
             <Section
@@ -410,7 +481,10 @@ export function OptionsPage() {
                   placeholder="Add a company to block, then Enter…"
                   values={form.blockedCompanies.map((c) => c.display)}
                   onAdd={(v) =>
-                    set("blockedCompanies", [...form.blockedCompanies, makeBlockedCompany(v)])
+                    set("blockedCompanies", [
+                      ...form.blockedCompanies,
+                      makeBlockedCompany(v),
+                    ])
                   }
                   onRemove={(i) =>
                     set(
@@ -424,7 +498,12 @@ export function OptionsPage() {
                   label="Blocked title keywords"
                   placeholder="Add a keyword to block, then Enter…"
                   values={form.blockedTitleKeywords}
-                  onAdd={(v) => set("blockedTitleKeywords", [...form.blockedTitleKeywords, v])}
+                  onAdd={(v) =>
+                    set("blockedTitleKeywords", [
+                      ...form.blockedTitleKeywords,
+                      v,
+                    ])
+                  }
                   onRemove={(i) =>
                     set(
                       "blockedTitleKeywords",
@@ -447,18 +526,40 @@ export function OptionsPage() {
               description="Every page is a real load against LinkedIn, so the shipped depth is deliberately shallow. Raise it only if you find you are actually missing postings."
             >
               <div className="flex flex-col gap-4">
-                <div className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
+                {/* First in the section because it decides whether anything below
+                    it runs at all: the schedule reads differently once you know
+                    nothing is on a timer. */}
+                <ToggleRow
+                  id="manual-only"
+                  label="Only scan when I press Scan now"
+                  description={
+                    form.manualOnly
+                      ? "Nothing runs on a timer. Your searches stay switched on and the list, the toolbar count and Telegram all keep working — but LinkedIn is only opened when you press Scan now."
+                      : "Rounds run on the schedule below. Switch this on to keep every search but decide yourself when they run — the schedule is kept, just not used."
+                  }
+                  checked={form.manualOnly}
+                  onChange={(v) => set("manualOnly", v)}
+                />
+
+                <Separator />
+
+                {/* Two by two rather than one row of four: the four numbers pair
+                    up (how often, then how deep), and a 4-wide row squeezes the
+                    hints under each field into three-line columns. */}
+                <div className="grid gap-3.5 sm:grid-cols-2">
                   {numField(
                     "intervalMinutes",
                     "Interval (minutes)",
                     1,
                     "Gap between rounds. Under 15 gets noticed.",
+                    true,
                   )}
                   {numField(
                     "jitterMinutes",
                     "Jitter (± minutes)",
                     0,
                     "Random wobble, so rounds are not clockwork. 60 ± 30 lands anywhere in 30–90 min.",
+                    true,
                   )}
                   {numField(
                     "pagesPerScan",
@@ -480,11 +581,17 @@ export function OptionsPage() {
                 {estimate && tier && (
                   <div
                     id="load-estimate"
-                    className="flex flex-wrap items-center gap-2.5 rounded-xl border bg-muted/50 px-3 py-2.5"
+                    className={cn(
+                      "flex flex-wrap items-center gap-2.5 rounded-xl border px-3 py-2.5",
+                      tier.block,
+                    )}
                   >
                     <Badge
                       variant="outline"
-                      className={cn("px-2 py-0 text-[10.5px]", tier.className)}
+                      className={cn(
+                        "px-2 py-0 text-[10.5px] font-semibold tracking-[0.06em]",
+                        tier.className,
+                      )}
                     >
                       {tier.label}
                     </Badge>
@@ -496,15 +603,21 @@ export function OptionsPage() {
 
                 <Separator />
 
+                {/* Quiet hours only ever silenced the automatic rounds, so with
+                    manual-only on there is nothing left for them to silence — the
+                    whole row goes inert, and keeps the window you set. */}
                 <ToggleRow
                   id="quiet-enabled"
                   label="Pause during quiet hours"
                   description={
-                    form.quietHoursEnabled
-                      ? "No rounds between these times; one catch-up round runs when they end."
-                      : "Rounds keep running all night, which is the least human-looking pattern."
+                    form.manualOnly
+                      ? "Nothing to pause while only you start the rounds — a Scan now runs whenever you press it."
+                      : form.quietHoursEnabled
+                        ? "No rounds between these times; one catch-up round runs when they end."
+                        : "Rounds keep running all night, which is the least human-looking pattern."
                   }
                   checked={form.quietHoursEnabled}
+                  disabled={form.manualOnly}
                   onChange={(v) => set("quietHoursEnabled", v)}
                 >
                   {/* Dimmed and inert rather than hidden when quiet hours are off:
@@ -513,7 +626,10 @@ export function OptionsPage() {
                   <div
                     className={cn(
                       "mt-2.5 flex flex-wrap gap-3",
-                      !form.quietHoursEnabled && "pointer-events-none opacity-50",
+                      // Not dimmed again for manual-only: the row above already
+                      // fades as a whole, and two stacked opacities read as broken.
+                      !form.quietHoursEnabled &&
+                        "pointer-events-none opacity-50",
                     )}
                   >
                     <div className="flex w-37 flex-col gap-1.5">
@@ -524,12 +640,15 @@ export function OptionsPage() {
                         id="quietStart"
                         type="time"
                         value={form.quietStart}
-                        disabled={!form.quietHoursEnabled}
+                        disabled={!form.quietHoursEnabled || form.manualOnly}
                         aria-invalid={Boolean(errors.quietStart)}
                         onChange={(e) => set("quietStart", e.target.value)}
                       />
                       {errors.quietStart && (
-                        <p data-err="quietStart" className="text-[11.5px] text-destructive">
+                        <p
+                          data-err="quietStart"
+                          className="text-[11.5px] text-destructive"
+                        >
                           {errors.quietStart}
                         </p>
                       )}
@@ -542,12 +661,15 @@ export function OptionsPage() {
                         id="quietEnd"
                         type="time"
                         value={form.quietEnd}
-                        disabled={!form.quietHoursEnabled}
+                        disabled={!form.quietHoursEnabled || form.manualOnly}
                         aria-invalid={Boolean(errors.quietEnd)}
                         onChange={(e) => set("quietEnd", e.target.value)}
                       />
                       {errors.quietEnd && (
-                        <p data-err="quietEnd" className="text-[11.5px] text-destructive">
+                        <p
+                          data-err="quietEnd"
+                          className="text-[11.5px] text-destructive"
+                        >
                           {errors.quietEnd}
                         </p>
                       )}
@@ -562,7 +684,7 @@ export function OptionsPage() {
               description="Seen ids are what stop a job coming back a second time — keep them longer than the age of the postings your searches return."
             >
               <div className="flex flex-col gap-3.5">
-                <div className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="grid gap-3.5 sm:grid-cols-2">
                   {numField(
                     "seenDays",
                     "Seen ids (days)",
@@ -595,8 +717,8 @@ export function OptionsPage() {
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Clock aria-hidden="true" className="size-3.5 shrink-0" />
                   <span>
-                    The daily clean-up is not wired up yet — these are saved, and take effect as
-                    soon as it is.
+                    The daily clean-up is not wired up yet — these are saved,
+                    and take effect as soon as it is.
                   </span>
                 </div>
               </div>
@@ -684,11 +806,20 @@ export function OptionsPage() {
                         onChange={(e) => set("pushChatId", e.target.value)}
                       />
                     </div>
-                    <Button type="button" variant="outline" id="send-test" onClick={onSendTest}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      id="send-test"
+                      onClick={onSendTest}
+                    >
                       Send test message
                     </Button>
                   </div>
-                  <StatusText id="test-status" status={testStatus} className="mt-2.5 block" />
+                  <StatusText
+                    id="test-status"
+                    status={testStatus}
+                    className="mt-2.5 block"
+                  />
                 </ToggleRow>
               </div>
             </Section>
@@ -708,9 +839,10 @@ export function OptionsPage() {
           passes over white cards, and letting those bleed through made it read
           as a rendering artefact instead of a bar. */}
       <footer className="flex shrink-0 flex-wrap items-center gap-3 border-t bg-background px-4 py-2.5 md:px-6 justify-between">
-        <p className="min-w-0 flex-1 basis-65 text-[11.5px] leading-snug text-faint text-pretty">
-          Personal use only · keep the frequency low, and switch watching off when you are not
-          looking for work.
+        <p className="min-w-0 flex-1 basis-65 text-xs leading-snug text-faint text-pretty">
+          <span className="font-semibold">Personal use only</span> · keep the
+          frequency low, and switch watching off when you are not looking for
+          work.
         </p>
         {/* The save word and the buttons it belongs to read as one thing, so they
             sit on one line — the message to the left of the button it describes,
@@ -732,23 +864,33 @@ export function OptionsPage() {
               disabled rather than opening a dialog about nothing. */}
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button type="button" variant="ghost" id="reset" disabled={!dirty}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  id="reset"
+                  disabled={!dirty}
+                >
                   Reset
                 </Button>
               </AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
-                  <AlertDialogTitle>Discard your unsaved changes?</AlertDialogTitle>
+                  <AlertDialogTitle>
+                    Discard your unsaved changes?
+                  </AlertDialogTitle>
                   <AlertDialogDescription>
-                    Every field goes back to the settings last saved. Anything typed since — watches
-                    added, filters, times, Telegram credentials — is lost, and there is no undo.
-                    Nothing already saved is deleted, and no jobs are touched.
+                    Every field goes back to the settings last saved. Anything
+                    typed since — watches added, filters, times, Telegram
+                    credentials — is lost, and there is no undo. Nothing already
+                    saved is deleted, and no jobs are touched.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   {/* The way out is the wide, safe one; the act that costs
                     something wears destructive and sits under the thumb. */}
-                  <AlertDialogCancel id="reset-cancel">Keep editing</AlertDialogCancel>
+                  <AlertDialogCancel id="reset-cancel">
+                    Keep editing
+                  </AlertDialogCancel>
                   <AlertDialogAction
                     id="reset-confirm"
                     onClick={onReset}
@@ -775,12 +917,15 @@ export function OptionsPage() {
 /** A switch with its label and the sentence that says what switching it off
  *  actually costs — the settings that used to be a bare label each needed one.
  *  `children` is whatever the switch reveals or governs, laid under the text so
- *  it reads as belonging to the row rather than following it. */
+ *  it reads as belonging to the row rather than following it. `disabled` is for a
+ *  row another switch has made moot: it dims and blocks the control — keyboard
+ *  included, which a dimmed wrapper alone would not — while leaving its value be. */
 function ToggleRow({
   id,
   label,
   description,
   checked,
+  disabled = false,
   onChange,
   children,
 }: {
@@ -788,19 +933,25 @@ function ToggleRow({
   label: string;
   description: ReactNode;
   checked: boolean;
+  disabled?: boolean;
   onChange: (checked: boolean) => void;
   children?: ReactNode;
 }) {
   return (
-    <div className="flex items-start gap-3">
+    <div className={cn("flex items-start gap-3", disabled && "opacity-50")}>
       <div className="pt-0.5">
-        <Switch id={id} checked={checked} onCheckedChange={onChange} />
+        <Switch
+          id={id}
+          checked={checked}
+          disabled={disabled}
+          onCheckedChange={onChange}
+        />
       </div>
       <div className="min-w-0 flex-1">
         <Label htmlFor={id} className="text-[13px] font-semibold">
           {label}
         </Label>
-        <p className="mt-0.5 max-w-[62ch] text-xs leading-snug text-muted-foreground">
+        <p className="mt-0.5 text-xs leading-snug text-muted-foreground">
           {description}
         </p>
         {children}
@@ -809,7 +960,15 @@ function ToggleRow({
   );
 }
 
-function StatusText({ id, status, className }: { id: string; status: Status; className?: string }) {
+function StatusText({
+  id,
+  status,
+  className,
+}: {
+  id: string;
+  status: Status;
+  className?: string;
+}) {
   if (!status.message) return null;
   return (
     <span

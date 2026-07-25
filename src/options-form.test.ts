@@ -24,6 +24,7 @@ function validForm(overrides: Partial<OptionsFormValues> = {}): OptionsFormValue
     blockedCompanies: [{ display: "Acme", normalized: "acme" }],
     blockedTitleKeywords: ["Intern"],
     hideReposted: true,
+    manualOnly: false,
     intervalMinutes: "15",
     jitterMinutes: "1",
     pagesPerScan: "1",
@@ -130,6 +131,26 @@ test("settingsToForm fills the push fields from stored settings", () => {
   assert.equal(form.pushEnabled, true);
   assert.equal(form.pushBotToken, "123:ABC");
   assert.equal(form.pushChatId, "42");
+});
+
+test("manual-only survives the round trip, and the cadence is kept beside it", () => {
+  // Switching it on must not zero the interval it suspends: switching it back off
+  // has to put back the schedule that was there, not a default.
+  const r = parseSettingsForm(validForm({ manualOnly: true, intervalMinutes: "90" }), {
+    ...DEFAULT_SETTINGS,
+    manualOnly: false,
+  });
+  assert.ok(r.ok);
+  assert.equal(r.settings.manualOnly, true);
+  assert.equal(r.settings.intervalMinutes, 90);
+  assert.equal(settingsToForm(r.settings).manualOnly, true);
+});
+
+test("settingsToForm reads settings saved before manual-only existed as off", () => {
+  // An upgrade must keep scanning on its schedule rather than go quiet by default.
+  const legacy = { ...DEFAULT_SETTINGS } as Partial<Settings>;
+  delete legacy.manualOnly;
+  assert.equal(settingsToForm(legacy as Settings).manualOnly, false);
 });
 
 test("parseSettingsForm rejects a zero interval and writes nothing", () => {

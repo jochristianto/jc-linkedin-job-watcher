@@ -962,6 +962,18 @@ test("ScanStatusBar says Paused when the master switch is off (§ master)", () =
   assert.match(h, /lucide-power-off/);
 });
 
+test("ScanStatusBar reads manual-only as a standing state, not a missing schedule", () => {
+  // Deliberately not the `unscheduled` wording: nothing is wrong here, so the bar
+  // must not say "no scan scheduled" as if something had gone missing.
+  const h = html(<ScanStatusBar status={{ kind: "manual" }} unread={2} watchCount={3} />);
+  assert.match(h, /data-kind="manual"/);
+  assert.match(h, /Manual only — press Scan now/);
+  assert.doesNotMatch(h, /No scan scheduled/);
+  // The counts stay: a manual round is a full round, so the unread total is as
+  // real here as under a countdown — only `disabled` replaces it with "Paused".
+  assert.match(h, /2 new · 3 watches/);
+});
+
 // ── HowItWorks: the Options-page explainer ───────────────────────────────────
 
 test("HowItWorks is always open — the last section, not a disclosure", () => {

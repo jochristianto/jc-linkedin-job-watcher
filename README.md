@@ -89,7 +89,7 @@ In both views:
 - **The tick on a row** → marks that one job read: the row greys out, drops out of **New**, and the badge falls by one. This is the only thing that clears a job. Press it again (it flips to an undo arrow) to bring the job back.
 - **Block on a row** → adds that job's company to your blocklist, without a trip to Options. Future scans stop surfacing it. Jobs from that company already in your list stay on screen, greyed and tagged **Blocked**, and stop counting towards the badge. It asks first: the button reads **Sure?** after one press and only blocks on the second — click anywhere else, or wait five seconds, and the question goes away. The button then reads **Unblock**, which takes just the one press.
 - **Scan now** runs a cycle immediately, ignoring the interval and quiet hours. It flips to *Scanning…* (greyed out, with the status bar below it saying the same) **the moment you press it** — not when the background gets round to answering, which can take a second or two if Chrome had put the extension to sleep. The list repaints on its own when the cycle finishes. After a manual scan the next automatic one is a full interval away, not stacked minutes behind. When a verification challenge has halted scanning, the same button turns red and reads **Resume** — that is how you clear the halt.
-- **The status bar** along the bottom says what the loop is doing: *Scanning for new jobs…* with a spinning icon while a cycle is running, otherwise a live countdown to the next one (*Next scan in 4m 12s*). Inside quiet hours it says so, which is why that number is hours rather than minutes. It reads the armed alarm itself, so it can't drift from the real schedule — and with no search enabled there is nothing to scan, so the bar disappears entirely.
+- **The status bar** along the bottom says what the loop is doing: *Scanning for new jobs…* with a spinning icon while a cycle is running, otherwise a live countdown to the next one (*Next scan in 4m 12s*). Inside quiet hours it says so, which is why that number is hours rather than minutes. It reads the armed alarm itself, so it can't drift from the real schedule — and with no search enabled there is nothing to scan, so the bar disappears entirely. Under **Only scan when I press Scan now** there is no schedule to report, so it reads *Manual only — press Scan now* instead of counting down.
 - **Watch chips** filter the list to one search. The badge still counts across all of them.
 - **New ⇄ All** toggles between unread-only and everything.
 - **Mark all as read** clears the badge and empties New in one action.
@@ -118,11 +118,14 @@ Filtered jobs are still recorded as seen, so they never resurface later.
 
 | Setting | Default | What it does |
 |---|---|---|
+| Only scan when I press Scan now | off | No automatic rounds at all — see below |
 | Interval | `5` min | Base time between scans |
 | Jitter | `±1` min | Randomised onto each interval so traffic isn't a fixed heartbeat |
 | Pages per scan | `1` | Routine depth. Page 2 is mostly stale when sorted by date |
 | Catch-up pages | `4` | Deeper scan after a browser restart or when quiet hours end |
 | Quiet hours | `23:00–07:00` | Scanning pauses overnight; resuming triggers a catch-up scan |
+
+**Only scan when I press Scan now.** Switch this on and no round ever runs by itself: no alarm is armed, so nothing is loaded from LinkedIn until you press **Scan now** in the popup. Everything else carries on as normal — your searches stay enabled, and a manual round updates the list, the toolbar count, the desktop notification and Telegram exactly as a scheduled one would. It is *not* the same as the header's on/off switch: that one pauses the whole extension including the button, while this one just hands the timing to you. The interval, jitter and quiet hours are kept as you set them, greyed out while it's on, and go straight back into service when you switch it off.
 
 The section shows what those four numbers add up to: a running estimate of the page loads a day they cause, tiered Gentle / Heavy / Risky, with the arithmetic spelled out. It's deliberately a ceiling — it ignores the back-off and assumes Chrome is open the whole time. Raise the depth only if you find you're actually missing things.
 
@@ -277,7 +280,7 @@ Open the popup — a one-line banner says which it is:
 Either the parser found no results list (LinkedIn may have changed its layout — check `chrome://extensions` → *service worker* → Console for a `[ljw]` selector-drift warning), or scans have gone stale.
 
 **Nothing ever gets scanned**
-Click **Scan now** in the popup first — it bypasses the interval and quiet hours, so it tells you straight away whether the problem is the schedule or the scan itself. If that finds nothing either, check, in order: at least one search is **enabled**; you're signed in to LinkedIn in this profile; and the alarm exists — `chrome://extensions` → *service worker* → Console → `await chrome.alarms.getAll()`.
+Click **Scan now** in the popup first — it bypasses the interval and quiet hours, so it tells you straight away whether the problem is the schedule or the scan itself. If that finds nothing either, check, in order: at least one search is **enabled**; you're signed in to LinkedIn in this profile; and the alarm exists — `chrome://extensions` → *service worker* → Console → `await chrome.alarms.getAll()`. An empty list is expected, not a fault, if **Only scan when I press Scan now** is switched on: that setting is exactly "arm no alarm".
 
 Note the default quiet hours are **23:00–07:00**, so an extension installed late at night genuinely won't scan until morning. That's the schedule working, not a fault.
 

@@ -155,6 +155,10 @@ export type ScanButtonState = "idle" | "scanning" | "halted";
  *                   one armed), so it says so rather than showing a fake countdown.
  * - `off`         — no enabled search, so there is nothing to scan and a countdown
  *                   would be a promise the loop can't keep. Renders nothing.
+ * - `manual`      — "Only scan when I press Scan now" is on (§ manual-only). Like
+ *                   `unscheduled` there is no alarm to count down to, but here that
+ *                   is the setting working, not a fault, so it reads as a standing
+ *                   state rather than as something missing.
  * - `disabled`    — the user flipped the master switch off (§ master). The whole
  *                   loop is paused on purpose, so the bar says "Paused" rather
  *                   than counting down to a scan that isn't coming.
@@ -166,6 +170,7 @@ export type ScanStatus =
   | { kind: "halted" }
   | { kind: "unscheduled" }
   | { kind: "off" }
+  | { kind: "manual" }
   | { kind: "disabled" };
 
 /** Join the present parts with " · ", dropping any that are missing so a blank

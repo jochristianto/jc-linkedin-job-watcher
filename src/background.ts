@@ -557,8 +557,21 @@ async function runCycle(settings: Settings, pages: number): Promise<void> {
 }
 
 /** Compute and arm the next one-shot alarm (PRD §15 decision 3). `nextScanDelayMs`
- *  owns jitter, back-off and the quiet-hours jump; this only creates the alarm. */
+ *  owns jitter, back-off and the quiet-hours jump; this only creates the alarm.
+ *
+ *  Every route that arms goes through here — the alarm tick's re-arm, the manual
+ *  "Scan now", and `ensureAlarmExists` on install and startup — which is why the
+ *  manual-only switch is enforced in this one place rather than at each caller. */
 async function armNextAlarm(settings: Settings): Promise<void> {
+  // "Only scan when I press Scan now" (§ manual-only): there is no cadence to arm.
+  // It *clears* rather than simply returning so an alarm armed before the switch
+  // was turned on can't survive to fire; the alarm is also what every countdown
+  // in the UI reads, so leaving one would promise a scan that will never run.
+  if (settings.manualOnly === true) {
+    await chrome.alarms.clear(ALARM_NAME);
+    return;
+  }
+
   const health = await get("health");
   const { delayMs, willResumeFromQuiet } = nextScanDelayMs({
     now: new Date(),
@@ -584,6 +597,25 @@ async function armNextAlarm(settings: Settings): Promise<void> {
 async function ensureAlarmExists(settings: Settings): Promise<void> {
   const existing = await chrome.alarms.get(ALARM_NAME);
   if (!existing) await armNextAlarm(settings);
+}
+
+/**
+ * Make the alarm agree with the settings as they now stand — the reconciliation
+ * every surface that *writes* settings relies on, since only the worker can touch
+ * `chrome.alarms`.
+ *
+ * The Options page saves and says nothing to the worker, so without this the two
+ * manual-only transitions both end badly. Turning it ON would leave the armed
+ * alarm ticking down in the footer until it fired and tidied itself away; turning
+ * it OFF would leave *no* alarm at all and nothing to re-arm one — the cadence
+ * would be silently gone until the next Chrome restart or manual scan.
+ */
+async function syncAlarmToSettings(settings: Settings): Promise<void> {
+  if (settings.enabled === false || settings.manualOnly === true) {
+    await chrome.alarms.clear(ALARM_NAME);
+    return;
+  }
+  await ensureAlarmExists(settings);
 }
 
 /** Take the scan lock and persist it, returning this cycle's page depth (PRD §17
@@ -648,7 +680,9 @@ async function runScanNow(): Promise<ScanNowResponse> {
   // full interval after this manual one, and the footer's countdown resets the
   // moment the button is pressed rather than when the ~minute-long cycle ends.
   // runLockedCycle therefore runs with `rearm: false`; arming here, before the
-  // cycle, is why it must not arm again after.
+  // cycle, is why it must not arm again after. Under the manual-only switch this
+  // arms nothing (armNextAlarm returns early) — the whole point of that switch is
+  // that a press buys one round, not a round plus a new schedule.
   await armNextAlarm(settings);
   // Deliberately not awaited: the reply goes back now so the popup repaints as
   // "Scanning…" instead of hanging for the 60–90s the cycle takes. The keepalive
@@ -665,7 +699,10 @@ async function onAlarm(): Promise<void> {
   // sleeping worker isn't woken every interval for nothing. Self-healing — if a
   // toggle-off missed the worker, the next tick tidies up the stray alarm here.
   // Turning it back on re-arms via the LJW_SET_ENABLED handler below.
-  if (settings.enabled === false) {
+  // The manual-only switch lands here the same way and for the same reason: an
+  // alarm armed before it was turned on must not run a round the user has said
+  // they want to trigger themselves (§ manual-only).
+  if (settings.enabled === false || settings.manualOnly === true) {
     await chrome.alarms.clear(ALARM_NAME);
     return;
   }
@@ -698,6 +735,22 @@ async function onAlarm(): Promise<void> {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM_NAME) void onAlarm();
+});
+
+/** Settings were saved somewhere — the Options page, most of the time — so bring
+ *  the alarm back in line with them (see {@link syncAlarmToSettings}). Listening
+ *  to storage rather than adding a message the Options page must remember to send
+ *  means every present and future writer is covered by the one listener, and a
+ *  save that changed nothing about the cadence costs an idempotent check. */
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !("settings" in changes)) return;
+  void (async () => {
+    try {
+      await syncAlarmToSettings(await get("settings"));
+    } catch (err) {
+      console.error("[ljw] Alarm sync failed:", err);
+    }
+  })();
 });
 
 /** The popup / jobs tab asking for a scan right now. Returning `true` keeps the

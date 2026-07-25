@@ -171,6 +171,7 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
       now,
       // Absent (settings from before the master switch existed) reads as on.
       enabled: state.settings.enabled !== false,
+      manualOnly: state.settings.manualOnly === true,
     });
   }, [state, mode, title, activeWatchId, pendingScan, armedBlockId, now]);
 
@@ -180,9 +181,15 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
   // learn. `refreshAlarm` no-ops when the time is unchanged, so this is quiet.
   const scanning = state?.scanState.isScanning ?? false;
   const nextScanAt = state?.nextScanAt ?? null;
+  const manualOnly = state?.settings.manualOnly === true;
   useEffect(() => {
+    // Manual only: no alarm is armed and none will appear on its own, so this
+    // would become a once-a-second read with no possible answer — and the jobs
+    // tab can sit open for hours. Switching the setting back off writes settings,
+    // and that reload re-reads the alarm anyway, so nothing is missed.
+    if (manualOnly) return;
     if (!scanning && (nextScanAt === null || nextScanAt <= now)) void refreshAlarm();
-  }, [now, nextScanAt, scanning, refreshAlarm]);
+  }, [now, nextScanAt, scanning, manualOnly, refreshAlarm]);
 
   /**
    * Ask the background for a scan right away rather than waiting out the interval
