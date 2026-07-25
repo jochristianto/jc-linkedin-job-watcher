@@ -12,3 +12,6 @@ dist/
 # Fixtures are saved from a logged-in LinkedIn session and must never be committed.
 .scratch/
 .gstack/
+
+
+.design/
