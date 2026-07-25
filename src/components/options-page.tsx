@@ -151,21 +151,30 @@ function Section({
   );
 }
 
-/** The badge tone for each load tier — green for a pace that looks like a person
- *  browsing, amber past that, red where it stops being defensible (PRD §12). */
-const LOAD_TIER_STYLE: Record<LoadTier, { label: string; className: string }> =
-  {
-    gentle: { label: "Gentle", className: "border-ok/30 bg-ok/10 text-ok" },
-    heavy: {
-      label: "Heavy",
-      className: "border-warn/30 bg-warn-weak/70 text-warn",
-    },
-    risky: {
-      label: "Risky",
-      className:
-        "border-destructive/30 bg-destructive-weak/70 text-destructive",
-    },
-  };
+/** The tone for each load tier — green for a pace that looks like a person
+ *  browsing, amber past that, red where it stops being defensible (PRD §12).
+ *  `block` tints the whole estimate row, not just its badge: past Gentle the
+ *  number is the warning, and a warning the size of a badge gets skimmed. */
+const LOAD_TIER_STYLE: Record<
+  LoadTier,
+  { label: string; className: string; block: string }
+> = {
+  gentle: {
+    label: "GENTLE",
+    className: "border-ok/30 bg-ok/10 text-ok",
+    block: "bg-muted/50",
+  },
+  heavy: {
+    label: "HEAVY",
+    className: "border-warn/40 bg-warn/15 text-warn",
+    block: "border-warn/40 bg-warn-weak/70",
+  },
+  risky: {
+    label: "RISKY",
+    className: "border-destructive/40 bg-destructive/15 text-destructive",
+    block: "border-destructive/40 bg-destructive-weak/70",
+  },
+};
 
 export function OptionsPage() {
   // `base` holds the fields the page doesn't edit (pacing/backoff/…) so a save
@@ -534,7 +543,10 @@ export function OptionsPage() {
 
                 <Separator />
 
-                <div className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
+                {/* Two by two rather than one row of four: the four numbers pair
+                    up (how often, then how deep), and a 4-wide row squeezes the
+                    hints under each field into three-line columns. */}
+                <div className="grid gap-3.5 sm:grid-cols-2">
                   {numField(
                     "intervalMinutes",
                     "Interval (minutes)",
@@ -569,11 +581,17 @@ export function OptionsPage() {
                 {estimate && tier && (
                   <div
                     id="load-estimate"
-                    className="flex flex-wrap items-center gap-2.5 rounded-xl border bg-muted/50 px-3 py-2.5"
+                    className={cn(
+                      "flex flex-wrap items-center gap-2.5 rounded-xl border px-3 py-2.5",
+                      tier.block,
+                    )}
                   >
                     <Badge
                       variant="outline"
-                      className={cn("px-2 py-0 text-[10.5px]", tier.className)}
+                      className={cn(
+                        "px-2 py-0 text-[10.5px] font-semibold tracking-[0.06em]",
+                        tier.className,
+                      )}
                     >
                       {tier.label}
                     </Badge>
@@ -666,7 +684,7 @@ export function OptionsPage() {
               description="Seen ids are what stop a job coming back a second time — keep them longer than the age of the postings your searches return."
             >
               <div className="flex flex-col gap-3.5">
-                <div className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="grid gap-3.5 sm:grid-cols-2">
                   {numField(
                     "seenDays",
                     "Seen ids (days)",
