@@ -23,11 +23,21 @@ import { HealthBanner } from "../src/components/health-banner.tsx";
 import { HowItWorks } from "../src/components/how-it-works.tsx";
 import { JobList } from "../src/components/job-list.tsx";
 import { HeaderMenu, ListHeader } from "../src/components/list-header.tsx";
+import { SettingsNav } from "../src/components/settings-nav.tsx";
+import { WatchList } from "../src/components/watch-list.tsx";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "../src/components/ui/card";
 import { ScanningBar } from "../src/components/scanning.tsx";
 import { ScanStatusBar } from "../src/components/scan-status.tsx";
 import { Toolbar } from "../src/components/toolbar.tsx";
 import { TooltipProvider } from "../src/components/ui/tooltip";
 import type { EmptyKind, JobView, ListMode, ScanStatus, ViewVariant } from "../src/view-model.ts";
+import type { Watch } from "../src/types.ts";
 
 const root = resolve(import.meta.dirname, "..");
 const noop = () => {};
@@ -111,6 +121,30 @@ const TAB_JOBS: JobView[] = [
     applied: true,
     notes: "Referral · Cover letter v3, asked about the platform team",
   }),
+];
+
+/** Three saved searches for the Options mockup: two running, one paused, and
+ *  between them enough URL parameters to show every chip `watchUrlChips` reads —
+ *  place, recency, job type and workplace. */
+const MOCK_WATCHES: Watch[] = [
+  {
+    id: "w1",
+    name: "SE @ Japan",
+    enabled: true,
+    url: "https://www.linkedin.com/jobs/search/?f_TPR=r86400&geoId=101355337&keywords=Software%20Engineer&origin=JOB_SEARCH_PAGE",
+  },
+  {
+    id: "w2",
+    name: "SE @ Indonesia",
+    enabled: true,
+    url: "https://www.linkedin.com/jobs/search/?f_JT=F&f_TPR=r86400&geoId=102478259&keywords=Software%20Engineer&origin=JOB_SEARCH_PAGE",
+  },
+  {
+    id: "w3",
+    name: "SE @ Singapore",
+    enabled: false,
+    url: "https://www.linkedin.com/jobs/search/?f_TPR=r86400&f_WT=2&geoId=102454443&keywords=Software%20Engineer&origin=JOB_SEARCH_PAGE",
+  },
 ];
 
 // ── Page shells ─────────────────────────────────────────────────────────────
@@ -311,31 +345,66 @@ const files: Record<string, string> = {
   "options.html": page(
     "Options — LinkedIn Job Watcher",
     css,
-    // The Options *form* reads chrome.storage on mount, so it cannot be rendered
-    // headlessly the way the list view can. What can: the how-it-works explainer
-    // that sits in the column beside it, which reads nothing — it ships here
-    // expanded exactly as production shows it, and `<details>` is native, so the
-    // file collapses it on a click with no script. Below it, the banner pair —
-    // the two things on that page a screenshot would otherwise never show.
+    // The Options *form* reads chrome.storage on mount, so the page as a whole
+    // cannot be rendered headlessly the way the list view can. Three parts of it
+    // can, because they take everything they show as props: the rail, the watch
+    // rows — the most-changed piece of the redesign, and the one whose URL chips
+    // are worth being able to look at — and the how-it-works explainer. They are
+    // laid out here the way the real page lays them out, on the same surface
+    // colour. Below them, the banner pair: the two things on that page a
+    // screenshot would otherwise never show.
     renderToStaticMarkup(
-      <div className="mx-auto flex max-w-3xl flex-col gap-4 p-8">
-        <h1 className="text-xl font-semibold">LinkedIn Job Watcher — Settings</h1>
-        <HowItWorks />
-        <p className="text-sm text-muted-foreground">
-          The settings form itself is live over <code>chrome.storage</code>, so it is not
-          rendered here — load the unpacked extension and open Options to see it. Its two
-          transient banners are below, since neither shows on a healthy first open.
-        </p>
-        <HealthBanner
-          message="Telegram push has been failing — run Send test message"
-          severity="warn"
-          className="rounded-md border"
-        />
-        <HealthBanner
-          message="Signed out of LinkedIn — scanning paused."
-          severity="error"
-          className="rounded-md border"
-        />
+      <div className="bg-[color-mix(in_oklab,var(--muted)_45%,var(--background))] p-6">
+        <div className="mx-auto flex w-full max-w-275 flex-wrap items-start gap-4">
+          <SettingsNav active="watches" dirty={new Set(["scanning"] as const)} onSelect={noop} />
+
+          <main className="flex min-w-0 flex-1 basis-115 flex-col gap-3.5">
+            <Card className="gap-4 py-5">
+              <CardHeader className="gap-1.5 px-5">
+                <CardTitle className="flex flex-wrap items-center gap-2 text-[15px] tracking-tight">
+                  Watches
+                </CardTitle>
+                <CardDescription className="max-w-[74ch] text-[12.5px] leading-relaxed text-pretty">
+                  A watch is a saved LinkedIn search with your filters already applied. Every
+                  watch runs on the same cycle — switch one off to pause it without losing the
+                  URL.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="px-5">
+                <WatchList watches={MOCK_WATCHES} onChange={noop} />
+              </CardContent>
+            </Card>
+
+            <Card className="gap-4 py-5">
+              <CardHeader className="gap-1.5 px-5">
+                <CardTitle className="text-[15px] tracking-tight">How this works</CardTitle>
+                <CardDescription className="max-w-[74ch] text-[12.5px] leading-relaxed text-pretty">
+                  It re-runs your saved searches in the background and tells you when something
+                  genuinely new turns up — so you can stop refreshing the tab yourself.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="px-5">
+                <HowItWorks />
+              </CardContent>
+            </Card>
+
+            <p className="text-sm text-muted-foreground">
+              The rest of the form is live over <code>chrome.storage</code>, so it is not
+              rendered here — load the unpacked extension and open Options to see it. Its two
+              transient banners are below, since neither shows on a healthy first open.
+            </p>
+            <HealthBanner
+              message="Telegram push has been failing — run Send test message"
+              severity="warn"
+              className="rounded-md border"
+            />
+            <HealthBanner
+              message="Signed out of LinkedIn — scanning paused."
+              severity="error"
+              className="rounded-md border"
+            />
+          </main>
+        </div>
       </div>,
     ),
   ),

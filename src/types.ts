@@ -93,6 +93,12 @@ export type Settings = {
   pagesPerScan: number; // default 1 — routine depth (§15); page 2 is mostly stale
   catchUpPages: number; // default 4, used on startup and quiet-hours resume (§9/§15)
   quietHours: QuietHours;
+  /** The desktop pop-up that announces a cycle's new jobs (§3/§9). Off silences
+   *  that pop-up and nothing else — the toolbar count still moves and Telegram
+   *  still delivers, because those are how you find out later rather than now.
+   *  Settings written before this field existed have no `notifyDesktop`, which
+   *  reads as on, so an upgrade never goes quiet on its own. */
+  notifyDesktop: boolean; // default true
   pacing: PacingConfig;
   backoff: BackoffConfig;
   retention: RetentionConfig;
@@ -121,6 +127,7 @@ export const DEFAULT_SETTINGS: Settings = {
   pagesPerScan: 1,
   catchUpPages: 4,
   quietHours: { enabled: true, startMinute: 1380, endMinute: 420 },
+  notifyDesktop: true,
   pacing: { pagePauseMs: [3000, 5000], watchPauseMs: [8000, 12000] },
   backoff: { emptyScansBeforeBackoff: 3, maxIntervalMinutes: 60 },
   retention: {

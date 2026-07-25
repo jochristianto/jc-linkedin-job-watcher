@@ -86,6 +86,7 @@ export type OptionsFormValues = {
   quietHoursEnabled: boolean;
   quietStart: string; // "HH:MM"
   quietEnd: string; // "HH:MM"
+  notifyDesktop: boolean; // the desktop pop-up (§3/§9); Telegram is separate
   seenDays: string;
   openedJobDays: string;
   unopenedJobDays: string;
@@ -159,6 +160,7 @@ export function parseSettingsForm(raw: OptionsFormValues, base: Settings): Parse
       startMinute: startMinute!,
       endMinute: endMinute!,
     },
+    notifyDesktop: raw.notifyDesktop,
     retention: {
       ...base.retention,
       seenDays: seenDays!,
@@ -190,6 +192,9 @@ export function settingsToForm(s: Settings): OptionsFormValues {
     quietHoursEnabled: s.quietHours.enabled,
     quietStart: minutesToTime(s.quietHours.startMinute),
     quietEnd: minutesToTime(s.quietHours.endMinute),
+    // Absent (settings saved before the switch existed) reads as on — the same
+    // rule the master `enabled` switch follows, so an upgrade never goes quiet.
+    notifyDesktop: s.notifyDesktop !== false,
     seenDays: String(s.retention.seenDays),
     openedJobDays: String(s.retention.openedJobDays),
     unopenedJobDays: String(s.retention.unopenedJobDays),
@@ -222,8 +227,12 @@ function sameValue(a: unknown, b: unknown): boolean {
 }
 
 /**
- * Is there anything in the form that isn't in storage yet — i.e. does Reset have
- * something to throw away?
+ * WHICH fields differ from what is stored — the unsaved edits, named.
+ *
+ * One function rather than a yes/no predicate beside it, because the page asks
+ * the same question three ways and they must never disagree: Reset is enabled
+ * when this is non-empty, the header badge counts it, and `settings-view.ts`
+ * maps the names onto sections to put a dot on the rail.
  *
  * Compared against `settingsToForm(saved)` rather than against `saved` itself,
  * so the comparison happens in the form's own vocabulary: "23:00" against
@@ -235,8 +244,14 @@ function sameValue(a: unknown, b: unknown): boolean {
  * A build-time .env prefill counts too: it fills blank fields and writes
  * nothing, which is exactly an unsaved edit (see {@link applyPushPrefill}).
  */
-export function hasUnsavedChanges(form: OptionsFormValues, saved: Settings): boolean {
-  return !sameValue(form, settingsToForm(saved));
+export function changedFormKeys(
+  form: OptionsFormValues,
+  saved: Settings,
+): (keyof OptionsFormValues)[] {
+  const stored = settingsToForm(saved);
+  return (Object.keys(form) as (keyof OptionsFormValues)[]).filter(
+    (key) => !sameValue(form[key], stored[key]),
+  );
 }
 
 // ── Build-time .env prefill (the `npm run build:dev` path) ───────────────────

@@ -964,12 +964,25 @@ test("ScanStatusBar says Paused when the master switch is off (§ master)", () =
 
 // ── HowItWorks: the Options-page explainer ───────────────────────────────────
 
-test("HowItWorks starts expanded in its own column beside the settings", () => {
+test("HowItWorks is always open — the last section, not a disclosure", () => {
   const h = html(<HowItWorks />);
-  assert.match(h, /<details[^>]*id="how-it-works"/);
-  // It no longer sits above the form, so an open essay pushes nothing down —
-  // and a collapsed one would leave its column empty.
-  assert.match(h, /<details[^>]*\sopen\b/);
+  assert.match(h, /id="how-it-works"/);
+  // It is a section of the page now, reached from the rail like every other one.
+  // Nothing collapses, so there is no state to keep and nothing to re-open.
+  assert.doesNotMatch(h, /<details|<summary/);
+});
+
+test("HowItWorks runs the prose in two columns, headed and in order", () => {
+  const h = html(<HowItWorks />);
+  // What happens, then what surprises people about it — the second column is the
+  // one that answers "why did it do that?" without a trip to the README.
+  assert.match(h, /Every round/);
+  assert.match(h, /Worth knowing/);
+  assert.ok(h.indexOf("Every round") < h.indexOf("Worth knowing"));
+  // The steps are numbered by position, so the order is carried by the markup
+  // rather than typed into each sentence.
+  assert.match(h, />1</);
+  assert.match(h, />5</);
 });
 
 test("HowItWorks links out to the repo, in a new tab", () => {
@@ -1011,4 +1024,41 @@ test("WatchList makes the saved search URL a link, opened in a new tab", () => {
   assert.match(h, /<a[^>]*rel="noreferrer"/);
   // Truncated to one line, so the full URL has to be reachable some other way.
   assert.match(h, /<a[^>]*title="https:\/\/www\.linkedin\.com\/jobs\/\?f=1&amp;k=x"/);
+});
+
+test("WatchList says what a search filters on, so two rows are tellable apart", () => {
+  const h = html(
+    <WatchList
+      watches={[
+        {
+          ...watch,
+          url: "https://www.linkedin.com/jobs/search/?f_WT=2&geoId=102478259&keywords=Software%20Engineer",
+        },
+      ]}
+      onChange={() => {}}
+    />,
+  );
+  // The query string read back as words — the URL itself tells a human nothing.
+  assert.match(h, /“Software Engineer”/);
+  assert.match(h, /Indonesia/);
+  assert.match(h, /Remote/);
+});
+
+test("WatchList pauses a watch with a switch, and says so on the row", () => {
+  const on = html(<WatchList watches={[watch]} onChange={() => {}} />);
+  const off = html(<WatchList watches={[{ ...watch, enabled: false }]} onChange={() => {}} />);
+  // A switch, not a checkbox: it pauses a search rather than selecting it.
+  assert.match(on, /data-act="toggle"[^>]*role="switch"|role="switch"[^>]*data-act="toggle"/);
+  // Greyed alone reads as "the last one" rather than "this one is off".
+  assert.doesNotMatch(on, />Paused</);
+  assert.match(off, />Paused</);
+  assert.match(off, /data-act="toggle"[^>]*aria-label="Resume Indonesia"/);
+});
+
+test("WatchList offers the add form as the empty list's one thing to click", () => {
+  const h = html(<WatchList watches={[]} onChange={() => {}} />);
+  assert.match(h, /id="add-search"/);
+  assert.match(h, /Add a watch/);
+  // Closed until asked for — one form on the page, never two sets of fields.
+  assert.doesNotMatch(h, /id="watch-form"/);
 });

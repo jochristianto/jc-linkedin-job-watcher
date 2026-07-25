@@ -63,7 +63,7 @@ Pin the extension to your toolbar so you can see the badge.
 2. **Sort by "Most recent"** — this matters. The defaults scan only page 1, which assumes newest-first ordering. Sorting by date puts `sortBy=DD` in the URL.
 3. Copy the full URL from the address bar.
 4. Right-click the extension icon → **Options** (or click the gear in the popup).
-5. Under **Searches**, give it a nickname (e.g. "Indonesia") and paste the URL → **Add**.
+5. Under **Watches**, click **Add a watch**, give it a nickname (e.g. "Indonesia") and paste the URL → **Add watch**.
 6. Click **Save settings** at the bottom. *Nothing is stored until you save.*
 
 The first scan fires on the next alarm tick — or immediately, if you open the popup and click **Scan now**. Any URL that works in your browser works here — the query string (keywords, filters, `sortBy=DD`) is preserved verbatim; only `&start=` is rewritten for pagination.
@@ -102,11 +102,10 @@ A row therefore has three looks: plain (untouched), highlighted with a blue bar 
 
 ## Options reference
 
-### How this works
-A collapsed explainer at the top of the page: what a scan round actually does, in plain English, plus the things worth knowing before you trust a background scraper (nothing runs while Chrome is closed, it slows itself down when nothing turns up, the ToS caveat). Click the row to open it; it links back here for the rest.
+The page is a fixed shell: the header and the save bar stay put, only the sections between them scroll, and a rail down the left jumps to any section and marks the ones holding unsaved edits. The header carries a one-line summary of the whole configuration — how many watches, how often, when they stop, where a find is delivered — and it tracks what you're about to save, not what you saved last.
 
-### Searches
-Add, edit, remove, and individually enable/disable saved searches. Enabled searches all run on the same cycle, strictly one after another — never in parallel.
+### Watches
+Add, edit, remove, and individually pause saved searches. Enabled watches all run on the same cycle, strictly one after another — never in parallel. Each row reads its own URL back as chips (keywords, place, date posted, job type, remote/hybrid/on-site), so two saved searches are tellable apart without parsing 200 characters of query string.
 
 ### Filters
 - **Blocked companies** — matched case-insensitively; normalised once when saved. The **Block** button on any job row adds and removes entries here too
@@ -125,15 +124,19 @@ Filtered jobs are still recorded as seen, so they never resurface later.
 | Catch-up pages | `4` | Deeper scan after a browser restart or when quiet hours end |
 | Quiet hours | `23:00–07:00` | Scanning pauses overnight; resuming triggers a catch-up scan |
 
-At the defaults that's roughly **192 page loads a day per search**. Raise the depth only if you find you're actually missing things.
+The section shows what those four numbers add up to: a running estimate of the page loads a day they cause, tiered Gentle / Heavy / Risky, with the arithmetic spelled out. It's deliberately a ceiling — it ignores the back-off and assumes Chrome is open the whole time. Raise the depth only if you find you're actually missing things.
 
 There's also automatic back-off: after **3** consecutive empty scans, the interval stretches out toward a 60-minute ceiling; one scan that finds something resets it.
 
-### Telegram push
-Optional, and *additive* to the desktop notification — never a replacement. See below.
+### Notifications
+- **Desktop notification** — the pop-up announcing a round that found something. One per round, never one per job. Switching it off silences the pop-up only: the toolbar count still moves, and Telegram still delivers
+- **Also push to Telegram** — optional, and *additive* to the desktop notification rather than a replacement. See [Telegram push](#telegram-push-optional)
 
 ### Retention
 How long records are kept: seen IDs `15` days, jobs you've opened or read `7` days, untouched jobs `30` days, seen hard cap `50,000`. **Not yet enforced** — see [Known limitations](#known-limitations).
+
+### How this works
+The last section: what a scan round actually does, in plain English, plus the things worth knowing before you trust a background scraper (nothing runs while Chrome is closed, it slows itself down when nothing turns up, the ToS caveat). It links back here for the rest.
 
 > **Save settings** writes your changes. **Reset** reverts the form to the last-saved values — it is not a factory reset. It asks before discarding, and is greyed out while there's nothing unsaved to discard.
 
@@ -149,7 +152,7 @@ Get new jobs on your phone.
    https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates
    ```
    Read `result[0].message.chat.id` out of the JSON.
-3. In **Options → Telegram push**, tick **Send new jobs to Telegram**, paste both values, and click **Send test message**. Success or failure is reported inline.
+3. In **Options → Notifications**, switch on **Also push to Telegram**, paste both values, and click **Send test message**. Success or failure is reported inline. The test sends whatever is in the fields right now, so you can prove a token before switching the pushes on.
 4. **Check it on your phone**, not just desktop Telegram — confirm the links are tappable and the layout reads well.
 5. Click **Save settings**.
 
@@ -186,7 +189,7 @@ npm run send-test-message
 TELEGRAM_BOT_TOKEN=123456:ABC... TELEGRAM_CHAT_ID=987654321 npm run send-test-message
 ```
 
-By default that `.env` feeds **only** this terminal script. The running extension reads what you saved in **Options → Telegram push** — a separate copy. If you'd rather not enter the credentials twice, see below.
+By default that `.env` feeds **only** this terminal script. The running extension reads what you saved in **Options → Notifications** — a separate copy. If you'd rather not enter the credentials twice, see below.
 
 ### Pre-filling Options from `.env` (`npm run build:dev`)
 
