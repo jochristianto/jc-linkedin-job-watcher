@@ -79,6 +79,10 @@ export type OptionsFormValues = {
   blockedCompanies: BlockedCompany[];
   blockedTitleKeywords: string[];
   hideReposted: boolean;
+  /** "Only scan when I press Scan now" — no routine round runs while it is on,
+   *  and the cadence fields below are left alone rather than zeroed, so turning
+   *  it off puts back the schedule you had. */
+  manualOnly: boolean;
   intervalMinutes: string;
   jitterMinutes: string;
   pagesPerScan: string;
@@ -151,6 +155,7 @@ export function parseSettingsForm(raw: OptionsFormValues, base: Settings): Parse
     blockedCompanies: raw.blockedCompanies,
     blockedTitleKeywords: raw.blockedTitleKeywords,
     hideReposted: raw.hideReposted,
+    manualOnly: raw.manualOnly,
     intervalMinutes: intervalMinutes!,
     jitterMinutes: jitterMinutes!,
     pagesPerScan: pagesPerScan!,
@@ -185,6 +190,9 @@ export function settingsToForm(s: Settings): OptionsFormValues {
     blockedCompanies: s.blockedCompanies,
     blockedTitleKeywords: s.blockedTitleKeywords,
     hideReposted: s.hideReposted,
+    // Absent (settings saved before the switch existed) reads as off, so an
+    // upgrade keeps scanning on its schedule instead of going manual by surprise.
+    manualOnly: s.manualOnly === true,
     intervalMinutes: String(s.intervalMinutes),
     jitterMinutes: String(s.jitterMinutes),
     pagesPerScan: String(s.pagesPerScan),

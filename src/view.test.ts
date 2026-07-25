@@ -667,6 +667,42 @@ test("scanStatus says so when no alarm is armed at all", () => {
   assert.deepEqual(scanStatus({ ...base, nextScanAt: null, now: NOW }), { kind: "unscheduled" });
 });
 
+test("scanStatus reports manual-only as a state, not as a missing schedule", () => {
+  // With nothing armed it would otherwise fall through to `unscheduled`, which
+  // reads as a fault. Here the absence of a schedule is the setting working.
+  assert.deepEqual(scanStatus({ ...base, manualOnly: true, nextScanAt: null, now: NOW }), {
+    kind: "manual",
+  });
+});
+
+test("scanStatus: manual-only outranks an alarm left armed from before the switch", () => {
+  // The worker clears that alarm, but not necessarily before the popup next
+  // paints — and a countdown to a wake that will only cancel itself is a lie.
+  assert.deepEqual(
+    scanStatus({ ...base, manualOnly: true, nextScanAt: NOW + 300_000, now: NOW }),
+    { kind: "manual" },
+  );
+});
+
+test("scanStatus: the master switch and a live cycle both outrank manual-only", () => {
+  // Paused is a stronger statement than manual — under it the button is gone too —
+  // and a cycle in flight is simply what is happening, however it was started.
+  assert.deepEqual(scanStatus({ ...base, manualOnly: true, enabled: false, now: NOW }), {
+    kind: "disabled",
+  });
+  assert.deepEqual(scanStatus({ ...base, manualOnly: true, scanning: true, now: NOW }), {
+    kind: "scanning",
+  });
+});
+
+test("scanStatus treats an absent manual-only as off (upgrade back-compat)", () => {
+  assert.deepEqual(scanStatus({ ...base, nextScanAt: NOW + 60_000, now: NOW }), {
+    kind: "waiting",
+    remainingMs: 60_000,
+    quiet: false,
+  });
+});
+
 test("selectView hands the footer a countdown to the next scan", () => {
   const v = selectView({ ...base, jobs: [job()], nextScanAt: NOW + 252_000, now: NOW });
   assert.deepEqual(v.status, { kind: "waiting", remainingMs: 252_000, quiet: false });

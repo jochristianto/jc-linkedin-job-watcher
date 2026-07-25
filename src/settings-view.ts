@@ -48,6 +48,7 @@ const SECTION_OF_FIELD: Record<keyof OptionsFormValues, SettingsSection> = {
   blockedCompanies: "filters",
   blockedTitleKeywords: "filters",
   hideReposted: "filters",
+  manualOnly: "scanning",
   intervalMinutes: "scanning",
   jitterMinutes: "scanning",
   pagesPerScan: "scanning",
@@ -211,6 +212,10 @@ export function spanHours(start: string, end: string): number {
  * alarm shorter than a minute whatever the jitter says (issue #3).
  */
 function cadencePhrase(form: OptionsFormValues): string {
+  // Manual only: the interval and jitter below are still stored, but nothing is
+  // reading them, so quoting a band would describe a schedule that isn't running.
+  if (form.manualOnly) return "Only when you press Scan now";
+
   const minutes = Number.parseInt(form.intervalMinutes, 10);
   if (!Number.isFinite(minutes)) return "Interval not set";
 
@@ -256,7 +261,13 @@ export function headerSummary(form: OptionsFormValues): string {
       ? "Telegram only"
       : "badge only";
 
-  return `${watches} · ${every} ${hours} · ${delivery}`;
+  // Quiet hours govern the automatic rounds and nothing else, so under manual-only
+  // there is no window to name: "Only when you press Scan now from 07:00 to 23:00"
+  // would describe a restriction that isn't there — a manual scan runs whenever
+  // you press it, including at 3am.
+  const cadence = form.manualOnly ? every : `${every} ${hours}`;
+
+  return `${watches} · ${cadence} · ${delivery}`;
 }
 
 // ── How hard the current pacing leans on LinkedIn ────────────────────────────
@@ -269,7 +280,11 @@ const HEAVY_MAX = 320;
 export type LoadTier = "gentle" | "heavy" | "risky";
 
 export type LoadEstimate = {
-  /** Scan rounds in a day, after quiet hours are taken out. */
+  /** Nothing runs on a schedule — every load below is one the user asked for by
+   *  pressing Scan now, so the *daily* figure is 0 and the honest number is the
+   *  per-press one. */
+  manual: boolean;
+  /** Scan rounds in a day, after quiet hours are taken out. 0 under `manual`. */
   rounds: number;
   /** Watches that are switched on — a paused watch costs nothing. */
   activeWatches: number;
@@ -313,10 +328,16 @@ export function estimateLoad(form: OptionsFormValues): LoadEstimate {
     ? Math.max(1, 24 - spanHours(form.quietStart, form.quietEnd))
     : 24;
 
-  const rounds = Math.max(1, Math.round((awakeHours * 60) / interval));
+  // Manual only: no round happens without a press, so a *daily* number would be a
+  // prediction about how often the user will press the button — which this cannot
+  // know and should not guess. Zero rounds is the truthful answer; the per-press
+  // cost is what {@link loadEstimateLine} reports instead.
+  const manual = form.manualOnly === true;
+  const rounds = manual ? 0 : Math.max(1, Math.round((awakeHours * 60) / interval));
   const loads = rounds * activeWatches * pagesPerScan;
 
   return {
+    manual,
     rounds,
     activeWatches,
     pagesPerScan,
@@ -334,6 +355,17 @@ export function loadEstimateLine(est: LoadEstimate): string {
   }
   const watches = `${est.activeWatches} active ${est.activeWatches === 1 ? "watch" : "watches"}`;
   const pages = `${est.pagesPerScan} ${est.pagesPerScan === 1 ? "page" : "pages"}`;
+
+  // Manual only: the same arithmetic, priced per press instead of per day — the
+  // one number that still means something when nothing runs on its own.
+  if (est.manual) {
+    const perPress = est.activeWatches * est.pagesPerScan;
+    return (
+      `≈ ${perPress.toLocaleString("en-US")} LinkedIn page loads each time you press Scan now — ` +
+      `${watches} × ${pages}. Nothing is loaded until you do.`
+    );
+  }
+
   return (
     `≈ ${est.loads.toLocaleString("en-US")} LinkedIn page loads a day — ` +
     `${est.rounds} rounds × ${watches} × ${pages}, across ${est.awakeHours} awake hours.`

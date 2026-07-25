@@ -324,14 +324,23 @@ export function OptionsPage() {
     setSection((prev) => (prev === current ? prev : current));
   }
 
-  /** One whole-number field, with its hint and its inline error. */
+  /** One whole-number field, with its hint and its inline error. `governsCadence`
+   *  marks the fields only the automatic rounds read: the manual-only switch dims
+   *  and disables those, and leaves the rest (page depth, retention) alone —
+   *  a manual round is a full round and reads them exactly as a timed one does. */
   const numField = (
     key: keyof OptionsFormValues,
     label: string,
     min: number,
     hint: string,
+    governsCadence = false,
   ) => (
-    <div className="flex flex-col gap-1.5">
+    <div
+      className={cn(
+        "flex flex-col gap-1.5",
+        governsCadence && form.manualOnly && "opacity-50",
+      )}
+    >
       <Label htmlFor={key} className="text-xs">
         {label}
       </Label>
@@ -340,6 +349,7 @@ export function OptionsPage() {
         type="number"
         min={min}
         value={String(form[key])}
+        disabled={governsCadence && form.manualOnly}
         aria-invalid={Boolean(errors[key])}
         onChange={(e) =>
           set(key, e.target.value as OptionsFormValues[typeof key])
@@ -507,18 +517,37 @@ export function OptionsPage() {
               description="Every page is a real load against LinkedIn, so the shipped depth is deliberately shallow. Raise it only if you find you are actually missing postings."
             >
               <div className="flex flex-col gap-4">
+                {/* First in the section because it decides whether anything below
+                    it runs at all: the schedule reads differently once you know
+                    nothing is on a timer. */}
+                <ToggleRow
+                  id="manual-only"
+                  label="Only scan when I press Scan now"
+                  description={
+                    form.manualOnly
+                      ? "Nothing runs on a timer. Your searches stay switched on and the list, the toolbar count and Telegram all keep working — but LinkedIn is only opened when you press Scan now."
+                      : "Rounds run on the schedule below. Switch this on to keep every search but decide yourself when they run — the schedule is kept, just not used."
+                  }
+                  checked={form.manualOnly}
+                  onChange={(v) => set("manualOnly", v)}
+                />
+
+                <Separator />
+
                 <div className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
                   {numField(
                     "intervalMinutes",
                     "Interval (minutes)",
                     1,
                     "Gap between rounds. Under 15 gets noticed.",
+                    true,
                   )}
                   {numField(
                     "jitterMinutes",
                     "Jitter (± minutes)",
                     0,
                     "Random wobble, so rounds are not clockwork. 60 ± 30 lands anywhere in 30–90 min.",
+                    true,
                   )}
                   {numField(
                     "pagesPerScan",
@@ -556,15 +585,21 @@ export function OptionsPage() {
 
                 <Separator />
 
+                {/* Quiet hours only ever silenced the automatic rounds, so with
+                    manual-only on there is nothing left for them to silence — the
+                    whole row goes inert, and keeps the window you set. */}
                 <ToggleRow
                   id="quiet-enabled"
                   label="Pause during quiet hours"
                   description={
-                    form.quietHoursEnabled
-                      ? "No rounds between these times; one catch-up round runs when they end."
-                      : "Rounds keep running all night, which is the least human-looking pattern."
+                    form.manualOnly
+                      ? "Nothing to pause while only you start the rounds — a Scan now runs whenever you press it."
+                      : form.quietHoursEnabled
+                        ? "No rounds between these times; one catch-up round runs when they end."
+                        : "Rounds keep running all night, which is the least human-looking pattern."
                   }
                   checked={form.quietHoursEnabled}
+                  disabled={form.manualOnly}
                   onChange={(v) => set("quietHoursEnabled", v)}
                 >
                   {/* Dimmed and inert rather than hidden when quiet hours are off:
@@ -573,6 +608,8 @@ export function OptionsPage() {
                   <div
                     className={cn(
                       "mt-2.5 flex flex-wrap gap-3",
+                      // Not dimmed again for manual-only: the row above already
+                      // fades as a whole, and two stacked opacities read as broken.
                       !form.quietHoursEnabled &&
                         "pointer-events-none opacity-50",
                     )}
@@ -585,7 +622,7 @@ export function OptionsPage() {
                         id="quietStart"
                         type="time"
                         value={form.quietStart}
-                        disabled={!form.quietHoursEnabled}
+                        disabled={!form.quietHoursEnabled || form.manualOnly}
                         aria-invalid={Boolean(errors.quietStart)}
                         onChange={(e) => set("quietStart", e.target.value)}
                       />
@@ -606,7 +643,7 @@ export function OptionsPage() {
                         id="quietEnd"
                         type="time"
                         value={form.quietEnd}
-                        disabled={!form.quietHoursEnabled}
+                        disabled={!form.quietHoursEnabled || form.manualOnly}
                         aria-invalid={Boolean(errors.quietEnd)}
                         onChange={(e) => set("quietEnd", e.target.value)}
                       />
@@ -784,9 +821,10 @@ export function OptionsPage() {
           passes over white cards, and letting those bleed through made it read
           as a rendering artefact instead of a bar. */}
       <footer className="flex shrink-0 flex-wrap items-center gap-3 border-t bg-background px-4 py-2.5 md:px-6 justify-between">
-        <p className="min-w-0 flex-1 basis-65 text-[11.5px] leading-snug text-faint text-pretty">
-          Personal use only · keep the frequency low, and switch watching off
-          when you are not looking for work.
+        <p className="min-w-0 flex-1 basis-65 text-xs leading-snug text-faint text-pretty">
+          <span className="font-semibold">Personal use only</span> · keep the
+          frequency low, and switch watching off when you are not looking for
+          work.
         </p>
         {/* The save word and the buttons it belongs to read as one thing, so they
             sit on one line — the message to the left of the button it describes,
@@ -861,12 +899,15 @@ export function OptionsPage() {
 /** A switch with its label and the sentence that says what switching it off
  *  actually costs — the settings that used to be a bare label each needed one.
  *  `children` is whatever the switch reveals or governs, laid under the text so
- *  it reads as belonging to the row rather than following it. */
+ *  it reads as belonging to the row rather than following it. `disabled` is for a
+ *  row another switch has made moot: it dims and blocks the control — keyboard
+ *  included, which a dimmed wrapper alone would not — while leaving its value be. */
 function ToggleRow({
   id,
   label,
   description,
   checked,
+  disabled = false,
   onChange,
   children,
 }: {
@@ -874,19 +915,25 @@ function ToggleRow({
   label: string;
   description: ReactNode;
   checked: boolean;
+  disabled?: boolean;
   onChange: (checked: boolean) => void;
   children?: ReactNode;
 }) {
   return (
-    <div className="flex items-start gap-3">
+    <div className={cn("flex items-start gap-3", disabled && "opacity-50")}>
       <div className="pt-0.5">
-        <Switch id={id} checked={checked} onCheckedChange={onChange} />
+        <Switch
+          id={id}
+          checked={checked}
+          disabled={disabled}
+          onCheckedChange={onChange}
+        />
       </div>
       <div className="min-w-0 flex-1">
         <Label htmlFor={id} className="text-[13px] font-semibold">
           {label}
         </Label>
-        <p className="mt-0.5 max-w-[62ch] text-xs leading-snug text-muted-foreground">
+        <p className="mt-0.5 text-xs leading-snug text-muted-foreground">
           {description}
         </p>
         {children}

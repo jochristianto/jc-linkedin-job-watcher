@@ -84,6 +84,15 @@ export type Settings = {
    *  search); this pauses everything at once. Settings written before this field
    *  existed have no `enabled`, which reads as on, so an upgrade never goes dark. */
   enabled: boolean; // default true
+  /** "Only scan when I press Scan now" (§15). No routine alarm is ever armed, so
+   *  nothing is loaded from LinkedIn until the button is pressed — but everything
+   *  else stays live: the watches stay on, "Scan now" runs a full cycle, and the
+   *  list, badge and pushes work exactly as before. That is the whole difference
+   *  from the master switch above, which stops the manual button too: this hands
+   *  the *timing* to the user rather than stopping the loop. Settings written
+   *  before this field existed have no `manualOnly`, which reads as off, so an
+   *  upgrade keeps the cadence it already had. */
+  manualOnly: boolean; // default false
   watches: Watch[];
   blockedCompanies: BlockedCompany[];
   blockedTitleKeywords: string[];
@@ -118,6 +127,7 @@ export type ScanState = {
 // The single source for every default so no later ticket has to invent one.
 export const DEFAULT_SETTINGS: Settings = {
   enabled: true,
+  manualOnly: false,
   watches: [],
   blockedCompanies: [],
   blockedTitleKeywords: [],

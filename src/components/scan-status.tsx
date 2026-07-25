@@ -1,4 +1,12 @@
-import { Clock, Moon, PowerOff, RefreshCw, TriangleAlert, type LucideIcon } from "lucide-react";
+import {
+  Clock,
+  Moon,
+  MousePointerClick,
+  PowerOff,
+  RefreshCw,
+  TriangleAlert,
+  type LucideIcon,
+} from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { formatCountdown, type ScanStatus } from "@/view-model.ts";
@@ -19,6 +27,10 @@ function statusFace(status: ScanStatus): { icon: LucideIcon; text: string } {
       return { icon: TriangleAlert, text: "Scanning stopped — press Resume" };
     case "unscheduled":
       return { icon: Clock, text: "No scan scheduled — press Scan now" };
+    // Nearly the same sentence as `unscheduled`, deliberately without its "no
+    // scan scheduled": nothing is missing here, this is the switch doing its job.
+    case "manual":
+      return { icon: MousePointerClick, text: "Manual only — press Scan now" };
     case "off":
       return { icon: Clock, text: "" };
     case "disabled":
