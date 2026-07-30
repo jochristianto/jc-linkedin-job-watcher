@@ -186,18 +186,48 @@ export function clearJobApplied(jobs: JobsMap, id: string): JobsMap {
   return { ...jobs, [id]: cleared };
 }
 
+/** Which jobs a bulk read is allowed to reach — the list exactly as it is
+ *  filtered on screen, so the button can never dismiss a row you cannot see.
+ *  Mirrors the two filters `selectView` applies to the list; the New⇄All mode is
+ *  deliberately not among them, because every unread job is on the New list by
+ *  definition, so the mode cannot change which jobs a read would touch. Blocked
+ *  companies aren't either: those rows stay on screen, greyed, so they are part
+ *  of what you are looking at. */
+export type ReadScope = {
+  /** The watch chip filtering the list, or null/absent for "All watches". */
+  watchId?: string | null;
+  /** `settings.hideReposted` — a job the setting has taken off the list is not
+   *  yours to dismiss, and leaving it unread is what makes turning the setting
+   *  back off bring it back as the new job it never got shown as. */
+  hideReposted?: boolean;
+};
+
 /**
- * Mark every unread job read at `now`, immutably (the "Mark all as read" action,
- * mockups decision 4). Already-read jobs keep their original `readAt`; only the
- * unread ones flip. Returns the same reference when there was nothing to mark,
- * so mount.ts can skip a redundant storage write. mount.ts persists this and
- * clears the toolbar badge in one action.
+ * Mark every unread job in `scope` read at `now`, immutably (the "Mark all as
+ * read" action, mockups decision 4).
+ *
+ * "All" means all of the list in front of you, not all of storage: under a watch
+ * chip this reaches that watch's jobs and no others. Clearing four watches you
+ * had not looked at because you tidied up one of them is unrecoverable — nothing
+ * un-reads in bulk — and the header says which it is doing (`filtered` in
+ * `<ListHeader>`). An empty `scope` is the whole map, which is what "All watches"
+ * passes.
+ *
+ * Already-read jobs keep their original `readAt`; only the unread ones in scope
+ * flip. Returns the same reference when there was nothing to mark, so the caller
+ * can skip a redundant storage write. `<ListView>` persists this and repaints the
+ * toolbar badge in one action — and the badge still counts every watch, so a
+ * scoped read leaves a number behind on purpose.
  */
-export function markAllRead(jobs: JobsMap, now: number): JobsMap {
+export function markAllRead(jobs: JobsMap, now: number, scope: ReadScope = {}): JobsMap {
+  const watchId = scope.watchId || null;
+  const hideReposted = scope.hideReposted === true;
   let changed = false;
   const next: JobsMap = {};
   for (const [id, job] of Object.entries(jobs)) {
-    if (job.read) {
+    const onList =
+      (watchId === null || job.watchId === watchId) && !isHiddenAsReposted(job, hideReposted);
+    if (job.read || !onList) {
       next[id] = job;
     } else {
       next[id] = { ...job, read: true, readAt: now };

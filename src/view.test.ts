@@ -278,6 +278,61 @@ test("markAllRead no-ops (same reference) when nothing is unread", () => {
   assert.equal(markAllRead(jobs, 1), jobs);
 });
 
+test("markAllRead under a watch chip leaves the other watches unread", () => {
+  // "All" is all of the list in front of you. Tidying one watch must not clear
+  // four others you have not looked at — nothing un-reads in bulk.
+  const jobs: JobsMap = {
+    a: job({ id: "a", watchId: "w-id" }),
+    b: job({ id: "b", watchId: "w-other" }),
+  };
+  const next = markAllRead(jobs, 999, { watchId: "w-id" });
+  assert.equal(next["a"]!.read, true);
+  assert.equal(next["b"]!.read, false);
+  // The out-of-scope job is not even copied, so a caller comparing references can
+  // tell which jobs a bulk read touched.
+  assert.equal(next["b"], jobs["b"]);
+});
+
+test("markAllRead treats a blank or absent watch scope as every watch", () => {
+  const jobs: JobsMap = {
+    a: job({ id: "a", watchId: "w-id" }),
+    b: job({ id: "b", watchId: "w-other" }),
+  };
+  for (const scope of [{}, { watchId: null }, { watchId: "" }]) {
+    const next = markAllRead(jobs, 999, scope);
+    assert.equal(next["a"]!.read, true);
+    assert.equal(next["b"]!.read, true);
+  }
+});
+
+test("markAllRead skips jobs hideReposted has taken off the list", () => {
+  // Not on the list, so not yours to dismiss: turning the setting back off has to
+  // bring the job back as the new job it never got shown as.
+  const jobs: JobsMap = {
+    a: job({ id: "a" }),
+    b: job({ id: "b", isReposted: true }),
+  };
+  const next = markAllRead(jobs, 999, { hideReposted: true });
+  assert.equal(next["a"]!.read, true);
+  assert.equal(next["b"]!.read, false);
+  // With the setting off the repost is a row like any other, and gets read.
+  assert.equal(markAllRead(jobs, 999, { hideReposted: false })["b"]!.read, true);
+});
+
+test("markAllRead no-ops (same reference) when the scope holds nothing unread", () => {
+  // The only unread job belongs to another watch, so there is nothing to write —
+  // `<ListView>` skips the storage write on this reference alone.
+  const jobs: JobsMap = { a: job({ id: "a", watchId: "w-other" }) };
+  assert.equal(markAllRead(jobs, 1, { watchId: "w-id" }), jobs);
+});
+
+test("markAllRead still reaches blocked companies — those rows are on screen", () => {
+  // Unlike a hidden repost, a blocked company's row stays visible and greyed, so
+  // it is part of the list you just cleared.
+  const jobs: JobsMap = { a: job({ id: "a", company: "Acme Corp" }) };
+  assert.equal(markAllRead(jobs, 999, { watchId: "w-id" })["a"]!.read, true);
+});
+
 // ── Blocking a company from a row ────────────────────────────────────────────
 
 const blocklist = (...names: string[]): BlockedCompany[] =>

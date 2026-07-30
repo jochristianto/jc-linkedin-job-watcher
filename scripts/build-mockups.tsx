@@ -258,6 +258,9 @@ function listView(opts: {
           scanButton={opts.status.kind === "scanning" ? "scanning" : "idle"}
           variant={opts.variant}
           enabled={opts.status.kind !== "disabled"}
+          // Derived from the chip exactly as <ListView> derives it, so a mockup
+          // showing a filtered list also shows the narrowed bulk-read wording.
+          filtered={opts.activeWatchId !== null}
           onToggleEnabled={noop}
           onScan={noop}
           onMarkAllRead={noop}
@@ -331,6 +334,7 @@ function headerMenuFrame(): string {
           </div>
           <HeaderMenu
             enabled={true}
+            filtered={false}
             onToggleEnabled={noop}
             onMarkAllRead={noop}
             onOpenOptions={noop}

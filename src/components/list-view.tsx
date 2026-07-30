@@ -261,16 +261,35 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
     [reload],
   );
 
+  /**
+   * Dismiss everything on the list — the list as filtered, not the whole store.
+   * The active chip goes in as the scope, so tidying up one watch leaves the
+   * others exactly as unread as they were (see `markAllRead`).
+   *
+   * `hideReposted` is re-read from storage rather than taken from the render for
+   * the same reason `onBlock` re-reads the blocklist: the render could be a
+   * repaint behind an Options edit, and this write must match the list the user
+   * pressed the button on.
+   */
   const onMarkAllRead = useCallback(async () => {
-    const jobs = await storage.get("jobs");
-    const next = markAllRead(jobs, Date.now());
+    const [jobs, settings] = await Promise.all([
+      storage.get("jobs"),
+      storage.get("settings"),
+    ]);
+    const next = markAllRead(jobs, Date.now(), {
+      watchId: activeWatchId,
+      hideReposted: settings.hideReposted === true,
+    });
     if (next !== jobs) await storage.set("jobs", next);
-    // Whatever the open question was about is among the jobs just dismissed, so it
-    // is answered too — same rule as the single tick in `onToggleRead`.
-    await closeApplyQuestion();
+    // An open question is answered only if *its* job was among the ones just
+    // dismissed — same rule as the single tick in `onToggleRead`. Under a chip
+    // the question may well belong to another watch, and it keeps waiting there.
+    if (pendingApplyId && next[pendingApplyId] !== jobs[pendingApplyId]) {
+      await closeApplyQuestion();
+    }
     await refreshBadge();
     await reload();
-  }, [closeApplyQuestion, refreshBadge, reload]);
+  }, [activeWatchId, closeApplyQuestion, pendingApplyId, refreshBadge, reload]);
 
   /** Mark the job opened *before* the tab opens (PRD §9 — a closing popup can cut
    *  off a write in flight). The badge drops by one: you have looked at the job,
@@ -552,6 +571,9 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
               scanButton={view.scanButton}
               variant={variant}
               enabled={view.enabled}
+              // A chip narrows what "Mark all as read" reaches, so it narrows what
+              // the control says it will do — see `filtered` in <ListHeader>.
+              filtered={view.activeWatchId !== null}
               onToggleEnabled={onToggleEnabled}
               onScan={onScan}
               onMarkAllRead={onMarkAllRead}
