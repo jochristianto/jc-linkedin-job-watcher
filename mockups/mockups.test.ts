@@ -82,8 +82,7 @@ test("both popup and tab carry the watch chips and the New/All toggle", () => {
 });
 
 test("both popup and tab carry the manual scan control", () => {
-  // In the tab's header row; in the popup's menu, which is why popup.html
-  // renders that menu as a frame of its own beside the list.
+  // In both header rows — with words in the tab, icon-only in the 380px popup.
   for (const name of LIST_VIEWS) {
     assert.match(read(name), /id="scan-now"[^>]*data-scan-state="(idle|scanning)"/, name);
   }
@@ -94,11 +93,15 @@ test("the popup folds its header controls into a hamburger, and shows the menu",
   // The hamburger in the header…
   assert.match(popup, /id="header-menu"/);
   assert.match(popup, /lucide-menu/);
-  // …and the four it stands for, in the frame beside it, each with its words.
+  // …and the three it stands for, in the frame beside it, each with its words.
   assert.match(popup, /data-slot="header-menu"/);
-  for (const label of ["Scan now", "Mark all as read", "Options"]) {
+  for (const label of ["Mark all as read", "Options"]) {
     assert.match(popup, new RegExp(`>${label}<`), label);
   }
+  // "Scan now" is not one of them: it is the control you press most, so it stays
+  // out in the header beside the hamburger, icon-only, its label the aria-label.
+  assert.match(popup, /id="scan-now"[^>]*aria-label="Scan now"/);
+  assert.doesNotMatch(popup, />Scan now</);
   // The tab keeps them in a row and needs no menu button.
   assert.doesNotMatch(read("./jobs.html"), /id="header-menu"/);
 });

@@ -4,7 +4,9 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { ScanButtonState } from "@/view-model.ts";
 
-const SCAN_BUTTON: Record<ScanButtonState, { label: string; title: string }> = {
+/** Exported for the popup header, which renders the button icon-only and has to
+ *  say the same thing in a tooltip that the tab's button says in words. */
+export const SCAN_BUTTON: Record<ScanButtonState, { label: string; title: string }> = {
   idle: { label: "Scan now", title: "Scan every enabled search right now" },
   scanning: { label: "Scanning…", title: "A scan is already running" },
   // Short on purpose: the header is only 380px wide in the popup, and the health
@@ -28,6 +30,9 @@ export function ScanButton({
 }: {
   state: ScanButtonState;
   onScan: () => void;
+  /** Drops the words and keeps the icon, for the popup header — where it stands
+   *  in a row of icon-only buttons and there is no room for a label. The name
+   *  moves to `aria-label`, so it is still announced and still hoverable. */
   compact?: boolean;
   /** Layout imposed by wherever it is standing — the popup's menu stretches it
    *  to a full-width row. Applied last, so a caller that has to override the
@@ -45,6 +50,7 @@ export function ScanButton({
       id="scan-now"
       data-scan-state={state}
       title={title}
+      aria-label={compact ? label : undefined}
       disabled={scanning}
       onClick={onScan}
       className={cn(

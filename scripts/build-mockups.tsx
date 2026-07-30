@@ -311,7 +311,7 @@ function listView(opts: {
  * Its own frame rather than part of the popup frame, because a Radix dialog
  * cannot be rendered here at all: it draws nothing until it is open, and its
  * portal has no DOM to portal into under `renderToStaticMarkup`. Rendering
- * `HeaderMenu` directly is what keeps these five controls visible in the
+ * `HeaderMenu` directly is what keeps these three controls visible in the
  * mockups — the alternative is a picture of the popup with its whole right-hand
  * side reduced to one anonymous button.
  */
@@ -330,10 +330,8 @@ function headerMenuFrame(): string {
             </p>
           </div>
           <HeaderMenu
-            scanButton="idle"
             enabled={true}
             onToggleEnabled={noop}
-            onScan={noop}
             onMarkAllRead={noop}
             onOpenOptions={noop}
           />
