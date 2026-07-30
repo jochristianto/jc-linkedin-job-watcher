@@ -16,15 +16,20 @@ import { timeToMinutes, type OptionsFormValues } from "./options-form.ts";
 
 // ── Sections (the rail down the left of the page) ────────────────────────────
 
-/** The six panels the page is divided into, in the order they are read. The rail
+/** The panels the page is divided into, in the order they are read. The rail
  *  and the scroll-spy both walk this, so adding a section is one entry here plus
- *  the card itself. */
+ *  the card itself.
+ *
+ *  "Backup" sits last before the prose, and deliberately nowhere near the fields
+ *  it overwrites: importing replaces every setting on the page at once, and a
+ *  control that does that should not share a card with the ones it undoes. */
 export const SETTINGS_SECTIONS = [
   "watches",
   "filters",
   "scanning",
   "retention",
   "notifications",
+  "backup",
   "how",
 ] as const;
 
@@ -36,13 +41,16 @@ export const SECTION_LABELS: Record<SettingsSection, string> = {
   scanning: "Scanning",
   retention: "Retention",
   notifications: "Notifications",
+  backup: "Backup",
   how: "How this works",
 };
 
 /** Which form fields each section owns. Exhaustive over `OptionsFormValues` by
  *  construction — `sectionOfField` is typed against it, so a field added to the
  *  form without a home here fails to compile rather than silently losing its
- *  unsaved-changes dot. "How this works" owns nothing: it is prose. */
+ *  unsaved-changes dot. Two sections own nothing and so never carry a dot:
+ *  "How this works" is prose, and "Backup" writes straight to storage rather
+ *  than through the form — an import is saved the moment it lands. */
 const SECTION_OF_FIELD: Record<keyof OptionsFormValues, SettingsSection> = {
   watches: "watches",
   blockedCompanies: "filters",

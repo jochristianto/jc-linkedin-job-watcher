@@ -74,6 +74,14 @@ import {
   type ClearHistoryRequest,
   type ClearHistoryResponse,
 } from "./gc.ts";
+import {
+  backupCounts,
+  backupPhrase,
+  reconcileUi,
+  restoredSettings,
+  type ImportBackupRequest,
+  type ImportBackupResponse,
+} from "./backup.ts";
 import { buildScanNotification, SCAN_NOTIFICATION_ID } from "./notify.ts";
 import { focusOrOpenJobsTab } from "./jobs-tab.ts";
 import type { HealthState, Job, Settings } from "./types.ts";
@@ -845,6 +853,57 @@ async function clearAllHistory(): Promise<ClearHistoryResponse> {
   }
 }
 
+/**
+ * Restore a backup file (the Backup section of the options page): the file's
+ * settings, seen ids and job records become the stored ones.
+ *
+ * It runs here rather than in the page for the reason `clearAllHistory` does — an
+ * import writes `seen` and `jobs`, the scan lock is what serialises those two
+ * keys, and only the worker holds it. Without the lock an import can land inside
+ * a cycle's read-dedupe-write tail, which would overwrite the imported ids with
+ * the cycle's and quietly re-announce every restored posting. Same stale-lock
+ * recovery as the collector, and `holdLock` rather than `beginScan` so a pending
+ * catch-up this is not survives.
+ *
+ * The file has already been validated on the page (`parseBackup`), so by the time
+ * it arrives here it is known to be well-formed; what is left is the two things
+ * only this side knows. `restoredSettings` carries this browser's Telegram
+ * credentials through — they are never in a file — and `reconcileUi` un-points
+ * the view state from a watch or job the import removed.
+ *
+ * Writing `settings` is what re-arms the cadence: the `storage.onChanged`
+ * listener below reconciles the alarm to whatever was just written, so a backup
+ * carrying `manualOnly` or a different interval takes effect without this having
+ * to know about alarms at all.
+ */
+async function importBackup(backup: ImportBackupRequest["backup"]): Promise<ImportBackupResponse> {
+  const current = await get("settings");
+  const recovered = recoverStaleLock(await get("scanState"), Date.now(), current.staleLockMs);
+  if (recovered.state.isScanning) return { imported: false, reason: "scanning" };
+  await set("scanState", holdLock(recovered.state, Date.now()));
+
+  try {
+    const settings = restoredSettings(backup.settings, current);
+    const ui = reconcileUi(await get("ui"), backup.jobs, settings.watches);
+    // `seen` and `jobs` before `settings`: the settings write is what wakes the
+    // alarm reconciler, and it should find the restored history already in place.
+    await set("seen", backup.seen);
+    await set("jobs", backup.jobs);
+    await set("ui", ui);
+    await set("settings", settings);
+
+    const counts = backupCounts(backup);
+    console.log(`[ljw] backup imported — ${backupPhrase(counts)}`);
+    // The restored records carry their own read/unread state, so the count on the
+    // toolbar is almost certainly not the one that was there a moment ago. The
+    // colour still belongs to the health this has not changed.
+    await updateBadge((await get("health")).severity);
+    return { imported: true, counts };
+  } finally {
+    await set("scanState", endScan(await get("scanState")));
+  }
+}
+
 /** Make sure the daily collector alarm exists (PRD §7). Idempotent, and called
  *  from both install and startup: a periodic alarm survives the worker being
  *  torn down, so re-creating one that is already ticking would only push its
@@ -946,6 +1005,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   clearAllHistory().then(sendResponse, (err) => {
     console.error("[ljw] Delete history failed:", err);
     sendResponse({ cleared: false, reason: "failed" } satisfies ClearHistoryResponse);
+  });
+  return true;
+});
+
+/** The options page's "Import a backup" (see {@link importBackup}). Handled here
+ *  for the same reason the delete is: the import writes `seen` and `jobs`, and
+ *  only the worker can hold the scan lock that serialises them. The file arrives
+ *  already validated. Channel kept open for the async reply, as above; a failure
+ *  is answered rather than left silent, so the page can say nothing was imported
+ *  instead of appearing to hang. */
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  const req = message as ImportBackupRequest | undefined;
+  if (req?.type !== "LJW_IMPORT") return;
+  importBackup(req.backup).then(sendResponse, (err) => {
+    console.error("[ljw] Import failed:", err);
+    sendResponse({ imported: false, reason: "failed" } satisfies ImportBackupResponse);
   });
   return true;
 });

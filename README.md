@@ -241,6 +241,40 @@ two — and press it then.
 - **Also push to Telegram** — optional, and _additive_ to the desktop
   notification rather than a replacement. See below.
 
+### Backup
+
+Everything above, as one readable JSON file — and back again.
+
+**Export backup** writes your watches (with their names and on/off state), both
+blocklists, the schedule, the retention limits, the notification preferences, and
+the job history that stops a posting being announced twice. It comes from what is
+**stored**, not from the fields on screen, so press **Save settings** first if you
+want unsaved edits in it. The file is named for the day it was written, and it is
+indented rather than minified so you can open it, read it and hand-edit it.
+
+**Your Telegram bot token and chat id are never written to a backup.** That is
+enforced in the code rather than remembered — the exported shape simply has no
+room for them — so a file is safe to email to yourself or drop in a synced folder.
+Note that job records _do_ carry any notes you typed against "Did you apply for
+this job?".
+
+**Import a file** is a **restore, not a merge**: what the file says becomes the
+state, and anything not in the file is removed. That is deliberate — a merge could
+never be used to get rid of the entry you took the backup to get rid of. The file
+is checked in full before anything is written, so a damaged or foreign file is
+refused with a message naming the problem rather than half-applying. It asks
+before replacing anything, and tells you what is in the file first. There is no
+undo.
+
+The Telegram credentials saved in _this_ browser are kept across an import, since
+the file cannot contain any. One consequence worth knowing: restoring onto a fresh
+browser can leave the Telegram switch on with no token behind it — pushes are
+skipped and the Notifications section says so.
+
+Like **Delete all job history**, importing is unavailable while a round is
+running, and for the same reason: it rewrites the seen IDs a round in flight is
+about to compare against. Wait for the round to finish.
+
 ### How this works
 
 The last section: what a round actually does, in plain English, plus the things
