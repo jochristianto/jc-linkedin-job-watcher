@@ -32,7 +32,19 @@ open from there.
 
 ## Install (5 minutes)
 
-### 1. Build it
+### 1. Get a build
+
+Either download the latest one, or build it yourself. **No configuration file is
+needed** either way — not to build it, not to run it, not to get notifications.
+
+**Download it** — every merge to `main` is built and published here, no GitHub
+account required:
+
+**[⬇ jc-linkedin-job-watcher-dist.zip](https://github.com/jochristianto/jc-linkedin-job-watcher/releases/latest/download/jc-linkedin-job-watcher-dist.zip)**
+
+Unzip it, and the unzipped folder is what you load in step 2.
+
+**Or build from source:**
 
 ```bash
 nvm use        # optional, picks up .nvmrc
@@ -40,20 +52,21 @@ npm install
 npm run build
 ```
 
-That produces a loadable extension in `dist/`. **No configuration file is
-needed** — not to build it, not to run it, not to get notifications.
+That produces a loadable extension in `dist/`.
 
 ### 2. Load it into Chrome
 
 1. Open `chrome://extensions`
 2. Turn on **Developer mode** (top-right)
 3. Click **Load unpacked**
-4. Select the **`dist/`** folder — not the repository root
+4. Select the folder from step 1 — the unzipped download, or **`dist/`** if you
+   built it yourself. Not the repository root.
 
 Pin the extension to your toolbar so you can see the count.
 
-> Always load `dist/`. The [extension/](extension/) folder is an old experiment,
-> not the product, and is deliberately left out of the build.
+> Never load the repository root, and never the [extension/](extension/) folder —
+> that one is an old experiment, not the product, and is deliberately left out of
+> the build.
 
 ### 3. Add your first search
 
@@ -358,8 +371,13 @@ rm -rf node_modules package-lock.json && npm install
 npm install @rollup/rollup-darwin-arm64 --no-save
 ```
 
-**After pulling new code:** re-run `npm run build`, then press **Reload** (⟳) on
-the extension card in `chrome://extensions`.
+**To update:** if you built from source, pull and re-run `npm run build`. If you
+downloaded the zip, grab it again and unzip it over the same folder. Either way,
+finish by pressing **Reload** (⟳) on the extension card in `chrome://extensions`.
+Keep the folder path the same when you update. Chrome derives an unpacked
+extension's identity from its folder, so unzipping to a *new* path loads what
+Chrome considers a different extension — with none of your searches or seen-job
+history. Same folder, and everything carries over.
 
 ---
 

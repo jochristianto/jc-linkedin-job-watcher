@@ -1,0 +1,111 @@
+# Typechecks, tests and builds the extension on every PR into main, then — on
+# merge — republishes the result as the rolling `latest` release, so the newest
+# dist/ is downloadable without a GitHub login:
+#
+#   https://github.com/jochristianto/jc-linkedin-job-watcher/releases/latest/download/jc-linkedin-job-watcher-dist.zip
+#
+# The asset filename is deliberately constant — that URL is in the README, so a
+# per-version filename would break it on every merge. Version and commit go in
+# the release notes instead.
+#
+# Note the build step runs `npm run build` (production), NOT `build:dev`. Only
+# the "prefill" mode in vite.config.ts reads .env, so a CI build cannot bake in
+# a Telegram token — there is nothing secret in the published zip.
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # So you can republish the release by hand without an empty commit.
+  workflow_dispatch:
+
+# Superseded runs on the same branch or PR are pointless; the newer one wins.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Runs everywhere, including PRs from forks. Deliberately read-only: the token
+  # here can't publish anything, so PR code never runs with write access.
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      # Gates: a red branch neither merges green nor gets published.
+      - run: npm run typecheck
+      - run: npm test
+
+      - run: npm run build
+
+      - name: Package dist/
+        id: package
+        run: |
+          version=$(node -p "require('./manifest.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # Zip the *contents* of dist/, so unzipping gives the folder you point
+          # "Load unpacked" at rather than a nested dist/dist.
+          (cd dist && zip -qr ../jc-linkedin-job-watcher-dist.zip .)
+
+      # Uploaded on PRs too, so a reviewer can install the branch build straight
+      # from the run page without building it locally.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jc-linkedin-job-watcher-dist
+          path: jc-linkedin-job-watcher-dist.zip
+          if-no-files-found: error
+
+    outputs:
+      version: ${{ steps.package.outputs.version }}
+
+  # Merges and manual runs only — never PRs, so nothing lands in Releases until
+  # the code is actually on main.
+  publish:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Shallow checkout, only so the `latest` tag can be moved below.
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: jc-linkedin-job-watcher-dist
+
+      - name: Publish rolling `latest` release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          notes="Automatic build of \`main\` — manifest version \`$VERSION\`, commit \`${GITHUB_SHA:0:7}\`.
+
+          Download **jc-linkedin-job-watcher-dist.zip**, unzip it, then load the
+          unzipped folder via \`chrome://extensions\` → Developer mode → Load unpacked."
+
+          # Move the tag first: `gh release edit` will not retarget an existing
+          # release, so the tag itself is what tracks main.
+          git tag -f latest "$GITHUB_SHA"
+          git push -f origin latest
+
+          # Update in place rather than delete-and-recreate, so the download URL
+          # never 404s mid-run.
+          if gh release view latest >/dev/null 2>&1; then
+            gh release edit latest --title "Latest build ($VERSION)" --notes "$notes" --latest
+          else
+            gh release create latest --title "Latest build ($VERSION)" --notes "$notes" --latest
+          fi
+
+          gh release upload latest jc-linkedin-job-watcher-dist.zip --clobber
