@@ -765,10 +765,8 @@ const header = (over: Partial<React.ComponentProps<typeof ListHeader>> = {}): st
 const menu = (over: Partial<React.ComponentProps<typeof HeaderMenu>> = {}): string =>
   html(
     <HeaderMenu
-      scanButton="idle"
       enabled={true}
       onToggleEnabled={noop}
-      onScan={noop}
       onMarkAllRead={noop}
       onOpenOptions={noop}
       {...over}
@@ -799,13 +797,35 @@ test("ListHeader escapes the title", () => {
 
 test("ListHeader folds the popup's control cluster into a hamburger", () => {
   // 380px could not hold a title and five controls on one line, so the header
-  // wrapped to two. Two buttons fit beside the title; the four fold in.
+  // wrapped to two. Three buttons fit beside the title; the three fold in.
   const h = header({ variant: "popup" });
   assert.match(h, /id="header-menu"/);
   assert.match(h, /lucide-menu/);
-  for (const id of ["scan-now", "mark-all-read", "open-options", "master-switch"]) {
+  for (const id of ["mark-all-read", "open-options", "master-switch"]) {
     assert.doesNotMatch(h, new RegExp(`id="${id}"`), id);
   }
+});
+
+test("ListHeader keeps Scan now out of the popup's menu and in the header", () => {
+  // It is the control you press most — skipping the wait is the entire point of
+  // it — so it does not go behind a click. Icon-only beside the other two, with
+  // the label kept as the accessible name.
+  const h = header({ variant: "popup" });
+  assert.match(h, /id="scan-now"[^>]*aria-label="Scan now"/);
+  assert.ok(
+    h.indexOf('id="scan-now"') < h.indexOf('id="open-tab"'),
+    "the scan button should render before the expand button",
+  );
+  assert.doesNotMatch(menu(), /id="scan-now"/);
+});
+
+test("ListHeader's popup scan button drops the words, not the meaning", () => {
+  // A 380px row of icons has no space for a label, so `compact` takes it off the
+  // button — but the state still has to be readable, hence the name and title.
+  const h = header({ variant: "popup", scanButton: "halted" });
+  assert.doesNotMatch(h, />Resume</);
+  assert.match(h, /id="scan-now"[^>]*aria-label="Resume"/);
+  assert.match(h, /data-scan-state="halted"/);
 });
 
 test("ListHeader keeps the way out of the popup out of the popup's menu", () => {
@@ -842,7 +862,7 @@ test("HeaderMenu spells every control out in words, not icons alone", () => {
   // The reason for folding them in here at all: as a row of icons in a 380px
   // header, most of them were a guess until you hovered. A list has the room.
   const h = menu();
-  for (const label of ["Scan now", "Mark all as read", "Options"]) {
+  for (const label of ["Mark all as read", "Options"]) {
     assert.match(h, new RegExp(`>${label}<`), label);
   }
 });
@@ -857,13 +877,12 @@ test("ListHeader renders the master on/off switch, checked while watching", () =
 test("ListHeader hides Scan now while the master switch is off", () => {
   // Nothing to scan while paused, so the manual trigger goes away with the loop;
   // the switch itself is the way back on.
-  for (const off of [header({ enabled: false }), menu({ enabled: false })]) {
-    assert.doesNotMatch(off, /id="scan-now"/);
-    assert.match(off, /data-state="unchecked"/);
+  for (const variant of ["tab", "popup"] as const) {
+    assert.doesNotMatch(header({ variant, enabled: false }), /id="scan-now"/, variant);
+    // ...and it comes back the moment watching resumes.
+    assert.match(header({ variant, enabled: true }), /id="scan-now"/, variant);
   }
-  // ...and it comes back the moment watching resumes.
-  assert.match(header({ enabled: true }), /id="scan-now"/);
-  assert.match(menu({ enabled: true }), /id="scan-now"/);
+  assert.match(menu({ enabled: false }), /data-state="unchecked"/);
 });
 
 test("HeaderMenu says what the master switch is currently doing", () => {

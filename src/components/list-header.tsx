@@ -2,7 +2,7 @@ import { CheckCheck, ExternalLink, MenuIcon, Power, Settings } from "lucide-reac
 import { useState, type ReactNode } from "react";
 
 import { AppIcon } from "@/components/app-icon.tsx";
-import { ScanButton } from "@/components/scan-button.tsx";
+import { SCAN_BUTTON, ScanButton } from "@/components/scan-button.tsx";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -37,11 +37,12 @@ export type ListHeaderProps = {
 };
 
 /** What folds away into the popup's menu. Its own type because {@link HeaderMenu}
- *  takes exactly this set and nothing else — note that `onOpenTab` is *not* in it:
- *  expanding to a full page stayed out in the header, beside the menu button. */
+ *  takes exactly this set and nothing else — note that neither `onOpenTab` nor
+ *  `onScan` is in it: expanding to a full page and scanning right now both stayed
+ *  out in the header, beside the menu button. */
 type MenuControls = Pick<
   ListHeaderProps,
-  "scanButton" | "enabled" | "onToggleEnabled" | "onScan" | "onMarkAllRead" | "onOpenOptions"
+  "enabled" | "onToggleEnabled" | "onMarkAllRead" | "onOpenOptions"
 >;
 
 /** One line of the popup's menu: an icon, a label, and the whole width to be hit
@@ -87,12 +88,14 @@ function MenuItem({
  * Labels on every row, which is the point of moving them here: as a row of icons
  * in a 380px header, most of them were a guess until you hovered. There is room
  * for the words in a list, so they get the words.
+ *
+ * "Scan now" is not among them. It is the one control here you reach for over and
+ * over — waiting out the interval is exactly what it exists to skip — and a menu
+ * charges a click every time. It sits in the header instead, see {@link ListHeader}.
  */
 export function HeaderMenu({
-  scanButton,
   enabled,
   onToggleEnabled,
-  onScan,
   onMarkAllRead,
   onOpenOptions,
 }: MenuControls) {
@@ -138,22 +141,6 @@ export function HeaderMenu({
 
       <div className="my-1 border-t" />
 
-      {/* Nothing to scan while paused, so the manual trigger goes away with it. */}
-      {enabled && (
-        <ScanButton
-          state={scanButton}
-          onScan={onScan}
-          className={cn(
-            "h-9 w-full justify-start gap-2.5 px-2 text-[13px] font-medium",
-            // Halted paints itself a filled primary button — that is how it asks
-            // to be pressed, so it keeps its own colours. Anything else is a
-            // plain row like the three below it, and a muted one among them
-            // would read as disabled.
-            scanButton !== "halted" && "text-foreground",
-          )}
-        />
-      )}
-
       <MenuItem
         id="mark-all-read"
         icon={<CheckCheck className="size-4 shrink-0" aria-hidden="true" />}
@@ -161,10 +148,10 @@ export function HeaderMenu({
         onClick={onMarkAllRead}
       />
 
-      {/* "Open as a full page" is deliberately not here — it stayed out in the
-          header beside the menu button, where a one-click escape from a 380px
-          panel belongs. Behind a menu it would cost two clicks to stop using
-          the surface you are complaining about. */}
+      {/* "Open as a full page" and "Scan now" are deliberately not here — both
+          stayed out in the header beside the menu button. A one-click escape
+          from a 380px panel belongs there, and behind a menu it would cost two
+          clicks to stop using the surface you are complaining about. */}
       <MenuItem
         id="open-options"
         icon={<Settings className="size-4 shrink-0" aria-hidden="true" />}
@@ -177,7 +164,7 @@ export function HeaderMenu({
 
 /** The hamburger, and the menu behind it.
  *
- *  Collapsing four controls into one costs a click on every one of them, and buys
+ *  Collapsing three controls into one costs a click on every one of them, and buys
  *  back the header's second line — at 380px the title and the cluster could not
  *  share a row, so the controls wrapped underneath and the popup opened ~34px
  *  shorter on jobs. It also buys the labels (see {@link HeaderMenu}).
@@ -234,7 +221,6 @@ function HeaderMenuButton(props: MenuControls) {
         </div>
         <HeaderMenu
           {...props}
-          onScan={close(props.onScan)}
           onMarkAllRead={close(props.onMarkAllRead)}
           onOpenOptions={close(props.onOpenOptions)}
         />
@@ -251,11 +237,17 @@ function HeaderMenuButton(props: MenuControls) {
  *  380px and does not, so they fold into a hamburger and a dialog — see
  *  {@link HeaderMenuButton} for what that trade buys and what it costs.
  *
- *  Two things stay out of that fold. "Open as a full page" keeps its place beside
+ *  Three things stay out of that fold. "Open as a full page" keeps its place beside
  *  the hamburger: it is the way out of the cramped surface, and putting the exit
  *  inside the thing you are escaping is a click too many. And it is popup-only to
  *  begin with — the tab already is the full page, so there is nothing to expand
- *  into. */
+ *  into. "Scan now" keeps its place for the opposite reason: it is the control you
+ *  press most, the whole point of it is not waiting, and a menu is a wait. It goes
+ *  icon-only here — the row it joins is icons, and the label survives as the
+ *  tooltip and the accessible name.
+ *
+ *  Which leaves the master switch, "Mark all as read" and "Options" behind the
+ *  hamburger — three things you do once and then get on with reading. */
 export function ListHeader({
   title,
   badge,
@@ -269,10 +261,8 @@ export function ListHeader({
   onOpenOptions,
 }: ListHeaderProps) {
   const menuControls: MenuControls = {
-    scanButton,
     enabled,
     onToggleEnabled,
-    onScan,
     onMarkAllRead,
     onOpenOptions,
   };
@@ -295,6 +285,22 @@ export function ListHeader({
       <div className="ml-auto flex shrink-0 items-center gap-0.5">
         {variant === "popup" ? (
           <>
+            {/* Nothing to scan while paused, so the manual trigger goes away
+                with the loop — the switch inside the menu is the way back on. */}
+            {enabled && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <ScanButton
+                    state={scanButton}
+                    onScan={onScan}
+                    compact
+                    className="size-8 px-0"
+                  />
+                </TooltipTrigger>
+                <TooltipContent>{SCAN_BUTTON[scanButton].title}</TooltipContent>
+              </Tooltip>
+            )}
+
             {/* The way out of a 380px panel, kept where one click reaches it. */}
             <Tooltip>
               <TooltipTrigger asChild>
