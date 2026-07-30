@@ -749,6 +749,7 @@ const header = (over: Partial<React.ComponentProps<typeof ListHeader>> = {}): st
       scanButton="idle"
       variant="tab"
       enabled={true}
+      filtered={false}
       onToggleEnabled={noop}
       onScan={noop}
       onMarkAllRead={noop}
@@ -766,6 +767,7 @@ const menu = (over: Partial<React.ComponentProps<typeof HeaderMenu>> = {}): stri
   html(
     <HeaderMenu
       enabled={true}
+      filtered={false}
       onToggleEnabled={noop}
       onMarkAllRead={noop}
       onOpenOptions={noop}
@@ -776,6 +778,19 @@ const menu = (over: Partial<React.ComponentProps<typeof HeaderMenu>> = {}): stri
 test("ListHeader renders a Mark all as read control", () => {
   assert.match(header(), /id="mark-all-read"/);
   assert.match(menu(), /id="mark-all-read"/);
+});
+
+test("ListHeader says 'these', not 'all', while a watch chip filters the list", () => {
+  // The action only reaches the filtered list (see `markAllRead`), and it is the
+  // one control here with no bulk undo — so the words have to match the scope.
+  const h = header({ filtered: true });
+  assert.match(h, />Mark these read</);
+  assert.match(h, /id="mark-all-read"[^>]*aria-label="Mark these as read"/);
+  assert.match(menu({ filtered: true }), />Mark these as read</);
+
+  // Unfiltered, it is the whole list and says so.
+  assert.match(header({ filtered: false }), />Mark all read</);
+  assert.match(menu({ filtered: false }), />Mark all as read</);
 });
 
 test("ListHeader's Options control is a labelled gear icon, not a glyph", () => {

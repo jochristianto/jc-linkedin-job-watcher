@@ -29,6 +29,11 @@ export type ListHeaderProps = {
   /** The master on/off switch (§ master). Off pauses the whole loop and hides
    *  "Scan now" — there is nothing to scan until it's back on. */
   enabled: boolean;
+  /** A watch chip is filtering the list, so the bulk read only reaches that
+   *  watch's jobs (see `markAllRead`). Changes nothing but the words on the
+   *  control — "all" over a filtered list would be a promise it doesn't keep,
+   *  and this is the one action here that cannot be undone in bulk. */
+  filtered: boolean;
   onToggleEnabled: (next: boolean) => void;
   onScan: () => void;
   onMarkAllRead: () => void;
@@ -36,13 +41,23 @@ export type ListHeaderProps = {
   onOpenOptions: () => void;
 };
 
+/** What the bulk-read control says, in the two lengths the two surfaces have room
+ *  for. The words name the scope rather than the watch: a watch name is the user's
+ *  to make as long as they like, and either surface would have to cut it short
+ *  anyway — "these" is what the chip beside it already answers. */
+export function markAllReadLabel(filtered: boolean): { short: string; full: string } {
+  return filtered
+    ? { short: "Mark these read", full: "Mark these as read" }
+    : { short: "Mark all read", full: "Mark all as read" };
+}
+
 /** What folds away into the popup's menu. Its own type because {@link HeaderMenu}
  *  takes exactly this set and nothing else — note that neither `onOpenTab` nor
  *  `onScan` is in it: expanding to a full page and scanning right now both stayed
  *  out in the header, beside the menu button. */
 type MenuControls = Pick<
   ListHeaderProps,
-  "enabled" | "onToggleEnabled" | "onMarkAllRead" | "onOpenOptions"
+  "enabled" | "filtered" | "onToggleEnabled" | "onMarkAllRead" | "onOpenOptions"
 >;
 
 /** One line of the popup's menu: an icon, a label, and the whole width to be hit
@@ -95,6 +110,7 @@ function MenuItem({
  */
 export function HeaderMenu({
   enabled,
+  filtered,
   onToggleEnabled,
   onMarkAllRead,
   onOpenOptions,
@@ -141,10 +157,12 @@ export function HeaderMenu({
 
       <div className="my-1 border-t" />
 
+      {/* A list has the room for the long form, so the menu takes it — and when a
+          chip is on, the row says it will only clear that chip's jobs. */}
       <MenuItem
         id="mark-all-read"
         icon={<CheckCheck className="size-4 shrink-0" aria-hidden="true" />}
-        label="Mark all as read"
+        label={markAllReadLabel(filtered).full}
         onClick={onMarkAllRead}
       />
 
@@ -254,6 +272,7 @@ export function ListHeader({
   scanButton,
   variant,
   enabled,
+  filtered,
   onToggleEnabled,
   onScan,
   onMarkAllRead,
@@ -262,10 +281,12 @@ export function ListHeader({
 }: ListHeaderProps) {
   const menuControls: MenuControls = {
     enabled,
+    filtered,
     onToggleEnabled,
     onMarkAllRead,
     onOpenOptions,
   };
+  const markRead = markAllReadLabel(filtered);
 
   return (
     <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b bg-background px-3 py-2 md:px-4">
@@ -365,16 +386,18 @@ export function ListHeader({
                   size="sm"
                   variant="ghost"
                   id="mark-all-read"
-                  title="Mark all as read"
-                  aria-label="Mark all as read"
+                  title={markRead.full}
+                  aria-label={markRead.full}
                   onClick={onMarkAllRead}
                   className="h-8 gap-1.5 px-2 text-[13px] font-medium text-muted-foreground"
                 >
                   <CheckCheck className="size-3.5" aria-hidden="true" />
-                  Mark all read
+                  {/* The row is tight even in the tab, so the visible words drop
+                      the "as"; the full sentence stays as the name and tooltip. */}
+                  {markRead.short}
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Mark all as read</TooltipContent>
+              <TooltipContent>{markRead.full}</TooltipContent>
             </Tooltip>
 
             <Tooltip>

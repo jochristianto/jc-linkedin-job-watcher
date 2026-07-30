@@ -60,7 +60,7 @@ New jobs surface in two places: a badge count on the extension icon, and a deskt
 - Each row has its own "block this company" button, so a bad company can be blocklisted from where you see it rather than from Options. Already-listed jobs from that company stay on screen, greyed and tagged, and stop counting towards the badge; it's future scans that stop surfacing it. It toggles too
 - Filter chips to show only one watch's results
 - Toggle between "New" and "All"
-- "Mark all as read"
+- "Mark all as read", over the list as you have it filtered rather than over everything stored: with a watch chip on it clears that watch and leaves the others as unread as they were, and reads "Mark these as read" so the words match what it will do. Nothing un-reads in bulk, so it must not reach jobs you cannot see — a job hidden by "Hide jobs marked Reposted" is left alone for the same reason. The badge keeps counting every watch, so a scoped read leaves a number behind on purpose
 - Middle-click / ctrl-click opens in a background tab so you can queue several
 - Opening a posting queues **"Did you apply for this job?"** on that job's own card, answerable when you come back from LinkedIn. Yes takes an optional note and pushes an `[Applied]` message; No records nothing (§19)
 - A status bar reading the armed alarm itself: scanning, a live countdown, quiet hours, manual-only, or paused
