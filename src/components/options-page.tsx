@@ -17,8 +17,8 @@
 // find — and the header's summary line stays readable while you change the very
 // numbers it describes.
 
-import { Clock, Eraser, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Clock, Download, Eraser, Upload, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 
 import { AppIcon } from "@/components/app-icon.tsx";
 import { HowItWorks } from "@/components/how-it-works.tsx";
@@ -51,6 +51,17 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { HealthBanner } from "@/components/health-banner.tsx";
 import { cn } from "@/lib/utils";
+import {
+  backupCounts,
+  backupFilename,
+  backupPhrase,
+  buildBackup,
+  parseBackup,
+  serializeBackup,
+  type BackupFile,
+  type ImportBackupRequest,
+  type ImportBackupResponse,
+} from "@/backup.ts";
 import {
   historyCounts,
   historyPhrase,
@@ -110,6 +121,27 @@ async function closeSettingsTab(): Promise<void> {
   const tab = await chrome.tabs.getCurrent();
   if (tab?.id !== undefined) await chrome.tabs.remove(tab.id);
   else window.close();
+}
+
+/**
+ * Hand a file to the browser's downloader.
+ *
+ * A blob URL behind a synthetic click, rather than `chrome.downloads` — that API
+ * would mean adding a `downloads` permission to the manifest, and a permission is
+ * a line on the install prompt for every user forever. This costs nothing and
+ * works because the options page is an ordinary tab.
+ *
+ * The object URL is revoked afterwards: the page is long-lived, and a blob held
+ * by a URL nobody released is the whole export sitting in memory until the tab
+ * closes.
+ */
+function downloadTextFile(filename: string, text: string): void {
+  const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 type Status = { message: string; kind: "ok" | "err" | "" };
@@ -210,6 +242,12 @@ export function OptionsPage() {
   const [saveStatus, setSaveStatus] = useState<Status>(NO_STATUS);
   const [testStatus, setTestStatus] = useState<Status>(NO_STATUS);
   const [clearStatus, setClearStatus] = useState<Status>(NO_STATUS);
+  const [backupStatus, setBackupStatus] = useState<Status>(NO_STATUS);
+  // A file that has been read and validated but not yet applied. Holding it here
+  // is what makes the confirm dialog able to say what is actually in the file
+  // rather than asking you to agree to an unknown quantity — and it means a
+  // damaged file is reported before anything is confirmed, not after.
+  const [pendingImport, setPendingImport] = useState<BackupFile | null>(null);
   // What is actually stored right now, so the Retention section can say what
   // deleting it would cost instead of asking you to confirm an unknown quantity.
   const [history, setHistory] = useState<HistoryCounts>({ jobs: 0, seen: 0 });
@@ -224,6 +262,11 @@ export function OptionsPage() {
   // ref: they are read only from the two event handlers below, and a ref per
   // section would mean a fresh ref callback on every keystroke for no gain.
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  // The hidden `<input type="file">` behind the Import button. A file picker can
+  // only be opened by a real user gesture on a real input, so the input exists
+  // and is clicked; the visible control is a Button so it matches every other
+  // control on the page rather than being the browser's own grey widget.
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -424,6 +467,123 @@ export function OptionsPage() {
         res?.reason === "scanning"
           ? "A scan is running — nothing was deleted. Try again when it finishes."
           : "Nothing was deleted — the extension's background worker did not answer.",
+      kind: "err",
+    });
+  }
+
+  /**
+   * Write the whole configuration and both history keys to a JSON file.
+   *
+   * Exported from **storage**, not from the form: a backup is a record of what
+   * the extension is actually doing, and one taken from half-typed fields would
+   * restore a state that never ran. Unsaved edits are called out beside the
+   * button rather than blocking it — the file is still valid, it is just not the
+   * settings on screen.
+   *
+   * The two Telegram secrets are not in the file. `buildBackup` is what leaves
+   * them out, at the type level, and the sentence under the button says so.
+   */
+  function onExport(): void {
+    void (async () => {
+      setBackupStatus({ message: "Preparing the file…", kind: "" });
+      try {
+        const [settings, seen, jobs] = await Promise.all([
+          storage.get("settings"),
+          storage.get("seen"),
+          storage.get("jobs"),
+        ]);
+        const now = Date.now();
+        const file = buildBackup({
+          settings,
+          seen,
+          jobs,
+          exportedAt: now,
+          extensionVersion: chrome.runtime.getManifest().version,
+        });
+        downloadTextFile(backupFilename(now), serializeBackup(file));
+        setBackupStatus({
+          message: `Exported ${backupPhrase(backupCounts(file))}.`,
+          kind: "ok",
+        });
+      } catch {
+        setBackupStatus({ message: "The file could not be written.", kind: "err" });
+      }
+    })();
+  }
+
+  /**
+   * Read and validate a chosen file, then hand it to the confirm dialog.
+   *
+   * Validation happens here, before anything is confirmed, so a damaged or
+   * foreign file is refused with a message that names the problem instead of
+   * opening a dialog about a file that was never going to import.
+   *
+   * The input's value is cleared at the end: without it, choosing the same file
+   * twice in a row fires no `change` event, and re-importing the backup you just
+   * fixed would silently do nothing.
+   */
+  function onFileChosen(event: ChangeEvent<HTMLInputElement>): void {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    void (async () => {
+      setBackupStatus({ message: "Reading the file…", kind: "" });
+      const result = parseBackup(await file.text().catch(() => ""));
+      if (!result.ok) {
+        setBackupStatus({ message: result.error, kind: "err" });
+        return;
+      }
+      setBackupStatus(NO_STATUS);
+      setPendingImport(result.backup);
+    })();
+  }
+
+  /**
+   * Apply the file the dialog just confirmed, and repaint the page from what was
+   * written.
+   *
+   * The write goes through the worker for the reason the delete does — it touches
+   * `seen` and `jobs`, and only the worker holds the scan lock that serialises
+   * them (see `importBackup` in background.ts) — so this reports whichever answer
+   * comes back, including the refusal while a round is in flight.
+   *
+   * On success the form is re-seeded from storage rather than from the file:
+   * what lands in `settings` is the file's values with *this browser's* Telegram
+   * credentials merged back in, and the fields must show what was actually
+   * written. That also drops any unsaved edits, which is correct — a restore
+   * replaces the configuration, and half of the old one surviving as a dirty
+   * field would be neither state.
+   */
+  async function onConfirmImport(): Promise<void> {
+    const backup = pendingImport;
+    setPendingImport(null);
+    if (!backup) return;
+
+    setBackupStatus({ message: "Importing…", kind: "" });
+    const req: ImportBackupRequest = { type: "LJW_IMPORT", backup };
+    const res = (await chrome.runtime
+      .sendMessage(req)
+      .catch(() => undefined)) as ImportBackupResponse | undefined;
+
+    if (res?.imported) {
+      const settings = await storage.get("settings");
+      setBase(settings);
+      setForm(settingsToForm(settings));
+      setErrors({});
+      setPrefilled(false);
+      setSaveStatus(NO_STATUS);
+      await refreshRetentionState();
+      setBackupStatus({
+        message: `Imported ${backupPhrase(res.counts)}.`,
+        kind: "ok",
+      });
+      return;
+    }
+    setBackupStatus({
+      message:
+        res?.reason === "scanning"
+          ? "A scan is running — nothing was imported. Try again when it finishes."
+          : "Nothing was imported — the extension's background worker did not answer.",
       kind: "err",
     });
   }
@@ -1019,6 +1179,133 @@ export function OptionsPage() {
                     className="mt-2.5 block"
                   />
                 </ToggleRow>
+              </div>
+            </Section>
+
+            <Section
+              id="backup"
+              description="One JSON file holding everything above — your watches, both blocklists, the schedule, retention, and the job history that stops a posting being announced twice. Your Telegram bot token and chat id are never written to it."
+            >
+              <div className="flex flex-col gap-3.5">
+                <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2.5">
+                  <div className="min-w-0 flex-1 basis-65">
+                    <p className="text-[13px] font-semibold">Export to a file</p>
+                    <p className="mt-0.5 text-xs leading-snug text-muted-foreground text-pretty">
+                      Saves what is{" "}
+                      <span className="font-medium text-foreground">stored</span>{" "}
+                      right now, including {historyPhrase(history)}.
+                      {/* A backup is a record of what the extension is actually
+                          doing, so it comes from storage rather than from the
+                          fields — worth saying while a dirty badge is showing,
+                          because otherwise the file looks like it lost an edit. */}
+                      {dirty &&
+                        " Your unsaved edits are not in it — press Save settings first if you want them."}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    id="export-backup"
+                    onClick={onExport}
+                    className="shrink-0"
+                  >
+                    <Download aria-hidden="true" />
+                    Export backup
+                  </Button>
+                </div>
+
+                <Separator />
+
+                <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2.5">
+                  <div className="min-w-0 flex-1 basis-65">
+                    <p className="text-[13px] font-semibold">Import a file</p>
+                    <p className="mt-0.5 text-xs leading-snug text-muted-foreground text-pretty">
+                      Replaces everything in the file — it is a restore, not a
+                      merge, so anything not in the file goes. Your Telegram
+                      credentials are kept.
+                      {scanning && " Unavailable while a scan is running."}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-3">
+                    {/* Clicked by the button beside it; never shown, because the
+                        browser's own file widget matches nothing else here. */}
+                    <input
+                      ref={fileRef}
+                      type="file"
+                      id="import-file"
+                      accept="application/json,.json"
+                      hidden
+                      onChange={onFileChosen}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      id="import-backup"
+                      disabled={scanning}
+                      onClick={() => fileRef.current?.click()}
+                    >
+                      <Upload aria-hidden="true" />
+                      Import backup
+                    </Button>
+                  </div>
+                </div>
+
+                {/* One line for both halves of the section, under them rather
+                    than beside either: the messages are whole sentences — a
+                    parse error names a field — and they have no room on a row
+                    that already ends in a button. */}
+                <StatusText
+                  id="backup-status"
+                  status={backupStatus}
+                  className="block text-right"
+                />
+
+                {/* Opened by a file having been read and validated, not by a
+                    click — which is why it is controlled rather than wrapped
+                    around a trigger. By the time it appears the file's contents
+                    are known, so it can name them. */}
+                <AlertDialog
+                  open={pendingImport !== null}
+                  onOpenChange={(open) => {
+                    if (!open) setPendingImport(null);
+                  }}
+                >
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>
+                        Replace your settings and history?
+                      </AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This backup holds{" "}
+                        {pendingImport
+                          ? backupPhrase(backupCounts(pendingImport))
+                          : "nothing"}
+                        , and importing it replaces what is in this browser
+                        outright — watches, filters, schedule, retention, job
+                        records and seen ids. Anything not in the file is
+                        removed, and there is no undo. Your Telegram bot token
+                        and chat id are the one exception: they are never in a
+                        backup, so the ones saved here are kept.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel id="import-cancel">
+                        Keep what I have
+                      </AlertDialogCancel>
+                      <AlertDialogAction
+                        id="import-confirm"
+                        onClick={() => void onConfirmImport()}
+                        className={cn(
+                          buttonVariants({ variant: "destructive" }),
+                        )}
+                      >
+                        Import and replace
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               </div>
             </Section>
 

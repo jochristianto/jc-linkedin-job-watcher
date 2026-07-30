@@ -32,7 +32,19 @@ open from there.
 
 ## Install (5 minutes)
 
-### 1. Build it
+### 1. Get a build
+
+Either download the latest one, or build it yourself. **No configuration file is
+needed** either way — not to build it, not to run it, not to get notifications.
+
+**Download it** — every merge to `main` is built and published here, no GitHub
+account required:
+
+**[⬇ jc-linkedin-job-watcher-dist.zip](https://github.com/jochristianto/jc-linkedin-job-watcher/releases/latest/download/jc-linkedin-job-watcher-dist.zip)**
+
+Unzip it, and the unzipped folder is what you load in step 2.
+
+**Or build from source:**
 
 ```bash
 nvm use        # optional, picks up .nvmrc
@@ -40,20 +52,21 @@ npm install
 npm run build
 ```
 
-That produces a loadable extension in `dist/`. **No configuration file is
-needed** — not to build it, not to run it, not to get notifications.
+That produces a loadable extension in `dist/`.
 
 ### 2. Load it into Chrome
 
 1. Open `chrome://extensions`
 2. Turn on **Developer mode** (top-right)
 3. Click **Load unpacked**
-4. Select the **`dist/`** folder — not the repository root
+4. Select the folder from step 1 — the unzipped download, or **`dist/`** if you
+   built it yourself. Not the repository root.
 
 Pin the extension to your toolbar so you can see the count.
 
-> Always load `dist/`. The [extension/](extension/) folder is an old experiment,
-> not the product, and is deliberately left out of the build.
+> Never load the repository root, and never the [extension/](extension/) folder —
+> that one is an old experiment, not the product, and is deliberately left out of
+> the build.
 
 ### 3. Add your first search
 
@@ -241,6 +254,40 @@ two — and press it then.
 - **Also push to Telegram** — optional, and _additive_ to the desktop
   notification rather than a replacement. See below.
 
+### Backup
+
+Everything above, as one readable JSON file — and back again.
+
+**Export backup** writes your watches (with their names and on/off state), both
+blocklists, the schedule, the retention limits, the notification preferences, and
+the job history that stops a posting being announced twice. It comes from what is
+**stored**, not from the fields on screen, so press **Save settings** first if you
+want unsaved edits in it. The file is named for the day it was written, and it is
+indented rather than minified so you can open it, read it and hand-edit it.
+
+**Your Telegram bot token and chat id are never written to a backup.** That is
+enforced in the code rather than remembered — the exported shape simply has no
+room for them — so a file is safe to email to yourself or drop in a synced folder.
+Note that job records _do_ carry any notes you typed against "Did you apply for
+this job?".
+
+**Import a file** is a **restore, not a merge**: what the file says becomes the
+state, and anything not in the file is removed. That is deliberate — a merge could
+never be used to get rid of the entry you took the backup to get rid of. The file
+is checked in full before anything is written, so a damaged or foreign file is
+refused with a message naming the problem rather than half-applying. It asks
+before replacing anything, and tells you what is in the file first. There is no
+undo.
+
+The Telegram credentials saved in _this_ browser are kept across an import, since
+the file cannot contain any. One consequence worth knowing: restoring onto a fresh
+browser can leave the Telegram switch on with no token behind it — pushes are
+skipped and the Notifications section says so.
+
+Like **Delete all job history**, importing is unavailable while a round is
+running, and for the same reason: it rewrites the seen IDs a round in flight is
+about to compare against. Wait for the round to finish.
+
 ### How this works
 
 The last section: what a round actually does, in plain English, plus the things
@@ -324,8 +371,13 @@ rm -rf node_modules package-lock.json && npm install
 npm install @rollup/rollup-darwin-arm64 --no-save
 ```
 
-**After pulling new code:** re-run `npm run build`, then press **Reload** (⟳) on
-the extension card in `chrome://extensions`.
+**To update:** if you built from source, pull and re-run `npm run build`. If you
+downloaded the zip, grab it again and unzip it over the same folder. Either way,
+finish by pressing **Reload** (⟳) on the extension card in `chrome://extensions`.
+Keep the folder path the same when you update. Chrome derives an unpacked
+extension's identity from its folder, so unzipping to a *new* path loads what
+Chrome considers a different extension — with none of your searches or seen-job
+history. Same folder, and everything carries over.
 
 ---
 
