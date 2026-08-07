@@ -287,8 +287,7 @@ export function reduceScanHealth(
         mode: "active",
         severity: "warn",
         consecutiveEmptyScans: n,
-        message:
-          "LinkedIn moved your search to its new results page, which this extension cannot read yet.",
+        message: "LinkedIn moved your search to its new results page, which this extension cannot read yet.",
         notify: false,
       };
     }
