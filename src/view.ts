@@ -324,6 +324,12 @@ export type ViewContext = {
    *  renders as its own amber banner, alongside any health banner. Never a desktop
    *  notification. */
   pushWarn?: boolean;
+  /** A guarded field has stopped reading — present on zero of a page's postings
+   *  (issue #52, `fieldHealth.message`), or null/undefined when every field reads.
+   *  A different axis from scan health: the list can be `ok` and a selector still
+   *  dead, so it renders as its own amber banner. Never a desktop notification
+   *  (the Telegram push is #54). */
+  fieldBreakMessage?: string | null;
   /** When the armed one-shot alarm is due to fire (`chrome.alarms.get(...)
    *  .scheduledTime`), or null/undefined when no alarm exists. The footer counts
    *  down to it. Read from the alarm rather than recomputed here: jitter, back-off
@@ -489,6 +495,10 @@ export function selectView(ctx: ViewContext): ViewProps {
 
   const banners: ViewProps["banners"] = [];
   if (ctx.message) banners.push({ message: ctx.message, severity: ctx.severity ?? "warn" });
+  // A field break is a different axis from scan health (issue #52) — the page can
+  // read `ok` and still have a dead selector — so it stacks as its own amber
+  // banner rather than being ranked against the health one.
+  if (ctx.fieldBreakMessage) banners.push({ message: ctx.fieldBreakMessage, severity: "warn" });
   // The push warning is a soft, config-level warning independent of scan health
   // (§16.7), so it stacks under any health banner rather than replacing it.
   if (ctx.pushWarn) banners.push({ message: PUSH_FAILING_MESSAGE, severity: "warn" });

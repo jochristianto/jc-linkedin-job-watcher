@@ -10,7 +10,13 @@
 
 import { DEFAULT_SETTINGS, type Settings, type Job, type ScanState, type HealthState } from "./types.ts";
 import { IDLE_LIFECYCLE } from "./lifecycle.ts";
-import { OK_HEALTH, OK_PUSH_HEALTH, type PushHealthState } from "./health.ts";
+import {
+  OK_HEALTH,
+  OK_FIELD_HEALTH,
+  OK_PUSH_HEALTH,
+  type FieldHealthState,
+  type PushHealthState,
+} from "./health.ts";
 import type { SeenMap } from "./dedupe.ts";
 import type { ListMode } from "./view-model.ts";
 
@@ -47,8 +53,9 @@ export type UiState = {
 export const DEFAULT_UI: UiState = { activeWatchId: null, mode: null, pendingApplyId: null };
 
 /** The §6 top-level keys and the shape each holds. `pushHealth` (§16.7) tracks
- *  consecutive Telegram-push failures separately from scan `health`; `ui` holds
- *  the popup's last chip + mode (mockups decision 4). */
+ *  consecutive Telegram-push failures separately from scan `health`; `fieldHealth`
+ *  (§16.4, issue #52) tracks a dead field selector on the same separate-axis
+ *  footing; `ui` holds the popup's last chip + mode (mockups decision 4). */
 export type StorageShape = {
   settings: Settings;
   seen: SeenMap;
@@ -56,6 +63,7 @@ export type StorageShape = {
   scanState: ScanState;
   health: HealthState;
   pushHealth: PushHealthState;
+  fieldHealth: FieldHealthState;
   ui: UiState;
 };
 
@@ -67,6 +75,7 @@ const DEFAULTS: StorageShape = {
   scanState: IDLE_LIFECYCLE,
   health: OK_HEALTH,
   pushHealth: OK_PUSH_HEALTH,
+  fieldHealth: OK_FIELD_HEALTH,
   ui: DEFAULT_UI,
 };
 

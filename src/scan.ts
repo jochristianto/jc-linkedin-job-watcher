@@ -8,7 +8,7 @@
 
 import type { Job, PostedPrecision, Watch } from "./types.ts";
 import type { JobsMap } from "./storage.ts";
-import type { Severity } from "./health.ts";
+import type { FieldReadCounts, Severity } from "./health.ts";
 import { isCompanyBlocked, isHiddenAsReposted } from "./filter.ts";
 import { parsePostedAge } from "./parse.ts";
 
@@ -134,6 +134,10 @@ export type ScanResponse = {
    *  declares none. The page's own claim about how many results it holds, and so
    *  the yardstick for whether the walk read all of them. */
   slotCount: number;
+  /** Per-field present-counts and the date-or-label invariant over the postings
+   *  read (issue #52), for the separate field-break axis (`reduceFieldHealth`).
+   *  Read here, off the page, precisely so that decision stays pure numbers. */
+  fieldCounts: FieldReadCounts;
 };
 
 /** The enabled watches to scan, in their saved order (PRD §9: "for each enabled

@@ -507,6 +507,30 @@ test("selectView shows no push warning when pushWarn is false", () => {
   assert.deepEqual(selectView(ctx({ jobs: [job({ id: "1" })], mode: "all" })).banners, []);
 });
 
+test("selectView shows an amber field-break banner when a field stops reading (§16.4, #52)", () => {
+  const msg = "LinkedIn showed no company name on any of 25 postings — its layout may have changed.";
+  const v = selectView(ctx({ jobs: [job({ id: "1" })], mode: "all", fieldBreakMessage: msg }));
+  assert.deepEqual(v.banners, [{ message: msg, severity: "warn" }]);
+});
+
+test("selectView stacks a field break under the health banner — a separate axis (#52)", () => {
+  // The page read `ok` on scan health yet a selector is dead: both surface, health
+  // first, the field break as its own amber banner rather than being masked.
+  const fieldMsg = "LinkedIn showed no company name on any of 25 postings.";
+  const v = selectView(
+    ctx({
+      jobs: [job({ id: "1" })],
+      mode: "all",
+      severity: "error",
+      message: "Signed out of LinkedIn — scanning paused.",
+      fieldBreakMessage: fieldMsg,
+    }),
+  );
+  assert.equal(v.banners.length, 2);
+  assert.equal(v.banners[0]!.severity, "error");
+  assert.deepEqual(v.banners[1], { message: fieldMsg, severity: "warn" });
+});
+
 test("selectView stacks the health banner and the push warning, health first", () => {
   const v = selectView(
     ctx({

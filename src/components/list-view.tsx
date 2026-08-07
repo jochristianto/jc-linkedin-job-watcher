@@ -34,6 +34,7 @@ import {
   type ScanNowResponse,
   type SetEnabledRequest,
 } from "@/scan.ts";
+import { badgeSeverityWithFieldBreak } from "@/health.ts";
 import * as storage from "@/storage.ts";
 import {
   appliedPushNotice,
@@ -132,15 +133,19 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
    *  from in here, and nothing else would notice until the next cycle. Same
    *  `badgeFor` the background uses, so the two can't drift apart. */
   const refreshBadge = useCallback(async () => {
-    const [jobs, settings, health] = await Promise.all([
+    const [jobs, settings, health, fieldHealth] = await Promise.all([
       storage.get("jobs"),
       storage.get("settings"),
       storage.get("health"),
+      storage.get("fieldHealth"),
     ]);
     const blocked = settings.blockedCompanies.map((b) => b.normalized);
+    // A field break bumps an otherwise-ok badge to amber, never overriding a hard
+    // red (issue #52). Same helper the background's updateBadge uses, so the two
+    // can't drift apart.
     const { text, color } = badgeFor(
       unreadCount(Object.values(jobs), blocked, settings.hideReposted),
-      health.severity,
+      badgeSeverityWithFieldBreak(health.severity, fieldHealth),
     );
     await chrome.action.setBadgeText({ text });
     await chrome.action.setBadgeBackgroundColor({ color });
@@ -165,6 +170,9 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
       severity: state.health.severity,
       message: state.health.message,
       pushWarn: state.pushHealth.warn,
+      // A dead field selector — a separate axis from scan health (issue #52),
+      // shown as its own amber banner.
+      fieldBreakMessage: state.fieldHealth.message,
       armedBlockId,
       quietHours: state.settings.quietHours,
       nextScanAt: state.nextScanAt,

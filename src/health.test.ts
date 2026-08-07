@@ -6,12 +6,19 @@ import {
   reduceScanHealth,
   shouldRunScan,
   isSavableJob,
-  fieldMissingAcrossAll,
+  fieldReadCounts,
+  aggregateFieldCounts,
+  reduceFieldHealth,
+  badgeSeverityWithFieldBreak,
   reducePushHealth,
   isLockStale,
   OK_HEALTH,
+  OK_FIELD_HEALTH,
+  NO_FIELD_READS,
   type PageSignals,
   type HealthState,
+  type FieldReadCounts,
+  type FieldHealthState,
 } from "./health.ts";
 import type { BackoffConfig } from "./schedule.ts";
 
@@ -33,6 +40,9 @@ const signals = (o: Partial<PageSignals> = {}): PageSignals => ({
   savedCount: 5,
   slotCount: 5,
   settled: true,
+  // A healthy read by default — the classifyPage cases below are about outcome,
+  // not the separate field-break axis (issue #52), which classifyPage ignores.
+  fieldCounts: fullCounts(5),
   ...o,
 });
 
@@ -309,7 +319,7 @@ test("shouldRunScan: active and paused keep scanning; halted does not", () => {
   assert.equal(shouldRunScan("halted"), false);
 });
 
-// ── isSavableJob / fieldMissingAcrossAll: partial parse (§16.4) ────────────────
+// ── isSavableJob: partial parse (§16.4) ───────────────────────────────────────
 
 test("isSavableJob: a job with id, title and url is saved even with blank company/location", () => {
   assert.equal(isSavableJob({ id: "123", title: "Engineer", url: "https://x/y" }), true);
@@ -319,19 +329,6 @@ test("isSavableJob: a job missing any load-bearing field is dropped", () => {
   assert.equal(isSavableJob({ id: "", title: "Engineer", url: "https://x/y" }), false);
   assert.equal(isSavableJob({ id: "123", title: "  ", url: "https://x/y" }), false);
   assert.equal(isSavableJob({ id: "123", title: "Engineer", url: "" }), false);
-});
-
-test("fieldMissingAcrossAll: flags a field blank on every card as selector drift", () => {
-  const jobs = [
-    { company: "", location: "Jakarta" },
-    { company: "  ", location: "Tokyo" },
-  ];
-  assert.equal(fieldMissingAcrossAll(jobs, "company"), true);
-  assert.equal(fieldMissingAcrossAll(jobs, "location"), false); // present on some
-});
-
-test("fieldMissingAcrossAll: an empty scan is not a drift signal", () => {
-  assert.equal(fieldMissingAcrossAll([], "company"), false);
 });
 
 // ── reducePushHealth: silent-per-call, not silent-forever (§16.7) ─────────────
@@ -360,4 +357,134 @@ test("isLockStale: a fresh lock is not stale, an old one is", () => {
 
 test("isLockStale: scanning with no startedAt is corrupt and treated as stale", () => {
   assert.equal(isLockStale({ isScanning: true, startedAt: null }, 1_000_000, 300_000), true);
+});
+
+// ── fieldReadCounts / reduceFieldHealth: notice when a field stops reading (§16.4,
+//    issue #52). A cliff, not a slope — fires only at total absence across a page.
+
+/** One parsed posting, every field reading by default — the healthy card. Only
+ *  the fields the counter touches are modelled. */
+const posting = (o: Partial<Parameters<typeof fieldReadCounts>[0][number]> = {}) => ({
+  title: "Staff Engineer",
+  company: "Acme Corp",
+  location: "Jakarta, Indonesia",
+  url: "https://www.linkedin.com/jobs/view/1",
+  linkedInStatus: "posted" as string | null,
+  ...o,
+});
+
+/** A counts object where every field read on all N postings — the fully-healthy
+ *  page the individual tests then knock one field out of. */
+const fullCounts = (n: number): FieldReadCounts => ({
+  postings: n,
+  title: n,
+  company: n,
+  location: n,
+  url: n,
+  dateOrLabel: n,
+});
+
+test("fieldReadCounts: counts each field's present postings and the date-or-label invariant", () => {
+  const jobs = [
+    posting(),
+    posting({ company: "" }), // blank company on one card
+    posting({ linkedInStatus: null }), // neither a date nor a state label
+  ];
+  assert.deepEqual(fieldReadCounts(jobs), {
+    postings: 3,
+    title: 3,
+    company: 2, // one blank
+    location: 3,
+    url: 3,
+    dateOrLabel: 2, // one card carried neither a date nor a label
+  });
+});
+
+test("fieldReadCounts: a Viewed/Promoted card counts toward the invariant (a label, no date)", () => {
+  // The unobserved arms count too: a `promoted`/`viewed` status is a state label,
+  // so the invariant holds even though the card carries no <time> date.
+  const jobs = [posting({ linkedInStatus: "viewed" }), posting({ linkedInStatus: "promoted" })];
+  assert.equal(fieldReadCounts(jobs).dateOrLabel, 2);
+});
+
+test("reduceFieldHealth: 0-of-25 company names fires and names the field and count", () => {
+  const next = reduceFieldHealth(OK_FIELD_HEALTH, { ...fullCounts(25), company: 0 });
+  assert.deepEqual(next.brokenFields, ["company"]);
+  assert.match(next.message ?? "", /company/);
+  assert.match(next.message ?? "", /25/);
+});
+
+test("reduceFieldHealth: 18-of-25 does not fire (a ratio is not the threshold)", () => {
+  assert.deepEqual(
+    reduceFieldHealth(OK_FIELD_HEALTH, { ...fullCounts(25), company: 18 }),
+    OK_FIELD_HEALTH,
+  );
+});
+
+test("reduceFieldHealth: 24-of-25 does not fire — only total absence does", () => {
+  assert.deepEqual(
+    reduceFieldHealth(OK_FIELD_HEALTH, { ...fullCounts(25), company: 24 }),
+    OK_FIELD_HEALTH,
+  );
+});
+
+test("reduceFieldHealth: a page below the sample floor never fires, whatever the counts", () => {
+  // 0-of-3 is not evidence of a dead selector — it is too small a sample to tell
+  // from a quiet search. The floor is a judgement call, not from the captures.
+  assert.deepEqual(
+    reduceFieldHealth(OK_FIELD_HEALTH, { ...fullCounts(3), company: 0, title: 0 }),
+    OK_FIELD_HEALTH,
+  );
+});
+
+test("reduceFieldHealth: below the floor, an already-recorded break is carried, not cleared", () => {
+  const broken = reduceFieldHealth(OK_FIELD_HEALTH, { ...fullCounts(25), company: 0 });
+  // A later quiet cycle of 2 cards must not clear a real break just because it is
+  // too small to judge.
+  assert.deepEqual(reduceFieldHealth(broken, { ...fullCounts(2), company: 0 }), broken);
+});
+
+test("reduceFieldHealth: every posting with a date OR a label passes; any with neither fires", () => {
+  // Healthy: the mix of dated and Viewed cards a normal page shows.
+  assert.deepEqual(
+    reduceFieldHealth(OK_FIELD_HEALTH, { ...fullCounts(25), dateOrLabel: 25 }),
+    OK_FIELD_HEALTH,
+  );
+  // Broken: not one of the 25 carried either — the footer slot stopped reading.
+  const next = reduceFieldHealth(OK_FIELD_HEALTH, { ...fullCounts(25), dateOrLabel: 0 });
+  assert.deepEqual(next.brokenFields, ["dateOrLabel"]);
+  assert.match(next.message ?? "", /date|status/);
+});
+
+test("reduceFieldHealth: the state clears on the first scan that reads the field again", () => {
+  const broken = reduceFieldHealth(OK_FIELD_HEALTH, { ...fullCounts(25), company: 0 });
+  assert.notDeepEqual(broken, OK_FIELD_HEALTH);
+  assert.deepEqual(reduceFieldHealth(broken, fullCounts(25)), OK_FIELD_HEALTH);
+});
+
+test("reduceFieldHealth: a single deploy killing two selectors names both", () => {
+  const next = reduceFieldHealth(OK_FIELD_HEALTH, { ...fullCounts(25), company: 0, location: 0 });
+  assert.deepEqual(next.brokenFields, ["company", "location"]);
+  assert.match(next.message ?? "", /company/);
+  assert.match(next.message ?? "", /location/);
+});
+
+test("aggregateFieldCounts: sums a cycle's per-page counts; an empty cycle is all zeros", () => {
+  assert.deepEqual(aggregateFieldCounts([]), NO_FIELD_READS);
+  assert.deepEqual(aggregateFieldCounts([fullCounts(25), { ...fullCounts(25), company: 0 }]), {
+    postings: 50,
+    title: 50,
+    company: 25, // one page's worth was blank
+    location: 50,
+    url: 50,
+    dateOrLabel: 50,
+  });
+});
+
+test("badgeSeverityWithFieldBreak: a field break raises ok to amber but never overrides a hard red", () => {
+  const broken: FieldHealthState = { brokenFields: ["company"], message: "…" };
+  assert.equal(badgeSeverityWithFieldBreak("ok", broken), "warn");
+  assert.equal(badgeSeverityWithFieldBreak("error", broken), "error"); // red outranks it
+  assert.equal(badgeSeverityWithFieldBreak("warn", broken), "warn");
+  assert.equal(badgeSeverityWithFieldBreak("ok", OK_FIELD_HEALTH), "ok"); // no break, no bump
 });
