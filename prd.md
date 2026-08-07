@@ -490,6 +490,24 @@ Desktop notification and push both fire. They serve different moments — one fo
 
 Silent push failure is the most likely thing to go wrong — a wrong chat ID produces no error you'd notice for days. A test button that reports success or failure inline removes that whole class of problem.
 
+### A third message: the field-break alarm (issue #54)
+
+Push carried new jobs only — never health. The field-break guard (§16.4) lights a badge and a popup banner, but those *already existed and already failed*: the extension went quiet twice and it was weeks before anyone noticed the amber badge that was there the whole time. So the guard's finding also goes out over Telegram, the one channel that persists in a chat the user reads rather than firing once into an empty room.
+
+```text
+⚠️ LinkedIn's job list changed
+
+Company names stopped reading — 0 of the 25 jobs on the last scan had one.
+
+Everything else still works. Jobs are still being found and sent to you.
+
+To get it fixed, save a copy of your job-search page while you're logged in. The extension's Options page has a button for it.
+```
+
+Four jobs, in order (`buildFieldBreakPush`, proved against this copy): **name the field** ("LinkedIn changed" is not actionable); **give the count** (`0 of N`, so whoever fixes it has the number); **say whether jobs are still arriving** — a dead `location` is cosmetic but a dead `title`/`url` means no job is saved at all, so the third line flips to "New jobs can't be read while this is broken"; and **name the one action that helps** — the Options capture button (§ Diagnostics / issue #49), which is why #54 is blocked on it, a message naming a button that does not exist being worse than none.
+
+**Cadence — once a day while broken.** Scans run every ~5 minutes, so this is the difference between ~288 pushes a day and one. The user's call, chosen over "once per break" and a weekly nudge: a fix can take a fortnight, and a daily alert about something already known is how a guard earns an uninstall — but the badge and banner stay lit continuously regardless, so the daily push is a nudge on top of a standing signal, not the only trace. State is one `lastPushedAt` (`'fieldBreakPush'` key) that spaces the send; `reduceFieldPush` is the pure gate (injected `lastPushedAt`, literal `now`). Recovery is immediate — the first scan that reads the field again clears the state and stops the pushes, so a *later* break pushes again rather than staying suppressed. A push that fails is swallowed exactly like §8's others, and with Telegram unconfigured the guard still lights the badge and banner and nothing throws. (Bounding the cadence — daily for a fortnight, weekly after — is offered to a later ticket if it bites, not built unasked.)
+
 ---
 
 ## 9. Key flows
@@ -806,7 +824,7 @@ The unifying idea: the content script never reports a bare "0 cards." It reports
 
    - **What is guarded:** the four always-present fields — `title`, `company`, `location`, `url` (0 blank across 50 measured postings) — plus one **invariant** that stands in for the one field that *cannot* be counted. The posting **date** is legitimately absent from a third to two-thirds of a healthy page (LinkedIn withholds it on opened postings, showing a `Viewed` badge instead), so a guard on the raw date count would have fired on both healthy captures. The invariant instead: **every posting carries a `<time>` date *or* a footer state label, never neither** (50/50, no exceptions). Read straight off `linkedInStatus` (§5): `posted` = a date was read, `viewed`/`promoted`/`applied` = a label, `null` = neither — so an unobserved `Promoted` card counts rather than trips a false alarm. **Reposted is deliberately excluded** — no reposted card has ever been captured, so there is no baseline for "normal."
    - **The threshold is a cliff, not a slope:** fires only when a guarded field is present on **zero** of the scan's postings, never a ratio. A class rename hits every card in one deploy, so a real break is `0 of N`, not `18 of 25`; `COMPLETE_READ_RATIO` (0.9) guards a different question — did we read the whole list — and is deliberately **not** reused. A **sample floor** of 5 postings (a judgement call, not from the captures) means `0 of 1` never trips the alarm; below it the scan is not judged and the prior state is carried unchanged.
-   - **Behaviour:** amber badge + a popup banner naming the field(s) and the count. No desktop notification (like the other soft failures); the Telegram push that actually gets noticed is #54, which this stands on. The state persists across scans and clears on the first scan that reads every field again.
+   - **Behaviour:** amber badge + a popup banner naming the field(s) and the count, **plus a once-a-day Telegram alarm** (issue #54, §8). No desktop notification (like the other soft failures). The badge and banner from #52 already existed and already failed to be noticed — the extension went quiet twice and it was weeks before anyone saw the amber badge sitting there — so #54 adds the one channel that persists in a chat the user actually reads. The strict `0-of-N` threshold is what pays for a channel that loud: a false positive is close to impossible, which is the only reason a daily alarm is defensible. The state persists across scans and clears on the first scan that reads every field again.
 
    A field blank on **every** card in a scan used to be only a console log; this guard turns that observation into a persisted, surfaced state (`fieldHealth`), on its own axis so it can be acted on rather than lost in the noise.
 
@@ -829,7 +847,7 @@ The split: hard failures (challenge, logged out) get an active push — a deskto
 
 ### Structural consequence
 
-Per §14, the decision logic is pure and tested (`src/health.ts` + `src/health.test.ts`): `classifyPage`, `aggregateOutcome`, `reduceScanHealth`, `isSavableJob`, `fieldReadCounts`/`aggregateFieldCounts`/`reduceFieldHealth` (the field-break axis, §16.4), `reducePushHealth`, `isLockStale`. The content script reads the live DOM/URL into a `PageSignals` — including the per-field present-counts and the date-or-label count — and `background.ts` persists the `HealthState`/`fieldHealth`, sets the badge, and fires notifications — none of that is unit-tested, all of the decisions are.
+Per §14, the decision logic is pure and tested (`src/health.ts` + `src/health.test.ts`): `classifyPage`, `aggregateOutcome`, `reduceScanHealth`, `isSavableJob`, `fieldReadCounts`/`aggregateFieldCounts`/`reduceFieldHealth` (the field-break axis, §16.4), `reduceFieldPush` (its once-a-day Telegram cadence, §8/issue #54), `reducePushHealth`, `isLockStale`. The message that alarm carries is `buildFieldBreakPush` in `src/push.ts`, proved against its copy. The content script reads the live DOM/URL into a `PageSignals` — including the per-field present-counts and the date-or-label count — and `background.ts` persists the `HealthState`/`fieldHealth`/`fieldBreakPush`, sets the badge, and fires notifications — none of that is unit-tested, all of the decisions are.
 
 ---
 

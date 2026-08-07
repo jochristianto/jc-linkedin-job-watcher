@@ -366,6 +366,14 @@ through, rather than being cut short. A push that fails can never break a round 
 after three failures in a row you get a soft warning suggesting you re-run **Send
 test message**.
 
+Telegram also carries one health message, not just new jobs: if a field stops
+reading — company names, job titles, the posting date — you get a **once-a-day
+alarm** naming the field, the `0 of N` count, whether jobs are still being found,
+and the fix (**Save a copy of this page**, below). It repeats at most daily while
+the break lasts and stops on its own the first round the field reads again; the
+amber toolbar badge and the popup banner stay lit the whole time regardless. With
+Telegram off you still get the badge and banner — only the phone alarm is skipped.
+
 ---
 
 ## Troubleshooting

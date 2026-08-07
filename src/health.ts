@@ -529,6 +529,72 @@ export function badgeSeverityWithFieldBreak(
   return severity === "ok" && fieldHealth.message !== null ? "warn" : severity;
 }
 
+// ── Field-break push cadence (issue #54, PRD §8 / §16.4) ─────────────────────
+//
+// The field-break guard above lights a badge and a banner that already exist —
+// and that already failed to be noticed, twice. #54 is the loud channel on top:
+// a Telegram push that lands in a chat the user actually reads. The strict
+// 0-of-N threshold on #52 is what pays for a channel this loud; a false positive
+// there is close to impossible, which is the only reason a daily alarm is
+// defensible. This is the pure cadence gate that spaces the send: at most one
+// push per 24 hours while the guard is lit, cleared the moment it recovers.
+
+/** How long to wait between field-break pushes while the guard stays lit (issue
+ *  #54). Scans run every ~5 minutes, so without this a single break would push
+ *  ~288 times a day; the badge and banner stay lit continuously regardless, so a
+ *  daily push is a nudge on top of a standing signal, not the only trace. Chosen
+ *  over "once per break" and a weekly nudge — a fix can take a fortnight and a
+ *  daily alert about something already known is how a guard earns an uninstall,
+ *  but the user made that call knowingly. Bounding it (daily then weekly) is
+ *  offered to a later ticket, not built unasked. */
+export const FIELD_BREAK_PUSH_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+/** The persisted field-break push record (`'fieldBreakPush'` storage key, issue
+ *  #54). One field: when the last field-break push went out, so {@link reduceFieldPush}
+ *  can space the next one. Its own key, apart from `fieldHealth` (the axis it
+ *  watches) and `pushHealth` (a different push concern), the same separate-axis
+ *  footing every other health state sits on. */
+export type FieldPushState = { lastPushedAt: number | null };
+
+/** The starting point — nothing pushed yet, so the next lit guard pushes at once. */
+export const NO_FIELD_PUSH: FieldPushState = { lastPushedAt: null };
+
+/**
+ * Decide whether this cycle sends the field-break push, and the state to persist
+ * (issue #54, PRD §8). Pure: an injected `lastPushedAt` and a literal `now`, never
+ * a real clock, so the once-a-day cadence is proved by `node --test`.
+ *
+ * - **Not broken** → clear the state ({@link NO_FIELD_PUSH}) and send nothing. The
+ *   first healthy scan wipes `lastPushedAt`, so a later break pushes immediately
+ *   rather than staying suppressed by a send from the break before it. Recovery is
+ *   immediate, matching how {@link reduceFieldHealth} clears its own state.
+ * - **Broken but push not configured** → carry the prior state untouched and send
+ *   nothing, exactly as `firePush` leaves `pushHealth` untouched when it never
+ *   attempts a send. The badge and banner still light (that is `fieldHealth`, a
+ *   separate axis); this only governs the push. Not advancing `lastPushedAt` here
+ *   means adding credentials later still pushes at once rather than being spaced
+ *   out by a send that never happened.
+ * - **Broken, configured, and due** (never pushed, or ≥ `intervalMs` ago) → send,
+ *   and stamp `lastPushedAt` to `now`. Stamped whether or not the send lands — the
+ *   push is a nudge on a standing badge/banner, so a failed one waits out the day
+ *   like a delivered one rather than retrying every five minutes.
+ * - **Broken, configured, not yet due** → carry the prior state and send nothing.
+ */
+export function reduceFieldPush(
+  prior: FieldPushState,
+  broken: boolean,
+  configured: boolean,
+  now: number,
+  intervalMs: number = FIELD_BREAK_PUSH_INTERVAL_MS,
+): { state: FieldPushState; send: boolean } {
+  if (!broken) return { state: NO_FIELD_PUSH, send: false };
+  if (!configured) return { state: prior, send: false };
+  if (prior.lastPushedAt !== null && now - prior.lastPushedAt < intervalMs) {
+    return { state: prior, send: false };
+  }
+  return { state: { lastPushedAt: now }, send: true };
+}
+
 /** The persisted push-failure record (`'pushHealth'` storage key, PRD §16.7). Kept
  *  apart from the scan {@link HealthState} because push failures are independent of
  *  scan health — a scan can read fine while a wrong chat id silently drops every

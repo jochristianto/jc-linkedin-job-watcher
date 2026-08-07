@@ -182,8 +182,91 @@ export function buildAppliedMessage(job: AppliedJob, notes: string): string {
 
 /** Is push configured enough to attempt a send at all (PRD §8)? Shared by both
  *  senders so "off", "no token" and "no chat id" mean the same thing everywhere. */
-function canPush(cfg: PushConfig): boolean {
+export function canPush(cfg: PushConfig): boolean {
   return cfg.enabled && cfg.botToken !== "" && cfg.chatId !== "";
+}
+
+// ── The field-break push (issue #54, PRD §8 / §16.4) ─────────────────────────
+//
+// The one message that gets noticed. The badge and banner from #52 already
+// exist and already failed to be seen twice; this is the loud channel on top,
+// landing in a chat the user reads. It is built here, pure, so the exact copy
+// the user meets is proved by `node --test` rather than left to a literal buried
+// in the worker — the same footing as the two job messages above.
+
+/** The field-break push header. `⚠️` not `<b>[…]</b>`: this is not one of a
+ *  stream of job posts, it is an alarm, and it should not read like the others. */
+const FIELD_BREAK_HEADER = "⚠️ LinkedIn's job list changed";
+
+/** How each guarded field (and the date-or-label invariant) is named in the push
+ *  — capitalised and plural, so it heads a sentence: "Company names stopped
+ *  reading". Its own map, not `health.ts`'s banner labels: the banner reads
+ *  "company name" mid-sentence, the push leads with "Company names". */
+const PUSH_FIELD_LABELS: Record<string, string> = {
+  title: "Job titles",
+  company: "Company names",
+  location: "Locations",
+  url: "Job links",
+  dateOrLabel: "Posting dates",
+};
+
+/** The guarded fields a job cannot be saved without (`isSavableJob`: id, title,
+ *  url — id is not guarded). When one of these is the field that broke, no new
+ *  job survives the read, so the push must say jobs have stopped arriving rather
+ *  than "everything else still works" — which is the one thing the reader needs
+ *  to know at that moment (issue #54, job 3). `company`/`location`/the date
+ *  invariant are cosmetic: a job with those blank is still saved and sent. */
+const JOB_BLOCKING_FIELDS = new Set(["title", "url"]);
+
+/**
+ * Build the field-break push (issue #54, PRD §8 / §16.4). Null when nothing is
+ * broken — there is nothing to alarm about — so the caller sends nothing.
+ *
+ * The four jobs the message does, in order (issue #54):
+ *   1. **Name the field** — "LinkedIn changed" alone is not actionable.
+ *   2. **Give the count** — `0 of N`, so whoever fixes it has the number.
+ *   3. **Say whether jobs are still arriving** — a dead `location` is cosmetic, a
+ *      dead `title` is not; at that moment it is the only question that matters.
+ *   4. **Name the one action that helps** — the Options capture button (#49). A
+ *      message naming a button that did not exist would be worse than none, which
+ *      is why #54 was blocked on it.
+ *
+ *     ⚠️ LinkedIn's job list changed
+ *
+ *     Company names stopped reading — 0 of the 25 jobs on the last scan had one.
+ *
+ *     Everything else still works. Jobs are still being found and sent to you.
+ *
+ *     To get it fixed, save a copy of your job-search page while you're logged in.
+ *     The extension's Options page has a button for it.
+ *
+ * `postings` is the `0 of N` denominator — the cycle-wide sample the guard judged.
+ * No user text reaches the message (field labels are fixed, the count is a
+ * number), so there is nothing to escape.
+ */
+export function buildFieldBreakPush(brokenFields: string[], postings: number): string | null {
+  if (brokenFields.length === 0) return null;
+
+  const names = brokenFields.map((f) => PUSH_FIELD_LABELS[f] ?? f);
+  const list =
+    names.length === 1
+      ? names[0]
+      : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  const pronoun = brokenFields.length === 1 ? "one" : "them";
+  const detail = `${list} stopped reading — 0 of the ${postings} jobs on the last scan had ${pronoun}.`;
+
+  // Job 3: is work still being found? Only a break in a load-bearing field stops
+  // that; a cosmetic one leaves the pipeline intact.
+  const jobsBlocked = brokenFields.some((f) => JOB_BLOCKING_FIELDS.has(f));
+  const stillWorks = jobsBlocked
+    ? "New jobs can't be read while this is broken — nothing is being found or sent right now."
+    : "Everything else still works. Jobs are still being found and sent to you.";
+
+  const fix =
+    "To get it fixed, save a copy of your job-search page while you're logged in. " +
+    "The extension's Options page has a button for it.";
+
+  return [FIELD_BREAK_HEADER, detail, stillWorks, fix].join("\n\n");
 }
 
 /**
@@ -301,4 +384,19 @@ export async function sendAppliedPush(
 ): Promise<boolean> {
   if (!canPush(cfg)) return false;
   return postMessage(buildAppliedMessage(job, notes), cfg, fetchImpl);
+}
+
+/** Send the field-break alarm (issue #54, PRD §8 / §16.4). One message, same
+ *  credential, same swallowed failure as {@link sendPush} — an offline phone or a
+ *  wrong chat id can never break the scan that noticed the break. A no-op (false)
+ *  when push is off or unconfigured, so the guard still lights the badge and the
+ *  banner and nothing here throws. The cadence — at most one a day — is decided by
+ *  `reduceFieldPush` upstream; this only posts the message it is handed. */
+export async function sendFieldBreakPush(
+  text: string,
+  cfg: PushConfig,
+  fetchImpl: typeof fetch = fetch,
+): Promise<boolean> {
+  if (!canPush(cfg)) return false;
+  return postMessage(text, cfg, fetchImpl);
 }

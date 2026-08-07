@@ -9,6 +9,9 @@ import {
   fieldReadCounts,
   aggregateFieldCounts,
   reduceFieldHealth,
+  reduceFieldPush,
+  FIELD_BREAK_PUSH_INTERVAL_MS,
+  NO_FIELD_PUSH,
   badgeSeverityWithFieldBreak,
   reducePushHealth,
   isLockStale,
@@ -487,4 +490,70 @@ test("badgeSeverityWithFieldBreak: a field break raises ok to amber but never ov
   assert.equal(badgeSeverityWithFieldBreak("error", broken), "error"); // red outranks it
   assert.equal(badgeSeverityWithFieldBreak("warn", broken), "warn");
   assert.equal(badgeSeverityWithFieldBreak("ok", OK_FIELD_HEALTH), "ok"); // no break, no bump
+});
+
+// ── reduceFieldPush: the field-break alarm, at most once a day (§8, issue #54) ─
+//
+// Pure cadence gate: an injected `lastPushedAt` and a literal `now`, never a real
+// clock. The interval is passed explicitly in most cases so the arithmetic is
+// legible, but the default is the real 24h.
+
+const DAY = FIELD_BREAK_PUSH_INTERVAL_MS;
+
+test("reduceFieldPush: the first lit scan with push configured sends and stamps now", () => {
+  assert.deepEqual(reduceFieldPush(NO_FIELD_PUSH, true, true, 1000, DAY), {
+    state: { lastPushedAt: 1000 },
+    send: true,
+  });
+});
+
+test("reduceFieldPush: a second scan inside 24h does not push again", () => {
+  const prior = { lastPushedAt: 1000 };
+  // One second short of a day: still suppressed.
+  assert.deepEqual(reduceFieldPush(prior, true, true, 1000 + DAY - 1, DAY), {
+    state: prior,
+    send: false,
+  });
+});
+
+test("reduceFieldPush: once the day has elapsed it pushes again and re-stamps", () => {
+  assert.deepEqual(reduceFieldPush({ lastPushedAt: 1000 }, true, true, 1000 + DAY, DAY), {
+    state: { lastPushedAt: 1000 + DAY },
+    send: true,
+  });
+});
+
+test("reduceFieldPush: the first healthy scan clears the state and sends nothing", () => {
+  assert.deepEqual(reduceFieldPush({ lastPushedAt: 5000 }, false, true, 9000, DAY), {
+    state: NO_FIELD_PUSH,
+    send: false,
+  });
+});
+
+test("reduceFieldPush: a break after recovery pushes at once, not suppressed by the last send", () => {
+  // Recovery wiped lastPushedAt, so a fresh break with a null prior is due
+  // immediately even minutes later — it is a new break, not the same one.
+  const recovered = reduceFieldPush({ lastPushedAt: 5000 }, false, true, 9000, DAY).state;
+  assert.deepEqual(reduceFieldPush(recovered, true, true, 9060_000, DAY), {
+    state: { lastPushedAt: 9060_000 },
+    send: true,
+  });
+});
+
+test("reduceFieldPush: with push unconfigured it never sends and never advances the cadence", () => {
+  const prior = { lastPushedAt: null };
+  const out = reduceFieldPush(prior, true, false, 1000, DAY);
+  assert.equal(out.send, false);
+  // The state is left untouched, so adding credentials later still pushes at once
+  // rather than being spaced out by a send that never happened.
+  assert.deepEqual(out.state, prior);
+});
+
+test("reduceFieldPush: an unconfigured push still clears the state on recovery", () => {
+  // The badge/banner are a separate axis and light regardless; the cadence state
+  // must not linger just because push was off.
+  assert.deepEqual(reduceFieldPush({ lastPushedAt: 5000 }, false, false, 9000, DAY), {
+    state: NO_FIELD_PUSH,
+    send: false,
+  });
 });

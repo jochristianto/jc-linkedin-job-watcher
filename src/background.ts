@@ -51,6 +51,7 @@ import {
   badgeSeverityWithFieldBreak,
   classifyPage,
   reduceFieldHealth,
+  reduceFieldPush,
   reducePushHealth,
   reduceScanHealth,
   shouldRunScan,
@@ -60,7 +61,10 @@ import {
   type Severity,
 } from "./health.ts";
 import {
+  buildFieldBreakPush,
+  canPush,
   sendAppliedPush,
+  sendFieldBreakPush,
   sendPush,
   type AppliedPushFailure,
   type AppliedPushRequest,
@@ -233,6 +237,34 @@ async function firePush(settings: Settings, newJobs: Job[]): Promise<void> {
     "pushHealth",
     reducePushHealth(ok, prior.consecutivePushFailures, settings.pushFailWarnThreshold),
   );
+}
+
+/** The once-a-day field-break alarm (issue #54, PRD §8 / §16.4). The badge and the
+ *  banner from #52 already exist and already failed to be noticed twice; this is
+ *  the loud channel on top, landing in the chat the user reads. `reduceFieldPush`
+ *  owns the whole decision — clear on recovery, hold to one push per 24 hours while
+ *  lit, skip entirely when push is unconfigured — and this only posts the message
+ *  it green-lights. Like `firePush`, a swallowed send failure can never break the
+ *  cycle, and an unconfigured push leaves both the state and the standing badge/
+ *  banner untouched. `postings` is the cycle-wide `0 of N` denominator the guard
+ *  judged. */
+async function fireFieldBreakPush(
+  settings: Settings,
+  brokenFields: string[],
+  postings: number,
+): Promise<void> {
+  const cfg = settings.push;
+  const { state, send } = reduceFieldPush(
+    await get("fieldBreakPush"),
+    brokenFields.length > 0,
+    canPush(cfg),
+    Date.now(),
+  );
+  if (send) {
+    const message = buildFieldBreakPush(brokenFields, postings);
+    if (message) await sendFieldBreakPush(message, cfg);
+  }
+  await set("fieldBreakPush", state);
 }
 
 /** Send the `[Applied]` message for one job — PRD §8's push, reused for the answer
@@ -580,10 +612,8 @@ async function runCycle(settings: Settings, pages: number): Promise<void> {
     // state — a page can be `ok` on every count above and still have a dead
     // selector, so this is decided apart from `health` and never ranked against it.
     // The reducer skips a below-floor sample and fires only at total absence.
-    const fieldHealth = reduceFieldHealth(
-      await get("fieldHealth"),
-      aggregateFieldCounts(fieldCountsList),
-    );
+    const fieldCounts = aggregateFieldCounts(fieldCountsList);
+    const fieldHealth = reduceFieldHealth(await get("fieldHealth"), fieldCounts);
     await set("fieldHealth", fieldHealth);
     if (fieldHealth.message) console.warn(`[ljw] ${fieldHealth.message}`);
 
@@ -599,6 +629,11 @@ async function runCycle(settings: Settings, pages: number): Promise<void> {
     // Additive Telegram push (PRD §8), after the badge and desktop notification so
     // its failure — swallowed by sendPush — can never affect either.
     await firePush(settings, newJobs);
+    // The field-break alarm (issue #54), likewise additive and likewise swallowed:
+    // once a day while the guard above is lit, cleared the moment it recovers. The
+    // badge and banner were set regardless — this is the loud nudge on top, not the
+    // only trace, so an unconfigured or failed push changes nothing already shown.
+    await fireFieldBreakPush(settings, fieldHealth.brokenFields, fieldCounts.postings);
   } finally {
     clearInterval(keepalive);
   }

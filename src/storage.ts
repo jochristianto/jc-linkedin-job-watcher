@@ -14,7 +14,9 @@ import {
   OK_HEALTH,
   OK_FIELD_HEALTH,
   OK_PUSH_HEALTH,
+  NO_FIELD_PUSH,
   type FieldHealthState,
+  type FieldPushState,
   type PushHealthState,
 } from "./health.ts";
 import type { SeenMap } from "./dedupe.ts";
@@ -55,7 +57,8 @@ export const DEFAULT_UI: UiState = { activeWatchId: null, mode: null, pendingApp
 /** The §6 top-level keys and the shape each holds. `pushHealth` (§16.7) tracks
  *  consecutive Telegram-push failures separately from scan `health`; `fieldHealth`
  *  (§16.4, issue #52) tracks a dead field selector on the same separate-axis
- *  footing; `ui` holds the popup's last chip + mode (mockups decision 4). */
+ *  footing; `fieldBreakPush` (issue #54) spaces the once-a-day Telegram alarm that
+ *  break drives; `ui` holds the popup's last chip + mode (mockups decision 4). */
 export type StorageShape = {
   settings: Settings;
   seen: SeenMap;
@@ -64,6 +67,7 @@ export type StorageShape = {
   health: HealthState;
   pushHealth: PushHealthState;
   fieldHealth: FieldHealthState;
+  fieldBreakPush: FieldPushState;
   ui: UiState;
 };
 
@@ -76,6 +80,7 @@ const DEFAULTS: StorageShape = {
   health: OK_HEALTH,
   pushHealth: OK_PUSH_HEALTH,
   fieldHealth: OK_FIELD_HEALTH,
+  fieldBreakPush: NO_FIELD_PUSH,
   ui: DEFAULT_UI,
 };
 
