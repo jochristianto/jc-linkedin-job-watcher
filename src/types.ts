@@ -16,13 +16,35 @@ import type { PushConfig } from "./push.ts";
 
 // ── Shapes defined here (PRD §5) ─────────────────────────────────────────────
 
+/** How much to trust `Job.postedAt` (§5). `"exact"` is a fresh phrase read to the
+ *  minute, `"day"` is LinkedIn's `<time datetime>` attribute (midnight UTC), and
+ *  `"estimated"` is a coarse phrase's midpoint guess — only that one renders a `~`
+ *  on the row. `null` pairs with a `null` `postedAt`: the card carried no date. */
+export type PostedPrecision = "exact" | "day" | "estimated" | null;
+
+/** What the card's first footer slot actually held (§5). The slot is EXCLUSIVE —
+ *  the posting date, or `Promoted`, or `Viewed`, or `Applied`, never two — so this
+ *  is the one honest answer to "why is there no date". `null` when even the slot
+ *  was unreadable. */
+export type LinkedInStatus = "posted" | "promoted" | "viewed" | "applied" | null;
+
 export type Job = {
   id: string; // LinkedIn's job ID from the URL
   title: string;
   company: string;
   location: string;
   isReposted: boolean;
-  postedText: string; // "2 hours ago"
+  /** LinkedIn's own posting date, resolved per issue #48's four-way rule (fresh phrase →
+   *  `<time datetime>` attribute → coarse-phrase midpoint → nothing). `null` when
+   *  the card carried no readable date — see `linkedInStatus`, which says why. The
+   *  parser resolves the attribute (midnight UTC, day precision); `stampJobs` adds
+   *  the phrase cases, which need `foundAt`, so no clock is injected into the parser. */
+  postedAt: number | null;
+  /** How much to trust `postedAt` — see {@link PostedPrecision}. */
+  postedPrecision: PostedPrecision;
+  postedText: string; // "2 hours ago" — the words LinkedIn rendered, unchanged
+  /** Why there is (or isn't) a date — see {@link LinkedInStatus}. */
+  linkedInStatus: LinkedInStatus;
   url: string;
   foundAt: number;
   watchId: string; // which saved search surfaced it

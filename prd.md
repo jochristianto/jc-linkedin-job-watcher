@@ -114,7 +114,19 @@ type Job = {
   company: string;
   location: string;
   isReposted: boolean;
-  postedText: string; // "2 hours ago"
+  // LinkedIn's own posting date, kept as a real date rather than the frozen phrase
+  // it was true at scan time (issue #48). `postedAt` is resolved four ways per card
+  // — fresh phrase to the minute, `<time datetime>` attribute to the day, coarse
+  // phrase to a midpoint estimate, or nothing — and `postedPrecision` says which;
+  // only `"estimated"` shows a `~`. `linkedInStatus` reads the exclusive footer
+  // slot, the one honest answer to why a card has no date. All three are optional
+  // in a backup file: records and files written before this shipped carry none,
+  // and an absent `postedAt` reads as "never captured" — the same state a `Viewed`
+  // card is stored in. `postedText` stays required — it has always been written.
+  postedAt: number | null;
+  postedPrecision: "exact" | "day" | "estimated" | null;
+  postedText: string; // "2 hours ago" — the words LinkedIn rendered, unchanged
+  linkedInStatus: "posted" | "promoted" | "viewed" | "applied" | null;
   url: string;
   foundAt: number;
   watchId: string; // which saved search surfaced it
@@ -686,6 +698,8 @@ export function parseJobCards(doc: Document): Job[] { ... }
 // thin content-script wrapper — not unit-tested
 parseJobCards(document);
 ```
+
+`parseJobCards` reads only the `Document` — including the `<time datetime>` attribute and the age phrase — and never a clock (issue #48). Reading an attribute is not reading a clock: the parser resolves the attribute to a `postedAt` at day precision and reads the footer's exclusive state into `linkedInStatus`, but the phrase cases (fresh-to-the-minute and coarse-estimate) need `foundAt`, which the pure `stampJobs` supplies later. So both halves stay provable against literal inputs, and no `Date.now()` is ever injected into the reader.
 
 - **Fixtures live in** `.scratch/linkedin-job-watcher/fixtures/page-1/` and `.../page-2/` — **gitignored** (a saved logged-in page carries profile chrome; it must never be committed, per `.gitignore` and issue #2).
 - **A test loads a fixture with `node:fs` + a DOM parser** (`linkedom` or `jsdom`, dev-dependency only) and asserts the parsed IDs/fields. Because fixtures are gitignored, the parser test **skips cleanly (`test.skip`) when its fixture file is absent** so CI/other machines stay green; it runs wherever the human has captured the page.

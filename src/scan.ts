@@ -6,10 +6,11 @@
 // is a pure function of its arguments, so `node --test` proves it without a
 // browser, the same shape as filter.ts / schedule.ts / dedupe.ts.
 
-import type { Job, Watch } from "./types.ts";
+import type { Job, PostedPrecision, Watch } from "./types.ts";
 import type { JobsMap } from "./storage.ts";
 import type { Severity } from "./health.ts";
 import { isCompanyBlocked, isHiddenAsReposted } from "./filter.ts";
+import { parsePostedAge } from "./parse.ts";
 
 /** Postings per results page on `/jobs/search/` — the `&start=` step (PRD §9:
  *  `url + &start=(page-1)*25`). */
@@ -176,13 +177,41 @@ export function repeatsPreviousPage(
 }
 
 /**
+ * Resolve a job's final `postedAt` + `postedPrecision` given the moment it was
+ * found (issue #48). The parser has already filled `postedAt` from the `<time datetime>`
+ * attribute (day precision) where there was one; this applies the two rules that
+ * need a clock, in the order the ticket fixes:
+ *
+ *   1. A phrase that parses to a sub-day age knows the *minute* while the posting
+ *      is fresh, so it beats the day-precise attribute → `foundAt − offset`, `exact`.
+ *   2. Otherwise the attribute's day, if the parser found one.
+ *   3. Otherwise a coarse phrase's midpoint estimate → `foundAt − midpoint`, `estimated`.
+ *   4. Otherwise nothing readable — a `Viewed`/`Promoted` card — stays `null`.
+ *
+ * LinkedIn's attribute knows the day and its words know the minute, and they fail
+ * in opposite directions, so taking the better of the two per card beats either.
+ */
+function resolvePostedAt(
+  job: Job,
+  foundAt: number,
+): { postedAt: number | null; postedPrecision: PostedPrecision } {
+  const age = parsePostedAge(job.postedText);
+  if (age?.precise) return { postedAt: foundAt - age.offsetMs, postedPrecision: "exact" };
+  if (job.postedAt !== null) return { postedAt: job.postedAt, postedPrecision: "day" };
+  if (age) return { postedAt: foundAt - age.offsetMs, postedPrecision: "estimated" };
+  return { postedAt: null, postedPrecision: null };
+}
+
+/**
  * Stamp the scan-context fields `parseJobCards` deliberately leaves neutral
- * (PRD §5/§12): which watch surfaced each job and when. Returns fresh records —
- * the parser's output is not mutated — so the same parsed array could be stamped
- * for more than one watch without cross-talk.
+ * (PRD §5/§12): which watch surfaced each job and when. Also finishes `postedAt`
+ * with the two rules that need `foundAt` (issue #48, {@link resolvePostedAt}) — the
+ * clock the parser is kept pure of. Returns fresh records — the parser's output is
+ * not mutated — so the same parsed array could be stamped for more than one watch
+ * without cross-talk.
  */
 export function stampJobs(jobs: Job[], watchId: string, foundAt: number): Job[] {
-  return jobs.map((job) => ({ ...job, watchId, foundAt }));
+  return jobs.map((job) => ({ ...job, watchId, foundAt, ...resolvePostedAt(job, foundAt) }));
 }
 
 /**

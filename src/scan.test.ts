@@ -33,7 +33,10 @@ function job(overrides: Partial<Job> & { id: string }): Job {
     company: "Acme Corp",
     location: "Jakarta, Indonesia",
     isReposted: false,
+    postedAt: null,
+    postedPrecision: null,
     postedText: "2 hours ago",
+    linkedInStatus: null,
     url: `https://www.linkedin.com/jobs/view/${overrides.id}/`,
     foundAt: 0,
     watchId: "",
@@ -112,6 +115,84 @@ test("stampJobs does not mutate the input jobs", () => {
   stampJobs([input], "w", 1);
   assert.equal(input.watchId, "");
   assert.equal(input.foundAt, 0);
+});
+
+// ── stampJobs finishes postedAt with the clock the parser is kept pure of (issue #48) ──
+
+const FOUND_AT = Date.UTC(2026, 7, 7, 12, 0, 0);
+
+test("stampJobs reads a fresh sub-day phrase to the minute (exact), beating the day attribute", () => {
+  // "53 minutes ago Within the past 24 hours" — the polluted fresh-card text.
+  const [j] = stampJobs(
+    [job({ id: "1", postedText: "53 minutes ago Within the past 24 hours" })],
+    "w",
+    FOUND_AT,
+  );
+  assert.equal(j!.postedAt, FOUND_AT - 53 * 60_000);
+  assert.equal(j!.postedPrecision, "exact");
+});
+
+test("stampJobs keeps the parser's day-precise attribute for a coarse phrase", () => {
+  const attrDay = Date.UTC(2026, 6, 17);
+  const [j] = stampJobs(
+    [job({ id: "1", postedText: "3 weeks ago", postedAt: attrDay, postedPrecision: "day" })],
+    "w",
+    FOUND_AT,
+  );
+  assert.equal(j!.postedAt, attrDay);
+  assert.equal(j!.postedPrecision, "day");
+});
+
+test("stampJobs estimates a coarse phrase with no attribute from foundAt minus the midpoint", () => {
+  const [j] = stampJobs([job({ id: "1", postedText: "3 weeks ago" })], "w", FOUND_AT);
+  assert.equal(j!.postedAt, FOUND_AT - 24 * 86_400_000);
+  assert.equal(j!.postedPrecision, "estimated");
+});
+
+test("a fresh phrase overrides the day attribute — minute precision wins over the day", () => {
+  const attrDay = Date.UTC(2026, 7, 7);
+  const [j] = stampJobs(
+    [job({ id: "1", postedText: "6 hours ago", postedAt: attrDay, postedPrecision: "day" })],
+    "w",
+    FOUND_AT,
+  );
+  assert.equal(j!.postedAt, FOUND_AT - 6 * 3_600_000);
+  assert.equal(j!.postedPrecision, "exact");
+});
+
+test("stampJobs leaves a dateless (Viewed) card null, and a non-English phrase falls through", () => {
+  const [viewed] = stampJobs(
+    [job({ id: "1", postedText: "", linkedInStatus: "viewed" })],
+    "w",
+    FOUND_AT,
+  );
+  assert.equal(viewed!.postedAt, null);
+  assert.equal(viewed!.postedPrecision, null);
+  assert.equal(viewed!.linkedInStatus, "viewed");
+  // A non-English phrase with the day attribute present falls through to the day.
+  const attrDay = Date.UTC(2026, 6, 17);
+  const [fr] = stampJobs(
+    [job({ id: "2", postedText: "il y a 3 semaines", postedAt: attrDay, postedPrecision: "day" })],
+    "w",
+    FOUND_AT,
+  );
+  assert.equal(fr!.postedAt, attrDay);
+  assert.equal(fr!.postedPrecision, "day");
+});
+
+test("mergeJobs never overwrites a stored postedAt on re-scan (write-once, issue #48)", () => {
+  // The record is written on first sight and never touched again, so a later
+  // Viewed read cannot destroy the date it captured while the posting was fresh.
+  const captured = Date.UTC(2026, 7, 7, 11, 7);
+  const existing: JobsMap = {
+    "1": job({ id: "1", postedAt: captured, postedPrecision: "exact", linkedInStatus: "posted" }),
+  };
+  const merged = mergeJobs(existing, [
+    job({ id: "1", postedAt: null, postedPrecision: null, linkedInStatus: "viewed" }),
+  ]);
+  assert.equal(merged["1"]!.postedAt, captured);
+  assert.equal(merged["1"]!.postedPrecision, "exact");
+  assert.equal(merged["1"]!.linkedInStatus, "posted");
 });
 
 test("mergeJobs adds new jobs keyed by id", () => {

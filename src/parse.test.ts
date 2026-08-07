@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { parseHTML } from "linkedom";
-import { findResultsScroller, parseJobCards, postingIdsOn } from "./parse.ts";
+import { findResultsScroller, parseJobCards, parsePostedAge, postingIdsOn } from "./parse.ts";
 
 /** Parse an HTML string into a Document the way the content script sees one. */
 function doc(html: string): Document {
@@ -18,8 +18,10 @@ function cardHtml(opts: {
   company?: string;
   location?: string;
   posted?: string;
+  datetime?: string;
   href?: string;
   footer?: string;
+  footerState?: string;
 }): string {
   const {
     jobId,
@@ -28,9 +30,16 @@ function cardHtml(opts: {
     company = "Acme Corp",
     location = "Jakarta, Indonesia",
     posted = "2 hours ago",
+    datetime,
     href = `/jobs/view/${jobId ?? occludableId ?? "0"}/?trk=foo`,
     footer = "",
+    footerState = "",
   } = opts;
+  // A dateless card (Viewed/Promoted) renders no <time> at all — that absence is
+  // exactly what the parser reads as "no posting date".
+  const time = posted || datetime
+    ? `<li><time${datetime ? ` datetime="${datetime}"` : ""}>${posted}</time></li>`
+    : "";
   return `
     <li ${occludableId ? `data-occludable-job-id="${occludableId}"` : ""}>
       <div class="job-card-container" ${jobId ? `data-job-id="${jobId}"` : ""}>
@@ -42,7 +51,8 @@ function cardHtml(opts: {
         <div class="artdeco-entity-lockup__subtitle">${company}</div>
         <div class="artdeco-entity-lockup__caption">${location}</div>
         <ul class="job-card-container__metadata-wrapper">
-          <li><time>${posted}</time></li>
+          ${time}
+          ${footerState ? `<li class="job-card-container__footer-job-state">${footerState}</li>` : ""}
           ${footer ? `<li class="job-card-container__footer-item">${footer}</li>` : ""}
         </ul>
       </div>
@@ -150,6 +160,69 @@ test("isReposted ignores the word 'reposted' in a description snippet — only t
 test("isReposted ignores the word 'reposted' in the title", () => {
   const [j] = parseJobCards(page([cardHtml({ jobId: "1", title: "Reposted Content Manager" })]));
   assert.equal(j!.isReposted, false);
+});
+
+// ── posting date and the footer's exclusive state (issue #48) ───────────
+
+test("the parser resolves the <time datetime> attribute to midnight UTC, day precision", () => {
+  const [j] = parseJobCards(
+    page([cardHtml({ jobId: "1", posted: "3 weeks ago", datetime: "2026-07-17" })]),
+  );
+  assert.equal(j!.postedAt, Date.UTC(2026, 6, 17));
+  assert.equal(j!.postedPrecision, "day");
+  assert.equal(j!.postedText, "3 weeks ago"); // the words are kept unchanged
+  assert.equal(j!.linkedInStatus, "posted");
+});
+
+test("a card with a phrase but no datetime attribute leaves postedAt for stampJobs (null, no precision)", () => {
+  // The parser holds no clock, so it cannot turn "3 weeks ago" into a date on its
+  // own — it leaves postedAt null and stampJobs fills it from foundAt.
+  const [j] = parseJobCards(page([cardHtml({ jobId: "1", posted: "3 weeks ago" })]));
+  assert.equal(j!.postedAt, null);
+  assert.equal(j!.postedPrecision, null);
+  assert.equal(j!.linkedInStatus, "posted");
+});
+
+test("a Viewed card carries no date and reads its status from the named footer slot", () => {
+  const [j] = parseJobCards(
+    page([cardHtml({ jobId: "1", posted: "", footerState: "Viewed" })]),
+  );
+  assert.equal(j!.postedAt, null);
+  assert.equal(j!.postedPrecision, null);
+  assert.equal(j!.postedText, "");
+  assert.equal(j!.linkedInStatus, "viewed");
+});
+
+test("linkedInStatus reads Promoted and Applied from the footer, and falls back to the footer strip", () => {
+  const [promoted] = parseJobCards(
+    page([cardHtml({ jobId: "1", posted: "", footerState: "Promoted" })]),
+  );
+  assert.equal(promoted!.linkedInStatus, "promoted");
+  // Fallback: no named slot, the word only in the footer strip.
+  const [applied] = parseJobCards(page([cardHtml({ jobId: "2", posted: "", footer: "Applied" })]));
+  assert.equal(applied!.linkedInStatus, "applied");
+});
+
+test("a card with neither a date nor a readable state has linkedInStatus null", () => {
+  const [j] = parseJobCards(page([cardHtml({ jobId: "1", posted: "" })]));
+  assert.equal(j!.linkedInStatus, null);
+  assert.equal(j!.postedAt, null);
+});
+
+test("parsePostedAge takes the first number+unit, ignoring the visually-hidden suffix (issue #43)", () => {
+  const age = parsePostedAge("53 minutes ago Within the past 24 hours");
+  assert.deepEqual(age, { offsetMs: 53 * 60_000, precise: true });
+});
+
+test("parsePostedAge marks sub-day units precise and coarse units estimated by their midpoint", () => {
+  assert.deepEqual(parsePostedAge("6 hours ago"), { offsetMs: 6 * 3_600_000, precise: true });
+  // "3 weeks ago" spans 21–27 days → the 24-day midpoint, not precise.
+  assert.deepEqual(parsePostedAge("3 weeks ago"), { offsetMs: 24 * 86_400_000, precise: false });
+});
+
+test("parsePostedAge returns null for a non-English phrase rather than throwing", () => {
+  assert.equal(parsePostedAge("il y a 3 semaines"), null);
+  assert.equal(parsePostedAge("yesterday"), null);
 });
 
 test("url strips LinkedIn's tracking query (?trk=...) down to the canonical path", () => {
