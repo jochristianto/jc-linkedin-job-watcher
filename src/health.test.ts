@@ -50,6 +50,71 @@ test("classifyPage: a missing results list is structure-changed, not empty (§16
   assert.equal(classifyPage(signals({ hasResultsList: false, cardCount: 0 })), "structure-changed");
 });
 
+test("classifyPage: a missing list on the new results surface says so, not generic structure-changed", () => {
+  // LinkedIn moved this account off the classic /jobs/search/ surface onto its
+  // newer /jobs/search-results/ one, which the reader can't parse — a specific,
+  // actionable outcome rather than the shrug of `structure-changed` (issue #50).
+  assert.equal(
+    classifyPage(
+      signals({
+        finalUrl: "https://www.linkedin.com/jobs/search-results/?keywords=x",
+        hasResultsList: false,
+        cardCount: 0,
+      }),
+    ),
+    "search-moved",
+  );
+});
+
+test("classifyPage: a missing list still on /jobs/search/ stays the generic structure-changed (issue #50)", () => {
+  assert.equal(
+    classifyPage(
+      signals({
+        finalUrl: "https://www.linkedin.com/jobs/search/?keywords=x",
+        hasResultsList: false,
+        cardCount: 0,
+      }),
+    ),
+    "structure-changed",
+  );
+});
+
+test("classifyPage: login/challenge outrank the new-surface URL check (issue #50)", () => {
+  // A redirect to the authwall or a checkpoint must classify as logged-out /
+  // challenge even though its path is not /jobs/search/ — the URL check must not
+  // steal the account-safety signals.
+  assert.equal(
+    classifyPage(
+      signals({ finalUrl: "https://www.linkedin.com/authwall?trk=x", hasResultsList: false, cardCount: 0 }),
+    ),
+    "logged-out",
+  );
+  assert.equal(
+    classifyPage(
+      signals({
+        finalUrl: "https://www.linkedin.com/checkpoint/challenge/verify",
+        hasResultsList: false,
+        cardCount: 0,
+      }),
+    ),
+    "challenge",
+  );
+});
+
+test("reduceScanHealth: search-moved warns at once with the new-surface message (issue #50)", () => {
+  const r = reduceScanHealth(OK_HEALTH, "search-moved", backoff());
+  assert.equal(r.severity, "warn");
+  assert.equal(r.mode, "active");
+  assert.equal(r.consecutiveEmptyScans, 1);
+  assert.equal(r.notify, false); // soft: badge + banner, no desktop notification
+  assert.match(r.message ?? "", /new results page/i);
+});
+
+test("aggregateOutcome: search-moved outranks structure-changed but not logged-out (issue #50)", () => {
+  assert.equal(aggregateOutcome(["structure-changed", "search-moved"]), "search-moved");
+  assert.equal(aggregateOutcome(["search-moved", "logged-out"]), "logged-out");
+});
+
 // ── partial reads: the failure that used to be indistinguishable from `ok` ────
 
 test("classifyPage: reading 11 of 25 declared slots is partial, not ok", () => {

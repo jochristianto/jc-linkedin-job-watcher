@@ -31,6 +31,11 @@ import type { BackoffConfig } from "./schedule.ts";
  *                         supposed to prevent, so it is never reported as `ok`.
  * - `structure-changed` — the results list itself was absent. Selectors are dead
  *                         — LinkedIn moved the DOM (PRD §12), not an empty search.
+ * - `search-moved`      — the results list was absent *and* the tab did not land
+ *                         on the classic `/jobs/search/` surface: LinkedIn moved
+ *                         this account onto its newer `/jobs/search-results/` page
+ *                         (PRD §16, issue #50 / #47), which the reader can't parse
+ *                         yet. A specific, nameable cause of `structure-changed`.
  * - `logged-out`        — the tab landed on a login wall / authwall (failure 1).
  * - `challenge`         — landed on a checkpoint / captcha / verification page
  *                         (failure 2). The most dangerous for the account.
@@ -42,6 +47,7 @@ export type PageOutcome =
   | "empty"
   | "partial"
   | "structure-changed"
+  | "search-moved"
   | "logged-out"
   | "challenge"
   | "load-failed";
@@ -128,7 +134,15 @@ export function classifyPage(s: PageSignals): PageOutcome {
   ) {
     return "logged-out";
   }
-  if (!s.hasResultsList) return "structure-changed";
+  if (!s.hasResultsList) {
+    // Same broken outcome, but a nameable cause when we can point to it: a tab
+    // that ended anywhere other than the classic `/jobs/search/` surface was
+    // moved onto LinkedIn's newer results page, which the reader can't parse yet
+    // (issue #50 / #47). Ranked below logged-out/challenge above, so this URL
+    // check can never outrank an account-safety signal.
+    if (!url.includes("/jobs/search/")) return "search-moved";
+    return "structure-changed";
+  }
   if (s.cardCount === 0) return "empty";
   if (isPartialRead(s)) return "partial";
   return "ok";
@@ -145,8 +159,11 @@ const RANK: Record<PageOutcome, number> = {
   // that loaded and was only half-read drops postings on every single cycle.
   partial: 3,
   "structure-changed": 4,
-  "logged-out": 5,
-  challenge: 6,
+  // Above structure-changed: same amber severity, but when a cycle has both, the
+  // specific "moved to the new surface" message is the one worth showing (#50).
+  "search-moved": 5,
+  "logged-out": 6,
+  challenge: 7,
 };
 
 /**
@@ -218,6 +235,9 @@ export const OK_HEALTH: HealthState = {
  * - `structure-changed`→ a dead selector is unambiguous, so warn **immediately**
  *                        (amber), no threshold wait (§16.3). Still counts toward
  *                        the empty-scan back-off.
+ * - `search-moved`     → same as structure-changed, but with the specific message
+ *                        that LinkedIn moved the account to its new results page
+ *                        (§16, issue #50) — actionable, not a shrug.
  * - `empty`            → could just be a quiet search, so it only warns once it
  *                        has repeated `emptyScansBeforeBackoff` times (§16.3 /
  *                        §15.6). Increments the counter.
@@ -255,6 +275,20 @@ export function reduceScanHealth(
         severity: "warn",
         consecutiveEmptyScans: n,
         message: "No job list on the page — LinkedIn may have changed its layout. Reading may be broken.",
+        notify: false,
+      };
+    }
+    case "search-moved": {
+      // A named structure-changed: warn at once and feed the same back-off
+      // counter, but say *why* the page can't be read — LinkedIn moved this
+      // account onto its newer results surface, unsupported for now (#50 / #47).
+      const n = prior.consecutiveEmptyScans + 1;
+      return {
+        mode: "active",
+        severity: "warn",
+        consecutiveEmptyScans: n,
+        message:
+          "LinkedIn moved your search to its new results page, which this extension cannot read yet.",
         notify: false,
       };
     }
