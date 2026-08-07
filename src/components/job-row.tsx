@@ -208,6 +208,38 @@ export function JobRow({
   // the hide filter never appear together.
   const reposted = job.isReposted;
 
+  // The posting-age slot renders exactly one of three things, in priority order:
+  // the live date; a `Seen on LinkedIn` chip when LinkedIn withheld the date
+  // because the posting was opened *somewhere*, including directly on LinkedIn
+  // outside this extension; or the legacy frozen phrase. All three are the one
+  // slot — a viewed card carries no `postedAt` by construction, so they are
+  // mutually exclusive — and an if/else chain reads that more plainly than a
+  // nested ternary. `Seen on LinkedIn` is the only signal we have ever had about
+  // browsing that happened without us, and it was thrown away until now; it is a
+  // fact about the posting, not beside the title with `Blocked`, which is a
+  // verdict on it.
+  let postedSlot: ReactNode = null;
+  if (hasDate) {
+    postedSlot = (
+      <span className="whitespace-nowrap" title={ageHover}>
+        Posted {ageTilde}
+        {age}
+      </span>
+    );
+  } else if (seen) {
+    postedSlot = (
+      <Chip
+        className="bg-muted"
+        title="LinkedIn withheld the posting date because this job has already been opened — anywhere, including on LinkedIn itself"
+      >
+        <Footprints className="size-2.5 shrink-0" aria-hidden="true" />
+        Seen on LinkedIn
+      </Chip>
+    );
+  } else if (frozen) {
+    postedSlot = <span className="whitespace-nowrap">Posted {frozen} ago</span>;
+  }
+
   // Read and blocked both grey the row, so the row says which one it is.
   const dimmed = job.read || job.blocked;
   // The dot means "you have not looked at this one", so clicking through to the
@@ -368,33 +400,10 @@ export function JobRow({
             {job.watchName && (
               <Chip className="border bg-card">{job.watchName}</Chip>
             )}
-            {/* The posting-age slot: the date, or — when LinkedIn withheld it
-                because the posting was opened *somewhere*, including directly on
-                LinkedIn outside this extension — a `Seen on LinkedIn` chip, or
-                the legacy frozen phrase. All three are the one slot: a viewed
-                card carries no `postedAt` by construction, so they are mutually
-                exclusive. `Seen on LinkedIn` is the only signal we have ever had
-                about browsing that happened without us, and it was thrown away
-                until now; it is a fact about the posting, not beside the title
-                with `Blocked`, which is a verdict on it. */}
-            {hasDate ? (
-              <span className="whitespace-nowrap" title={ageHover}>
-                Posted {ageTilde}
-                {age}
-              </span>
-            ) : seen ? (
-              <Chip
-                className="bg-muted"
-                title="LinkedIn withheld the posting date because this job has already been opened — anywhere, including on LinkedIn itself"
-              >
-                <Footprints className="size-2.5 shrink-0" aria-hidden="true" />
-                Seen on LinkedIn
-              </Chip>
-            ) : (
-              frozen && (
-                <span className="whitespace-nowrap">Posted {frozen} ago</span>
-              )
-            )}
+            {/* The posting-age slot (date / `Seen on LinkedIn` / frozen phrase),
+                built above where the three mutually-exclusive cases read as an
+                if/else chain rather than a nested ternary. */}
+            {postedSlot}
             {/* Immediately after whatever the posting-age slot holds — the date,
                 or `Seen on LinkedIn` when LinkedIn withheld it, or nothing on a
                 bare card — and ahead of `Found …`. The date and the repost are
