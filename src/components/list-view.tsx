@@ -34,6 +34,7 @@ import {
   type ScanNowResponse,
   type SetEnabledRequest,
 } from "@/scan.ts";
+import { badgeSeverityWithFieldBreak } from "@/health.ts";
 import * as storage from "@/storage.ts";
 import {
   appliedPushNotice,
@@ -139,13 +140,12 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
       storage.get("fieldHealth"),
     ]);
     const blocked = settings.blockedCompanies.map((b) => b.normalized);
-    // A field break bumps an otherwise-ok badge to amber, matching the background's
-    // updateBadge (issue #52); it never overrides a hard red.
-    const severity =
-      health.severity === "ok" && fieldHealth.message !== null ? "warn" : health.severity;
+    // A field break bumps an otherwise-ok badge to amber, never overriding a hard
+    // red (issue #52). Same helper the background's updateBadge uses, so the two
+    // can't drift apart.
     const { text, color } = badgeFor(
       unreadCount(Object.values(jobs), blocked, settings.hideReposted),
-      severity,
+      badgeSeverityWithFieldBreak(health.severity, fieldHealth),
     );
     await chrome.action.setBadgeText({ text });
     await chrome.action.setBadgeBackgroundColor({ color });

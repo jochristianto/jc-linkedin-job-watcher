@@ -515,6 +515,20 @@ export function reduceFieldHealth(
   return { brokenFields: broken, message };
 }
 
+/**
+ * Fold a field break into a badge severity (issue #52). A field break is a
+ * separate axis, so it bumps an otherwise-`ok` badge to amber but never overrides
+ * a hard red — a challenge outranks a dead selector. Shared by both badge painters
+ * (the background after a cycle, the list view after a local read/block) so the
+ * two can't drift apart, the same reason `badgeFor` is shared.
+ */
+export function badgeSeverityWithFieldBreak(
+  severity: Severity,
+  fieldHealth: FieldHealthState,
+): Severity {
+  return severity === "ok" && fieldHealth.message !== null ? "warn" : severity;
+}
+
 /** The persisted push-failure record (`'pushHealth'` storage key, PRD §16.7). Kept
  *  apart from the scan {@link HealthState} because push failures are independent of
  *  scan health — a scan can read fine while a wrong chat id silently drops every

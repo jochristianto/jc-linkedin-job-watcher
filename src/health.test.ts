@@ -9,6 +9,7 @@ import {
   fieldReadCounts,
   aggregateFieldCounts,
   reduceFieldHealth,
+  badgeSeverityWithFieldBreak,
   reducePushHealth,
   isLockStale,
   OK_HEALTH,
@@ -17,6 +18,7 @@ import {
   type PageSignals,
   type HealthState,
   type FieldReadCounts,
+  type FieldHealthState,
 } from "./health.ts";
 import type { BackoffConfig } from "./schedule.ts";
 
@@ -477,4 +479,12 @@ test("aggregateFieldCounts: sums a cycle's per-page counts; an empty cycle is al
     url: 50,
     dateOrLabel: 50,
   });
+});
+
+test("badgeSeverityWithFieldBreak: a field break raises ok to amber but never overrides a hard red", () => {
+  const broken: FieldHealthState = { brokenFields: ["company"], message: "…" };
+  assert.equal(badgeSeverityWithFieldBreak("ok", broken), "warn");
+  assert.equal(badgeSeverityWithFieldBreak("error", broken), "error"); // red outranks it
+  assert.equal(badgeSeverityWithFieldBreak("warn", broken), "warn");
+  assert.equal(badgeSeverityWithFieldBreak("ok", OK_FIELD_HEALTH), "ok"); // no break, no bump
 });

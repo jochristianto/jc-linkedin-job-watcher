@@ -48,6 +48,7 @@ import {
   NO_FIELD_READS,
   aggregateFieldCounts,
   aggregateOutcome,
+  badgeSeverityWithFieldBreak,
   classifyPage,
   reduceFieldHealth,
   reducePushHealth,
@@ -163,11 +164,10 @@ async function updateBadge(severity: Severity): Promise<void> {
     get("settings"),
     get("fieldHealth"),
   ]);
-  const effective: Severity = severity === "ok" && fieldHealth.message !== null ? "warn" : severity;
   const blocked = settings.blockedCompanies.map((b) => b.normalized);
   const { text, color } = badgeFor(
     unreadCount(jobs, blocked, settings.hideReposted),
-    effective,
+    badgeSeverityWithFieldBreak(severity, fieldHealth),
   );
   await chrome.action.setBadgeText({ text });
   await chrome.action.setBadgeBackgroundColor({ color });
