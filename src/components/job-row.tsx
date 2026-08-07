@@ -184,14 +184,14 @@ export function JobRow({
   //    records saved before #48 have no `postedAt` and age out within 30 days.
   //  - Nothing → nothing.
   const seen = job.linkedInStatus === "viewed";
-  const hasDate = job.postedAt != null;
-  const age = hasDate ? postedAge(job.postedAt as number, now) : "";
+  const postedAt = job.postedAt;
+  const hasDate = postedAt != null;
+  const age = postedAt != null ? postedAge(postedAt, now) : "";
   // Only "estimated" earns the tilde; "exact" and "day" are both true at the
   // resolution the row shows them, so marking them apart would be noise.
   const ageTilde = job.postedPrecision === "estimated" ? "~" : "";
-  const ageHover = hasDate
-    ? postedHover(job.postedAt as number, job.postedPrecision)
-    : undefined;
+  const ageHover =
+    postedAt != null ? postedHover(postedAt, job.postedPrecision) : undefined;
   const frozen = !hasDate && !seen ? shortAge(job.postedText) : "";
 
   // Read and blocked both grey the row, so the row says which one it is.
