@@ -33,6 +33,15 @@ export type JobView = {
    *  `Seen on LinkedIn` chip, the only signal the extension has ever had that the
    *  posting was opened somewhere — including directly on LinkedIn — without it. */
   linkedInStatus: LinkedInStatus;
+  /** LinkedIn marked this card `Reposted` (`Job.isReposted`) — the employer
+   *  re-listed the role, which often means nobody took the first listing. A
+   *  derived view of the stored flag, not a new stored field: `view.ts` simply
+   *  stops dropping it. Read as `=== true` (records written before the flag
+   *  existed have it absent, and absent means "no marker seen", not "reposted"),
+   *  so this is always a real boolean. The row shows it as the amber `Reposted`
+   *  chip; with `hideReposted` on the row never renders, so the chip and the hide
+   *  filter never appear together. */
+  isReposted: boolean;
   watchName: string;
   url: string;
   /** When *your watcher* first saw this posting (`Job.foundAt`), as an epoch ms.

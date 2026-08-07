@@ -6,6 +6,7 @@ import {
   EyeOffIcon,
   Footprints,
   History,
+  RefreshCw,
 } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
 
@@ -95,21 +96,27 @@ function monoStyle(company: string, unread: boolean): CSSProperties {
   };
 }
 
-/** One chip in the meta line: same shape, different fills. */
+/** One chip in the meta line: same shape, different fills. `ariaLabel` is for the
+ *  chips whose visible word does not stand on its own — `Reposted` reads as jargon
+ *  without the sentence its `title` carries, and a `title` alone gives a `<span>`
+ *  no accessible name — so the full name is spelled out for the screen reader. */
 function Chip({
   children,
   className,
   style,
   title,
+  ariaLabel,
 }: {
   children: ReactNode;
   className?: string;
   style?: CSSProperties;
   title?: string;
+  ariaLabel?: string;
 }) {
   return (
     <span
       title={title}
+      aria-label={ariaLabel}
       style={style}
       className={cn(
         "inline-flex items-center gap-1 rounded-full px-[7px] py-px whitespace-nowrap",
@@ -193,6 +200,45 @@ export function JobRow({
   const ageHover =
     postedAt != null ? postedHover(postedAt, job.postedPrecision) : undefined;
   const frozen = !hasDate && !seen ? shortAge(job.postedText) : "";
+  // The `Reposted` marker (issue #53): the flag has been parsed and stored since
+  // the beginning and only ever fed the hide filter — this shows it. It sits with
+  // the posting-age slot below, a fact about the posting's history, ahead of the
+  // watcher's own `Found …`. Already `=== true` in `toJobView`, so this is a
+  // plain boolean; with `hideReposted` on the row never renders, so the chip and
+  // the hide filter never appear together.
+  const reposted = job.isReposted;
+
+  // The posting-age slot renders exactly one of three things, in priority order:
+  // the live date; a `Seen on LinkedIn` chip when LinkedIn withheld the date
+  // because the posting was opened *somewhere*, including directly on LinkedIn
+  // outside this extension; or the legacy frozen phrase. All three are the one
+  // slot — a viewed card carries no `postedAt` by construction, so they are
+  // mutually exclusive — and an if/else chain reads that more plainly than a
+  // nested ternary. `Seen on LinkedIn` is the only signal we have ever had about
+  // browsing that happened without us, and it was thrown away until now; it is a
+  // fact about the posting, not beside the title with `Blocked`, which is a
+  // verdict on it.
+  let postedSlot: ReactNode = null;
+  if (hasDate) {
+    postedSlot = (
+      <span className="whitespace-nowrap" title={ageHover}>
+        Posted {ageTilde}
+        {age}
+      </span>
+    );
+  } else if (seen) {
+    postedSlot = (
+      <Chip
+        className="bg-muted"
+        title="LinkedIn withheld the posting date because this job has already been opened — anywhere, including on LinkedIn itself"
+      >
+        <Footprints className="size-2.5 shrink-0" aria-hidden="true" />
+        Seen on LinkedIn
+      </Chip>
+    );
+  } else if (frozen) {
+    postedSlot = <span className="whitespace-nowrap">Posted {frozen} ago</span>;
+  }
 
   // Read and blocked both grey the row, so the row says which one it is.
   const dimmed = job.read || job.blocked;
@@ -354,15 +400,34 @@ export function JobRow({
             {job.watchName && (
               <Chip className="border bg-card">{job.watchName}</Chip>
             )}
-            {hasDate ? (
-              <span className="whitespace-nowrap" title={ageHover}>
-                Posted {ageTilde}
-                {age}
-              </span>
-            ) : (
-              frozen && (
-                <span className="whitespace-nowrap">Posted {frozen} ago</span>
-              )
+            {/* The posting-age slot (date / `Seen on LinkedIn` / frozen phrase),
+                built above where the three mutually-exclusive cases read as an
+                if/else chain rather than a nested ternary. */}
+            {postedSlot}
+            {/* Immediately after whatever the posting-age slot holds — the date,
+                or `Seen on LinkedIn` when LinkedIn withheld it, or nothing on a
+                bare card — and ahead of `Found …`. The date and the repost are
+                both facts about the posting's own history; `Found …` is a fact
+                about the watcher, so the line groups them that way. Amber, not
+                grey: a reposted job is often one nobody took, so the colour is
+                what makes those rows findable while skimming, not only when read.
+                The full word on both surfaces — the popup wraps the line rather
+                than abbreviating, so the tab and the popup never say different
+                words for the same fact (issue #53). */}
+            {reposted && (
+              <Chip
+                className="border font-medium"
+                title="Re-listed by the employer — the role may be stale or never filled"
+                ariaLabel="Reposted — re-listed by the employer, the role may be stale or never filled"
+                style={{
+                  background: "var(--warn-weak)",
+                  borderColor: "color-mix(in oklab, var(--warning) 34%, transparent)",
+                  color: "var(--warn)",
+                }}
+              >
+                <RefreshCw className="size-2.5 shrink-0" aria-hidden="true" />
+                Reposted
+              </Chip>
             )}
             <span
               title="When your watcher picked it up"
@@ -378,23 +443,6 @@ export function JobRow({
                   aria-hidden="true"
                 />
                 Opened
-              </Chip>
-            )}
-            {/* LinkedIn withheld the date because the posting was opened
-                *somewhere* — including directly on LinkedIn, outside this
-                extension. That is the only signal we have ever had about
-                browsing that happened without us, and it was thrown away until
-                now. It sits with the other chips as a fact about the posting,
-                not beside the title with `Blocked`, which is a verdict on it.
-                It reads next to `Opened` on a row that earns both: "I opened
-                this from here" plus "LinkedIn agrees". */}
-            {seen && (
-              <Chip
-                className="bg-muted"
-                title="LinkedIn withheld the posting date because this job has already been opened — anywhere, including on LinkedIn itself"
-              >
-                <Footprints className="size-2.5 shrink-0" aria-hidden="true" />
-                Seen on LinkedIn
               </Chip>
             )}
           </span>
