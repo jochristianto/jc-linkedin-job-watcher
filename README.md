@@ -292,22 +292,49 @@ room for them — so a file is safe to email to yourself or drop in a synced fol
 Note that job records _do_ carry any notes you typed against "Did you apply for
 this job?".
 
-**Import a file** is a **restore, not a merge**: what the file says becomes the
-state, and anything not in the file is removed. That is deliberate — a merge could
-never be used to get rid of the entry you took the backup to get rid of. The file
-is checked in full before anything is written, so a damaged or foreign file is
-refused with a message naming the problem rather than half-applying. It asks
-before replacing anything, and tells you what is in the file first. There is no
-undo.
+**Import a file** shows you what it would change before it changes anything. The
+file is checked in full first, so a damaged or foreign one is refused with a
+message naming the problem rather than half-applying — and once it is read, a short
+wizard walks you through what applying it would actually do. Nothing is written
+until the last screen.
 
-The Telegram credentials saved in _this_ browser are kept across an import, since
-the file cannot contain any. One consequence worth knowing: restoring onto a fresh
-browser can leave the Telegram switch on with no token behind it — pushes are
-skipped and the Notifications section says so.
+The first screen is the choice:
+
+- **Merge it in** — add what the file has and keep what you have. Nothing here is
+  removed. A watch you renamed keeps its name, a company you blocked yesterday
+  stays blocked, and a job you have already opened or applied to stays that way,
+  whichever side of the merge says so. If both sides have a note against the same
+  job, both notes are kept.
+- **Replace everything** — make this browser match the file exactly. Anything not
+  in the file goes. That mode exists precisely because a merge can never get rid of
+  the entry you took the backup to get rid of, and it is the one with no undo.
+
+The screens after it are only the ones with something to say, so a file that
+changes nothing is two screens rather than five:
+
+| | |
+| --- | --- |
+| **Settings** | Only the settings you and the file disagree about, both values side by side, each on a switch set to yours. Tick one over to take the file's instead. Your watches and both blocklists are not here — those merge on their own, because keeping both sides needs no decision. Merge only; replacing takes every setting from the file by definition. |
+| **Watches and filters** | What is added, what is already here, and — replacing only — what is removed, named. Click a line to see which ones. |
+| **Job history** | The same for job records and seen IDs, plus how many jobs are already here but further along in the file. |
+| **Ready to…** | One sentence saying exactly what the button is about to do. |
+
+Two watches pointing at the same LinkedIn search count as one, even when the two
+browsers generated different internal IDs for them — otherwise every merge would
+duplicate every watch.
+
+The Telegram credentials saved in _this_ browser are kept across an import, merge
+or replace, since the file cannot contain any. One consequence worth knowing:
+restoring onto a fresh browser can leave the Telegram switch on with no token
+behind it — pushes are skipped and the Notifications section says so.
 
 Like **Delete all job history**, importing is unavailable while a round is
 running, and for the same reason: it rewrites the seen IDs a round in flight is
-about to compare against. Wait for the round to finish.
+about to compare against. If a round starts while the wizard is open, the last
+screen says so and the button is unavailable until it finishes. The counts you are
+shown are recomputed against live storage at the moment of the write, so anything
+that landed while you were reading — a round finishing, a company blocked from a
+job row — survives a merge rather than being quietly overwritten.
 
 ### Diagnostics
 

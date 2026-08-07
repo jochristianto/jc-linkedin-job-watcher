@@ -1,10 +1,12 @@
 // Backup — exporting the whole configuration to a JSON file, and reading one
 // back. The pure half (§14): what goes in the file, what the file is allowed to
-// contain, and what importing one turns the stored keys into. No chrome.*, no
-// DOM, no clock read (the caller passes `exportedAt`), so `node --test` proves
-// every rule here with plain values. The two thin wrappers are the Backup card in
+// contain, and what a restore turns the stored keys into. No chrome.*, no DOM, no
+// clock read (the caller passes `exportedAt`), so `node --test` proves every rule
+// here with plain values. The thin wrappers are the Backup card in
 // `options-page.tsx` (which downloads and reads files) and the `LJW_IMPORT`
-// handler in `background.ts` (which holds the scan lock and writes the keys).
+// handler in `background.ts` (which holds the scan lock and writes the keys); the
+// wizard between them lives in `import-plan.ts`, which owns everything about what
+// applying a file would *do*.
 //
 // Three rules shape the whole module:
 //
@@ -21,10 +23,16 @@
 //      A half-restored install — new watches against old seen ids — is the one
 //      outcome worse than a failed import, because nothing tells you it happened.
 //
-//   3. **Replace, don't merge.** An import is a restore: what the file says
-//      becomes the state. Merging blocklists and watches sounds friendlier right
-//      up to the point where you cannot use a backup to *remove* the entry you
-//      took the backup to get rid of.
+//   3. **Both ways, and you are shown the difference first.** This rule used to
+//      read "replace, don't merge", and half of it still holds: Replace survives
+//      untouched, because a merge can never be used to *remove* the entry you took
+//      the backup to get rid of, and that is a job only Replace can do. What
+//      changed (PRD §20) is that neither mode happens sight-unseen. `import-plan.ts`
+//      computes what each would produce against what is actually stored, the wizard
+//      shows it as counts you can open up, and the worker recomputes the same plan
+//      under the scan lock before it writes a key. The rule underneath is the one
+//      that survived intact: an import is a *decision*, and a decision you cannot
+//      see is not one.
 
 import { z } from "zod";
 import type { JobsMap, UiState } from "./storage.ts";
@@ -320,8 +328,8 @@ export function restoredSettings(exported: ExportedSettings, current: Settings):
  * Point the view state at things that still exist.
  *
  * `ui` is not in the file — it is about this browser's current moment, not about
- * the configuration — but a wholesale replacement of `watches` and `jobs` can
- * leave it pointing at neither. A dangling `activeWatchId` shows the list filtered
+ * the configuration — but a replacement of `watches` and `jobs` can leave it
+ * pointing at neither. A dangling `activeWatchId` shows the list filtered
  * to a chip that is no longer there, which reads as "the import lost my jobs"; a
  * dangling `pendingApplyId` leaves "Did you apply for this job?" hanging over a
  * record that no longer exists, the same reason `clearHistory` nulls it.
@@ -370,9 +378,10 @@ function count(n: number, singular: string, plural = `${singular}s`): string {
  * A backup's contents said out loud: `"4 watches, 12 blocked companies, 128 jobs
  * and 4,301 seen ids"`.
  *
- * The import dialog asks you to replace everything you have, and "replace your
- * settings?" asks you to confirm against a quantity you have not been told. Empty
- * categories are left out rather than reported as `0`, the same rule
+ * What is in the *file*, said before anything is compared to it — the first thing
+ * the import wizard shows, next to the date the file was exported, so you can tell
+ * you picked the right one before you start reading about what it would change.
+ * Empty categories are left out rather than reported as `0`, the same rule
  * `historyPhrase` follows, so the sentence only mentions things that are actually
  * in the file.
  */
@@ -393,26 +402,15 @@ export function backupPhrase(counts: BackupCounts): string {
   return parts.length === 0 ? last : `${parts.join(", ")} and ${last}`;
 }
 
-// ── The page asking the worker to import ─────────────────────────────────────
-
-/**
- * The options page handing a validated file to the worker.
- *
- * It goes through the worker for the reason "Delete all job history" does: an
- * import writes `seen` and `jobs`, and the scan lock is what serialises access to
- * those two keys. A page that wrote them itself could land inside a cycle's
- * read-dedupe-write tail and have the imported ids overwritten by the cycle's —
- * which would silently re-announce every restored posting. Only the worker holds
- * the lock.
- *
- * The whole validated file travels rather than a filename: parsing happens on the
- * page, where the file was read and where an error has somewhere to be shown, so
- * the worker only ever receives something already known to be well-formed.
- */
-export type ImportBackupRequest = { type: "LJW_IMPORT"; backup: BackupFile };
-
-/** What was imported, or why nothing was. `scanning` is the one refusal, and it
- *  is the honest answer rather than an import that half-survives a cycle. */
-export type ImportBackupResponse =
-  | { imported: true; counts: BackupCounts }
-  | { imported: false; reason: "scanning" | "failed" };
+// The `LJW_IMPORT` message the page sends the worker used to live here. It moved
+// to `import-plan.ts` when it grew a mode and a set of ticked rows: those are that
+// module's types, and a request carrying them belongs beside them. What has not
+// changed is why the message exists at all — an import writes `seen` and `jobs`,
+// the scan lock is what serialises access to those two keys, and only the worker
+// holds it. A page that wrote them itself could land inside a cycle's
+// read-dedupe-write tail and have the imported ids overwritten by the cycle's,
+// silently re-announcing every restored posting.
+//
+// Parsing still happens on the page, where the file was read and where an error has
+// somewhere to be shown, so the worker only ever receives a `BackupFile` already
+// known to be well-formed.

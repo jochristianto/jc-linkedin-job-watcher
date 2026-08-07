@@ -12,7 +12,7 @@ may not publish it as an extension or sell it.
 ```bash
 nvm use        # optional, picks up .nvmrc → Node v24.18.0
 npm install
-npm test       # 507 unit tests, no browser needed
+npm test       # 732 unit tests, no browser needed
 npm run build  # → dist/
 ```
 
@@ -50,7 +50,7 @@ checkable by `npm test` without a browser.
 
 | | |
 | --- | --- |
-| **Pure & tested** | [parse.ts](src/parse.ts) · [filter.ts](src/filter.ts) · [dedupe.ts](src/dedupe.ts) · [schedule.ts](src/schedule.ts) · [health.ts](src/health.ts) · [lifecycle.ts](src/lifecycle.ts) · [scan.ts](src/scan.ts) · [view.ts](src/view.ts) · [view-model.ts](src/view-model.ts) · [gc.ts](src/gc.ts) · [options-form.ts](src/options-form.ts) · [settings-view.ts](src/settings-view.ts) · [push.ts](src/push.ts) · [notify.ts](src/notify.ts) |
+| **Pure & tested** | [parse.ts](src/parse.ts) · [filter.ts](src/filter.ts) · [dedupe.ts](src/dedupe.ts) · [schedule.ts](src/schedule.ts) · [health.ts](src/health.ts) · [lifecycle.ts](src/lifecycle.ts) · [scan.ts](src/scan.ts) · [view.ts](src/view.ts) · [view-model.ts](src/view-model.ts) · [gc.ts](src/gc.ts) · [options-form.ts](src/options-form.ts) · [settings-view.ts](src/settings-view.ts) · [backup.ts](src/backup.ts) · [import-plan.ts](src/import-plan.ts) · [push.ts](src/push.ts) · [notify.ts](src/notify.ts) |
 | **Side-effect wrappers** | [background.ts](src/background.ts) · [content.ts](src/content.ts) · [storage.ts](src/storage.ts) · [jobs-tab.ts](src/jobs-tab.ts) · [components/](src/components/) · [hooks/](src/hooks/) |
 
 In practice: if a function needs a `chrome.*` stub to be tested, it is on the

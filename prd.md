@@ -705,6 +705,7 @@ Every piece of **pure logic** — a function of its inputs, no `chrome.*`, no DO
 | Card parser — DOM → `Job` | 01 | Fixture-driven, see below |
 | What the list view shows — badge count, which empty state, which banner, the scan status, the applied record (§19) | 09/UI | **Done** — `src/view.ts` + `src/view-model.ts`, with their tests. `selectView` returns it all as data; the components only map it to JSX |
 | What the settings page derives — dirty sections, watch-URL chips, the header summary, the load estimate and its tier | UI | **Done** — `src/settings-view.ts` + `src/settings-view.test.ts`, above `options-form.ts`'s validation and storage round-trip |
+| What importing a backup would change, how merge and replace differ, and which screen the wizard is on (§20) | UI | **Done** — `src/import-plan.ts` + `src/import-plan.test.ts`, above `backup.ts`'s file shape and validation. `planImport` is called by both the preview and the write |
 | Notification text and when one is due | 06 | **Done** — `src/notify.ts` + `src/notify.test.ts` |
 
 That is the line. Anything that is *only* an orchestration of `chrome.*` calls (opening tabs, firing alarms, setting the badge) is **not** unit-tested — see "the untestable remainder".
@@ -1029,3 +1030,51 @@ Tapping the **Applied** tag deletes all three fields rather than setting `applie
 ### Structural consequence
 
 Per §14: `markJobApplied` and `clearJobApplied` are pure functions over the jobs map in `view.ts`, tested there; `buildAppliedMessage` is pure in `push.ts`. The components own only the two-step interaction, and the pending question id lives in the `ui` storage key beside the active chip and mode.
+
+---
+
+## 20. Importing a backup: the difference, then the choice
+
+An import used to be a blind overwrite. The file was validated, the scan lock taken, and `settings`, `seen` and `jobs` written wholesale — anything in this browser but not in the file was gone. The only thing you were told beforehand was what the **file** held ("4 watches, 12 blocked companies, 128 jobs…"), never what you were about to lose.
+
+The old rule behind that — *replace, don't merge* — was argued on one point that is still correct: **a merge can never be used to remove the entry you took the backup to get rid of.** So Replace survives, unchanged. What changed is that neither mode happens sight-unseen.
+
+### Two modes, chosen on the first screen
+
+**Merge** adds what the file has and keeps what is here. **Replace** makes this browser match the file exactly. Replace is not a legacy mode kept for compatibility; it is the only one that can remove anything, and it is the one with no undo.
+
+The wizard between them shows only the screens with something to say — a file that changes nothing is two screens, not five — because a wizard that makes you press Next past three empty screens teaches you to press Next without reading, which is the habit this whole feature exists to break. "1 watch already here" is context standing beside an addition, not a reason for a screen.
+
+Replace skips only the settings screen (there is nothing to tick when every value comes from the file). It keeps the list and history screens **even when all they hold is removals** — especially then, because the removals are the thing the old one-shot dialog never told anyone, and showing them is Replace's whole justification for surviving.
+
+### The merge rules, and why each one goes the way it does
+
+**A merge only ever adds.** Every list is a union, every timestamp collapses to the earlier one, and every "have you dealt with this" flag survives if either side has it set. That makes the merge *monotone*, which is what lets the wizard show a preview computed a minute ago: a round finishing in the meantime can only make the real result contain more.
+
+- **Watches** match on id and then on **what the URL searches for**, with the local watch kept verbatim. Watch ids are `crypto.randomUUID()`, generated where the watch was typed, so two browsers configured with the same LinkedIn search never share one — matching on id alone would duplicate every watch on every merge, which is the failure that makes a merge feature worse than no merge feature. The honest consequence is worth stating rather than hiding: **a merge cannot rename or re-enable a watch. That is what Replace is for.** When a file's watch is dropped in favour of a local one under a different id, the file's jobs are re-pointed at the surviving id — otherwise they arrive carrying a `watchId` nothing matches, which `selectView` degrades to a blank chip and which reads as "the import lost my jobs".
+- **Blocklists** union on the matching form, keeping the local spelling. A file's company entries are re-derived with `makeBlockedCompany` rather than trusted: §6 normalizes on *write* and an import is a write, and since the merge *matches* on `normalized`, deriving it is how it earns the right to compare on it.
+- **Jobs** resolve to whichever record is **further along**. If either side says opened, dismissed or applied, that sticks; timestamps take the earlier value, following §19's "first answer wins". Descriptive fields keep the local record's — swapping a title under a row the user is reading is churn with no benefit — with one exception: `postedAt` and `postedPrecision` move **together** to whichever side is more precise, because that pair is the one place there is an objective better, and taking the date from one side and the confidence from the other would be a lie.
+- **Notes are the one rule that does not pick a winner.** Two different notes against the same job are joined, this browser's first. A note is the only irreplaceable free text in the system; everything else a merge discards can be re-scanned, re-derived or re-typed in seconds. §19 already flags "undo takes the note with it" as its harsh edge, and losing one *silently*, inside an import that advertised itself as additive, would be strictly worse. Segments are de-duplicated, so re-importing the same file does not double a note.
+- **Seen ids** union taking the **earlier** `firstSeenAt`. `dedupe.ts` keeps the existing stamp instead, and that is not a contradiction: there, a scan can only ever propose `now`, so existing already *is* earlier. Across two independent histories that guarantee is gone, and earlier is right three times over — the field is called `firstSeenAt`; `collectGarbage` prunes at `firstSeenAt + seenDays`, so the later stamp would quietly renew a memory past its schedule; and the minimum makes the merge commutative.
+
+### Single-value settings are asked about, not decided
+
+Everything that is not a list gets a row — grouped, so it reads in plain words (quiet hours is one decision, not three numbers) and only when the two sides actually differ, which in practice is two or three rows. Both values are on screen at once, which is why the control is a two-item toggle rather than a checkbox: a checkbox has room for one label, and the point of the screen is to show you both.
+
+**Absent reads as "mine"**, the same absent-means-the-safe-thing idiom `manualOnly`, `notifyDesktop` and `applied` already use, so pressing through the wizard without touching anything produces a purely additive merge. The master switch is a normal row rather than a carve-out: the wizard's promise is that nothing is written that you did not see, and a silent carve-out breaks that promise in the direction you cannot notice.
+
+The Telegram bot token and chat id are never a row and never merged. The merged settings go through the existing `restoredSettings`, so §backup rule 1 — the two credentials never come from a file, and the ones in this browser are what an import keeps — is still enforced in exactly one function.
+
+### The page ships decisions, never a result
+
+The `LJW_IMPORT` message carries the validated file, the mode and the ticked rows. It does **not** carry the merged maps the page just previewed, and the worker re-reads all three keys under the scan lock and re-plans against them.
+
+This is not theoretical. A wizard takes minutes, and `settings` is written from outside the options page while it is open — the popup's master switch and a job row's Block button both write it. A merge computed on the page against a snapshot taken when the file was chosen would silently drop whatever landed in between.
+
+There is deliberately **no** compare-and-retry refusal. The merge is monotone, so a recomputed result can only contain more; refusing would make the user redo the wizard to protect against nothing. The consequence to accept is that the counts shown can be smaller than the counts written — so the response carries the **recomputed** counts and the status line reports what happened rather than what was promised. (Replace does wipe a mid-wizard round's jobs. That is what it advertises.)
+
+### Structural consequence
+
+Per §14, a new pure module: `src/import-plan.ts` + `src/import-plan.test.ts`. `backup.ts` answers "what is in the file, and is it valid?"; this one answers "what would applying it do, and what do I get asked?" — the same seam `options-form.ts` → `settings-view.ts` already cuts.
+
+`planImport(file, target, mode, choices)` is the **single entry point, called from both sides**: the options page previews with it and the worker writes with it. A preview computed by different code than the write is a preview that can lie; with one function the only thing that can drift is the *input*, and re-reading that under the lock is exactly what the worker does. Which screens exist, what each line says and what the confirm sentence reads are decided there too, so `src/components/import-preview.tsx` is props-only and holds no step state — the `selectView` pattern applied to a wizard.

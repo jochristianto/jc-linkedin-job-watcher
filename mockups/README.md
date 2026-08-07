@@ -160,6 +160,15 @@ production stylesheet, so the pages cannot drift. They stay committed and
 `file://`-openable, which is what the original decision was protecting.
 
 One exception: **`options.html`** is a live form over `chrome.storage` and cannot
-be rendered headlessly, so it shows only the two banners a healthy page never
-displays. Load the unpacked extension to see the real thing — or look at the
-screenshot in [the README](../README.md#settings).
+be rendered headlessly, so it shows the parts that take everything they display as
+props — the rail, the watch rows, the explainer and the import wizard — plus the
+two banners a healthy page never displays. Load the unpacked extension to see the
+real thing — or look at the screenshot in [the README](../README.md#settings).
+
+The import wizard is there in four of its five screens because PRD §20 made it
+worth looking at: it is what a backup import shows you *before* it writes anything.
+The pair worth comparing is the same list screen under each mode — merge naming
+what it would add, replace naming what it would take away. The dialog around it is
+a Radix portal and renders nothing headlessly, which is exactly why the body is a
+separate props-only component ([`import-preview.tsx`](../src/components/import-preview.tsx))
+over a pure decision layer ([`import-plan.ts`](../src/import-plan.ts)).

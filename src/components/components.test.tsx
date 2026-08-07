@@ -21,6 +21,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { ApplyNote, ApplyPrompt } from "./apply-prompt.tsx";
 import { EmptyState } from "./empty-state.tsx";
+import { ImportPreview } from "./import-preview.tsx";
 import { HowItWorks } from "./how-it-works.tsx";
 import { JobList } from "./job-list.tsx";
 import { JobRow } from "./job-row.tsx";
@@ -30,6 +31,15 @@ import { ScanStatusBar } from "./scan-status.tsx";
 import { Toolbar } from "./toolbar.tsx";
 import { TooltipProvider } from "./ui/tooltip";
 import { WatchList } from "./watch-list.tsx";
+import { buildBackup, type BackupFile } from "../backup.ts";
+import {
+  DETAIL_CAP,
+  importSteps,
+  planImport,
+  type ImportMode,
+  type ImportTarget,
+} from "../import-plan.ts";
+import { DEFAULT_SETTINGS, type Job, type Settings } from "../types.ts";
 import type { ChipWatch, EmptyKind, JobView } from "../view-model.ts";
 
 /** Render to static markup. Radix needs a TooltipProvider in scope for anything
@@ -1243,4 +1253,260 @@ test("WatchList offers the add form as the empty list's one thing to click", () 
   assert.match(h, /Add a watch/);
   // Closed until asked for — one form on the page, never two sets of fields.
   assert.doesNotMatch(h, /id="watch-form"/);
+});
+
+// ── ImportPreview ────────────────────────────────────────────────────────────
+//
+// The import wizard's body. Props-only and fully controlled, so every screen is
+// renderable here without a click, a file or a storage stub — which is the whole
+// reason the step list, the lines and the confirm sentence are decided in
+// `import-plan.ts` rather than inside the component.
+
+const IMPORT_NOW = Date.UTC(2026, 0, 10, 8, 0, 0);
+
+function importJob(over: Partial<Job> = {}): Job {
+  return {
+    id: "1",
+    title: "Staff Engineer",
+    company: "Acme Corp",
+    location: "Remote",
+    isReposted: false,
+    postedAt: null,
+    postedPrecision: null,
+    postedText: "2 hours ago",
+    linkedInStatus: null,
+    url: "https://www.linkedin.com/jobs/view/1/",
+    foundAt: IMPORT_NOW,
+    watchId: "w1",
+    opened: false,
+    openedAt: null,
+    read: false,
+    readAt: null,
+    ...over,
+  };
+}
+
+const importFile = (over: Partial<Settings> = {}): BackupFile =>
+  buildBackup({
+    settings: {
+      ...DEFAULT_SETTINGS,
+      watches: [
+        {
+          id: "wf",
+          name: "Rust, remote",
+          url: "https://www.linkedin.com/jobs/search/?keywords=rust",
+          enabled: true,
+        },
+      ],
+      blockedCompanies: [{ display: "Initech", normalized: "initech" }],
+      ...over,
+    },
+    seen: { "1": IMPORT_NOW },
+    jobs: { "1": importJob() },
+    exportedAt: IMPORT_NOW,
+    extensionVersion: "0.1.0",
+  });
+
+const importTarget = (over: Partial<ImportTarget> = {}): ImportTarget => ({
+  settings: {
+    ...DEFAULT_SETTINGS,
+    watches: [
+      {
+        id: "wm",
+        name: "Go, Indonesia",
+        url: "https://www.linkedin.com/jobs/search/?keywords=go",
+        enabled: true,
+      },
+    ],
+  },
+  seen: { old: IMPORT_NOW },
+  jobs: { old: importJob({ id: "old", title: "Old role", company: "Globex" }) },
+  ...over,
+});
+
+/** One wizard screen, rendered. Everything defaults to the common case — a merge,
+ *  no round running, nothing expanded — so each test states only its own subject. */
+function preview(
+  over: Partial<React.ComponentProps<typeof ImportPreview>> & {
+    mode?: ImportMode;
+    file?: BackupFile;
+    target?: ImportTarget;
+  } = {},
+): string {
+  const mode = over.mode ?? "merge";
+  const file = over.file ?? importFile();
+  const target = over.target ?? importTarget();
+  const choices = over.choices ?? {};
+  const plan = planImport(file, target, mode, choices);
+  const steps = over.steps ?? importSteps(plan.diff);
+  return html(
+    <ImportPreview
+      backup={file}
+      diff={over.diff ?? plan.diff}
+      steps={steps}
+      step={over.step ?? steps[0]!}
+      mode={mode}
+      choices={choices}
+      scanning={over.scanning ?? false}
+      expandDetail={over.expandDetail}
+      onMode={noop}
+      onChoose={noop}
+      onStep={noop}
+      onConfirm={noop}
+      onCancel={noop}
+    />,
+  );
+}
+
+test("ImportPreview renders one step at a time and says which", () => {
+  const onMode = preview({ step: "mode" });
+  assert.match(onMode, /data-step="mode"/);
+  // The mode cards, and nothing from the screens after them.
+  assert.doesNotMatch(onMode, /data-choice=/);
+  assert.doesNotMatch(onMode, /data-group=/);
+
+  const onLists = preview({ step: "lists" });
+  assert.match(onLists, /data-step="lists"/);
+  assert.doesNotMatch(onLists, /data-mode="merge"/);
+});
+
+test("ImportPreview offers both modes on the first step, each named in words", () => {
+  const h = preview({ step: "mode" });
+  assert.match(h, /data-mode="merge"/);
+  assert.match(h, /data-mode="replace"/);
+  // Spelled out, not left to the icon — the two differ in what they destroy.
+  assert.match(h, /Merge it in/);
+  assert.match(h, /Replace everything/);
+  assert.match(h, /aria-pressed="true"/);
+});
+
+test("the two modes wear different icons, and neither is one the page already uses", () => {
+  const h = preview({ step: "mode" });
+  assert.match(h, /lucide-git-merge/);
+  assert.match(h, /lucide-replace/);
+  // Two actions never share an icon — including across the Backup card, whose
+  // Export/Import/capture/delete controls are all one click away from this dialog.
+  for (const taken of [
+    /lucide-download/,
+    /lucide-upload/,
+    /lucide-camera/,
+    /lucide-eraser/,
+    /lucide-clock/,
+  ]) {
+    assert.doesNotMatch(h, taken);
+  }
+});
+
+test("the settings step shows BOTH values, in words, on every row", () => {
+  const target = importTarget({
+    settings: { ...DEFAULT_SETTINGS, intervalMinutes: 60, jitterMinutes: 30 },
+  });
+  const file = importFile({ intervalMinutes: 15, jitterMinutes: 5 });
+  const h = preview({ step: "settings", file, target });
+  assert.match(h, /data-choice="cadence"/);
+  assert.match(h, /Mine · Every 30–90 min/);
+  assert.match(h, /File · Every 10–20 min/);
+});
+
+test("a settings row left alone reads as mine, and says so in its pressed state", () => {
+  const target = importTarget({
+    settings: { ...DEFAULT_SETTINGS, intervalMinutes: 60 },
+  });
+  const h = preview({ step: "settings", file: importFile({ intervalMinutes: 15 }), target });
+  assert.match(h, /data-side="mine"[^>]*data-state="on"|data-state="on"[^>]*data-side="mine"/);
+  assert.doesNotMatch(h, /data-side="file"[^>]*data-state="on"|data-state="on"[^>]*data-side="file"/);
+});
+
+test("replace never renders the settings step — there is nothing to tick", () => {
+  const target = importTarget({
+    settings: { ...DEFAULT_SETTINGS, intervalMinutes: 60 },
+  });
+  const file = importFile({ intervalMinutes: 15 });
+  const plan = planImport(file, target, "replace", {});
+  assert.ok(!importSteps(plan.diff).includes("settings"));
+  assert.equal(plan.diff.settings.length, 0);
+});
+
+test("a line is a count until you open it, and then it is names", () => {
+  const closed = preview({ step: "lists" });
+  const open = preview({ step: "lists", expandDetail: true });
+  assert.match(closed, /aria-expanded="false"/);
+  assert.doesNotMatch(closed, /Rust, remote/);
+  assert.match(open, /aria-expanded="true"/);
+  assert.match(open, /Rust, remote/);
+});
+
+test("a line with more names than it shows says how many more, rather than truncating", () => {
+  const many: Record<string, Job> = {};
+  for (let i = 0; i < DETAIL_CAP + 7; i += 1) {
+    many[`j${i}`] = importJob({ id: `j${i}`, title: `Role ${i}` });
+  }
+  const file = buildBackup({
+    settings: { ...DEFAULT_SETTINGS },
+    seen: {},
+    jobs: many,
+    exportedAt: IMPORT_NOW,
+    extensionVersion: "0.1.0",
+  });
+  const h = preview({
+    step: "history",
+    file,
+    target: importTarget({ jobs: {} }),
+    expandDetail: true,
+  });
+  assert.match(h, /and 7 more/);
+});
+
+test("a bucket holding nothing is never a line — no zeroes on any screen", () => {
+  for (const step of ["mode", "lists", "history", "confirm"] as const) {
+    for (const mode of ["merge", "replace"] as const) {
+      const h = preview({ step, mode, steps: ["mode", "lists", "history", "confirm"] });
+      assert.doesNotMatch(h, /\b0 (watches|jobs|blocked|seen)/, `${mode}/${step}`);
+    }
+  }
+});
+
+test("only replace's confirm button is destructive, and only its sentence names removals", () => {
+  const replace = preview({ step: "confirm", mode: "replace" });
+  assert.match(replace, /id="import-confirm"/);
+  assert.match(replace, /bg-destructive/);
+  assert.match(replace, /will be removed/);
+  assert.match(replace, /Replace everything/);
+
+  const merge = preview({ step: "confirm", mode: "merge" });
+  assert.doesNotMatch(merge, /bg-destructive/);
+  assert.match(merge, /nothing is removed/);
+  assert.match(merge, /Merge the file in/);
+});
+
+test("Back is absent on the first step and present after it", () => {
+  assert.doesNotMatch(preview({ step: "mode" }), /id="import-back"/);
+  assert.match(preview({ step: "confirm" }), /id="import-back"/);
+});
+
+test("a round starting mid-wizard disables the write and says why", () => {
+  const h = preview({ step: "confirm", scanning: true });
+  assert.match(h, /id="import-confirm"[^>]*disabled/);
+  assert.match(h, /A round started while you were reading/);
+});
+
+test("nothing in the wizard falls back to an emoji or a bare glyph", () => {
+  // The same guard the list view carries, over every screen this dialog can show.
+  const markup = (["mode", "settings", "lists", "history", "confirm"] as const)
+    .flatMap((step) =>
+      (["merge", "replace"] as const).map((mode) =>
+        preview({
+          step,
+          mode,
+          steps: ["mode", "settings", "lists", "history", "confirm"],
+          file: importFile({ intervalMinutes: 15 }),
+          expandDetail: true,
+        }),
+      ),
+    )
+    .join("");
+  assert.doesNotMatch(
+    markup,
+    /[\u{2190}-\u{21FF}\u{2200}-\u{22FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{1F300}-\u{1FAFF}]/u,
+  );
 });

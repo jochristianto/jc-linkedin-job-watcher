@@ -21,6 +21,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { EmptyState } from "../src/components/empty-state.tsx";
 import { HealthBanner } from "../src/components/health-banner.tsx";
 import { HowItWorks } from "../src/components/how-it-works.tsx";
+import { ImportPreview } from "../src/components/import-preview.tsx";
 import { JobList } from "../src/components/job-list.tsx";
 import { HeaderMenu, ListHeader } from "../src/components/list-header.tsx";
 import { SettingsNav } from "../src/components/settings-nav.tsx";
@@ -35,6 +36,14 @@ import {
 import { ScanStatusBar } from "../src/components/scan-status.tsx";
 import { Toolbar } from "../src/components/toolbar.tsx";
 import { TooltipProvider } from "../src/components/ui/tooltip";
+import { buildBackup, type BackupFile } from "../src/backup.ts";
+import {
+  importSteps,
+  planImport,
+  type ImportMode,
+  type ImportStep,
+  type ImportTarget,
+} from "../src/import-plan.ts";
 import type {
   EmptyKind,
   JobView,
@@ -42,7 +51,7 @@ import type {
   ScanStatus,
   ViewVariant,
 } from "../src/view-model.ts";
-import type { Watch } from "../src/types.ts";
+import { DEFAULT_SETTINGS, type Job, type Watch } from "../src/types.ts";
 
 const root = resolve(import.meta.dirname, "..");
 const noop = () => {};
@@ -231,6 +240,96 @@ const MOCK_WATCHES: Watch[] = [
     url: "https://www.linkedin.com/jobs/search/?f_TPR=r86400&f_WT=2&geoId=102454443&keywords=Software%20Engineer&origin=JOB_SEARCH_PAGE",
   },
 ];
+
+/** A stored `Job`, as opposed to the `JobView` the list renders — the import
+ *  wizard compares records, not rows. */
+const MOCK_IMPORT_JOB: Job = {
+  id: "3901",
+  title: "Senior Software Engineer",
+  company: "Acme Corp",
+  location: "Jakarta, Indonesia (Hybrid)",
+  isReposted: false,
+  postedAt: hrsAgo(2),
+  postedPrecision: "exact",
+  postedText: "2 hours ago",
+  linkedInStatus: "posted",
+  url: "https://www.linkedin.com/jobs/view/3901/",
+  foundAt: minsAgo(41),
+  watchId: "w1",
+  opened: false,
+  openedAt: null,
+  read: false,
+  readAt: null,
+};
+
+/**
+ * A backup file and a browser to compare it against, rigged so the import wizard
+ * has something to say on every screen: one watch in common, one only in the file,
+ * one only here, a job that has been opened since the file was taken, and history
+ * on both sides.
+ */
+const MOCK_IMPORT_FILE: BackupFile = buildBackup({
+  settings: {
+    ...DEFAULT_SETTINGS,
+    intervalMinutes: 20,
+    jitterMinutes: 5,
+    watches: [MOCK_WATCHES[0]!, MOCK_WATCHES[1]!],
+    blockedCompanies: [
+      { display: "Initech", normalized: "initech" },
+      { display: "Globex", normalized: "globex" },
+    ],
+    blockedTitleKeywords: ["intern", "unpaid"],
+  },
+  seen: { "3901": NOW - 86_400_000, "3902": NOW - 43_200_000 },
+  jobs: {
+    "3901": MOCK_IMPORT_JOB,
+    "3902": { ...MOCK_IMPORT_JOB, id: "3902", title: "Backend Engineer", company: "Initech" },
+  },
+  exportedAt: NOW - 7 * 86_400_000,
+  extensionVersion: "0.1.0",
+});
+
+const MOCK_IMPORT_TARGET: ImportTarget = {
+  settings: {
+    ...DEFAULT_SETTINGS,
+    intervalMinutes: 60,
+    jitterMinutes: 30,
+    watches: [MOCK_WATCHES[0]!, MOCK_WATCHES[2]!],
+    blockedCompanies: [{ display: "Initech", normalized: "initech" }],
+    blockedTitleKeywords: ["intern"],
+  },
+  seen: { "3901": NOW - 86_400_000, "4100": NOW },
+  jobs: {
+    "3901": { ...MOCK_IMPORT_JOB, opened: true, openedAt: NOW - 3_600_000 },
+    "4100": { ...MOCK_IMPORT_JOB, id: "4100", title: "Platform Engineer", company: "Umbrella" },
+  },
+};
+
+/** One wizard screen, rendered inside the same card surface the dialog sits on.
+ *  The dialog itself is a Radix portal, which renders nothing without a DOM, so
+ *  the body is shown on its own — which is exactly what it was built to be. */
+function importStep(step: ImportStep, mode: ImportMode): string {
+  const plan = planImport(MOCK_IMPORT_FILE, MOCK_IMPORT_TARGET, mode, {});
+  return renderToStaticMarkup(
+    <div className="w-full max-w-lg rounded-lg border bg-background p-4 shadow-lg">
+      <ImportPreview
+        backup={MOCK_IMPORT_FILE}
+        diff={plan.diff}
+        steps={importSteps(plan.diff)}
+        step={step}
+        mode={mode}
+        choices={{}}
+        scanning={false}
+        expandDetail={step === "lists"}
+        onMode={noop}
+        onChoose={noop}
+        onStep={noop}
+        onConfirm={noop}
+        onCancel={noop}
+      />
+    </div>,
+  );
+}
 
 // ── Page shells ─────────────────────────────────────────────────────────────
 
@@ -497,9 +596,26 @@ const files: Record<string, string> = {
             <p className="text-sm text-muted-foreground">
               The rest of the form is live over <code>chrome.storage</code>, so
               it is not rendered here — load the unpacked extension and open
-              Options to see it. Its two transient banners are below, since
-              neither shows on a healthy first open.
+              Options to see it. Below: the import wizard, which the Backup
+              section opens over the page once a file has been read, then the two
+              transient banners, since neither shows on a healthy first open.
             </p>
+            {/* Four of the wizard's five screens, and the four worth looking at:
+                the choice itself, the same list screen under each mode — merge
+                naming what it would add, replace naming what it would take away —
+                and the sentence you read last. The dialog around them is a Radix
+                portal and renders nothing headlessly, which is exactly why the body
+                is a separate props-only component. */}
+            <div
+              className="flex flex-wrap items-start gap-4"
+              dangerouslySetInnerHTML={{
+                __html:
+                  importStep("mode", "merge") +
+                  importStep("lists", "merge") +
+                  importStep("lists", "replace") +
+                  importStep("confirm", "replace"),
+              }}
+            />
             <HealthBanner
               message="Telegram push has been failing — run Send test message"
               severity="warn"
