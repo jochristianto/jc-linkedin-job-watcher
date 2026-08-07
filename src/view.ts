@@ -44,6 +44,12 @@ function toJobView(job: Job, watches: Watch[], blockedNormalized: string[]): Job
     company: job.company,
     location: job.location,
     postedText: job.postedText,
+    // The live-age trio (issue #51): the row recomputes "Posted 3w ago" from
+    // `postedAt` against `now`, and `linkedInStatus: "viewed"` becomes the
+    // `Seen on LinkedIn` chip. All read straight through — the row decides how.
+    postedAt: job.postedAt,
+    postedPrecision: job.postedPrecision,
+    linkedInStatus: job.linkedInStatus,
     watchName: watch?.name ?? "",
     url: job.url,
     foundAt: job.foundAt,

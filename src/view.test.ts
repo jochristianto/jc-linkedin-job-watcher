@@ -56,6 +56,19 @@ test("toJobViews maps a Job to a JobView and resolves the watch name", () => {
   assert.equal(v!.opened, false);
 });
 
+test("toJobViews carries the live-age trio straight through (issue #51)", () => {
+  // The row derives "Posted 3w ago" and the "Seen on LinkedIn" chip from these,
+  // so they must reach the view unchanged — the mapping decides nothing.
+  const posted = Date.UTC(2026, 6, 17);
+  const [v] = toJobViews(
+    [job({ postedAt: posted, postedPrecision: "day", linkedInStatus: "posted" })],
+    watches,
+  );
+  assert.equal(v!.postedAt, posted);
+  assert.equal(v!.postedPrecision, "day");
+  assert.equal(v!.linkedInStatus, "posted");
+});
+
 test("toJobViews carries the applied flag, absent on older records reading as no", () => {
   assert.equal(toJobViews([job()], watches)[0]!.applied, false);
   assert.equal(toJobViews([job({ applied: true })], watches)[0]!.applied, true);

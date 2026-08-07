@@ -12,12 +12,27 @@
 // gone with the markup — React escapes its children, which is the whole reason
 // `esc` existed.
 
+import type { PostedPrecision, LinkedInStatus } from "./types.ts";
+
 export type JobView = {
   id: string;
   title: string;
   company: string;
   location: string;
   postedText: string;
+  /** LinkedIn's own posting date (`Job.postedAt`), epoch ms, or `null` when the
+   *  card carried no readable date. When present the row computes a *live* age
+   *  from it against `now` — a job found three weeks ago stops insisting it was
+   *  posted two weeks ago — with the date in words on hover. When `null` the row
+   *  falls back to the frozen `postedText` phrase (legacy records) or nothing. */
+  postedAt: number | null;
+  /** How much to trust `postedAt` — only `"estimated"` earns the `~` on the row
+   *  (`"exact"` and `"day"` are both true at the resolution the row shows). */
+  postedPrecision: PostedPrecision;
+  /** Why LinkedIn withheld the date. `"viewed"` is the one the row surfaces: a
+   *  `Seen on LinkedIn` chip, the only signal the extension has ever had that the
+   *  posting was opened somewhere — including directly on LinkedIn — without it. */
+  linkedInStatus: LinkedInStatus;
   watchName: string;
   url: string;
   /** When *your watcher* first saw this posting (`Job.foundAt`), as an epoch ms.
@@ -253,6 +268,102 @@ export function formatAgo(ms: number): string {
   const hours = Math.round(minutes / 60);
   if (hours < 48) return `${hours}h`;
   return `${Math.round(hours / 24)}d`;
+}
+
+// ── The posting's own age (issue #51) ────────────────────────────────────────
+// A live ladder computed from `postedAt` against `now`, deliberately NOT reusing
+// `formatAgo`: that one tops out at days, which is right for "Found …" and wrong
+// for a posting that can be a year old. The two ladders stay separate.
+
+const MINUTE_MS = 60_000;
+const HOUR_MS = 3_600_000;
+const DAY_MS = 86_400_000;
+
+/** Local midnight of an epoch ms — the anchor the calendar rungs count between.
+ *  Local, not UTC, because "yesterday" is a word about the local calendar day
+ *  (§ two clocks); the day-precise `postedAt` sits at midnight UTC, which the
+ *  author's own +07/+09 timezone reads back as the same calendar date. */
+function localMidnight(ms: number): number {
+  const d = new Date(ms);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+/** Whole calendar days from `from` to `to` in local time. `Math.round` rather
+ *  than `floor` so a DST hour never shaves a day off the count. */
+function calendarDaysBetween(from: number, to: number): number {
+  return Math.round((localMidnight(to) - localMidnight(from)) / DAY_MS);
+}
+
+/**
+ * The posting-age rung the row shows after "Posted ": `"12m ago"`, `"6h ago"`,
+ * `"yesterday"`, `"5d ago"`, `"3w ago"`, `"2mo ago"`, `"1y ago"`.
+ *
+ * **Two clocks, deliberately.** Below a day the age is a *duration* in elapsed
+ * milliseconds — minutes floored (never "0m": something posted this second was
+ * still posted), then hours rounded. At a day and above it is a *calendar*
+ * difference in local time, because `postedAt` is only day-precise up there and
+ * "yesterday" is a calendar word. The switch is the 24-hour mark, where the
+ * precision drops from a real moment to a bare date.
+ *
+ * **`mo` for months, never `m`** — `m` is minutes, and "Posted 3m ago" about a
+ * three-month-old posting is the exact lie {@link AGE_UNITS} was written to stop.
+ *
+ * **Rounded half-up, erring *older*.** A 24-day posting reads `3w`, a 25-day one
+ * `4w`: a stale job that looks fresh costs an application, a fresh one that looks
+ * stale costs a glance, so the tie breaks towards older. The `~` for an estimated
+ * date is the caller's to add — this returns the rung, not the whole label.
+ */
+export function postedAge(postedAt: number, now: number): string {
+  const ms = Math.max(0, now - postedAt);
+  // Below a day: a duration, one coarse unit.
+  if (ms < HOUR_MS) return `${Math.max(1, Math.floor(ms / MINUTE_MS))}m ago`;
+  if (ms < DAY_MS) return `${Math.round(ms / HOUR_MS)}h ago`;
+  // A day and above: a calendar difference. `postedAt` is only day-precise here.
+  const days = calendarDaysBetween(postedAt, now);
+  if (days <= 1) return "yesterday"; // "1d" reads worse and means the same
+  if (days <= 6) return `${days}d ago`;
+  if (days <= 29) return `${Math.round(days / 7)}w ago`;
+  // 30.44 days to the month so a year's worth of months stays 12, not 13.
+  if (days <= 364) return `${Math.round(days / 30.44)}mo ago`;
+  return `${Math.round(days / 365)}y ago`;
+}
+
+const MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+const pad2 = (n: number): string => String(n).padStart(2, "0");
+
+/** `17 Jul 2026` in local time — the date the hover spells out in words. */
+function formatDate(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+/**
+ * The posting date in words, for the row's `title` hover — English, matching
+ * every other string in the row:
+ *
+ * - `exact`     → `Posted 7 Aug 2026, 08:48` (read to the minute from a fresh phrase)
+ * - `day`       → `Posted 17 Jul 2026` (LinkedIn's `<time datetime>`, day precision)
+ * - `estimated` → `Posted around 17 Jul 2026 — estimated from LinkedIn's wording`
+ *
+ * Only the estimated case explains itself: the `~` on the row carries the guess,
+ * but a tooltip has room to say so in words rather than leave the glyph alone.
+ * A `null`/`undefined` precision is treated as `day` — a date with no known
+ * precision is still a date, and showing it bare is the honest floor.
+ */
+export function postedHover(postedAt: number, precision: PostedPrecision): string {
+  const date = formatDate(postedAt);
+  if (precision === "exact") {
+    const d = new Date(postedAt);
+    return `Posted ${date}, ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  }
+  if (precision === "estimated") {
+    return `Posted around ${date} — estimated from LinkedIn's wording`;
+  }
+  return `Posted ${date}`;
 }
 
 /**

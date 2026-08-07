@@ -79,6 +79,8 @@ function compileCss(): string {
  *  generated files only change when a component does. */
 const NOW = Date.UTC(2026, 0, 15, 9, 0, 0);
 const minsAgo = (m: number) => NOW - m * 60_000;
+const hrsAgo = (h: number) => NOW - h * 3_600_000;
+const daysAgo = (d: number) => NOW - d * 86_400_000;
 
 function job(over: Partial<JobView> = {}): JobView {
   return {
@@ -87,6 +89,9 @@ function job(over: Partial<JobView> = {}): JobView {
     company: "Acme Corp",
     location: "Jakarta, Indonesia (Hybrid)",
     postedText: "2 hours ago",
+    postedAt: NOW - 2 * 3_600_000,
+    postedPrecision: "exact",
+    linkedInStatus: "posted",
     watchName: "Indonesia",
     url: "https://www.linkedin.com/jobs/view/3901/",
     foundAt: minsAgo(41),
@@ -112,24 +117,33 @@ const POPUP_JOBS: JobView[] = [
     title: "Senior Backend Engineer (Go)",
     company: "Tokopedia",
     postedText: "12 minutes ago",
+    postedAt: minsAgo(12),
     foundAt: minsAgo(4),
   }),
+  // Opened here *and* already seen on LinkedIn — the pair reads as "I opened this
+  // from here" plus "LinkedIn agrees". A viewed card carries no date.
   job({
     id: "2",
     title: "Staff Engineer, Platform",
     company: "GoTo Financial",
     location: "Jakarta (On-site)",
-    postedText: "1 hour ago",
+    postedText: "",
+    postedAt: null,
+    postedPrecision: null,
+    linkedInStatus: "viewed",
     foundAt: minsAgo(23),
     opened: true,
   }),
   // Location never parsed — the meta line must not leave a dangling separator.
+  // Only an *estimated* date wears the `~`.
   job({
     id: "3",
     title: "Principal Engineer",
     company: "Momo Financial",
     location: "",
-    postedText: "3 hours ago",
+    postedText: "3 weeks ago",
+    postedAt: daysAgo(24),
+    postedPrecision: "estimated",
     foundAt: minsAgo(58),
   }),
   job({
@@ -138,6 +152,7 @@ const POPUP_JOBS: JobView[] = [
     company: "Blocked Recruiters Ltd",
     location: "Remote",
     postedText: "5 hours ago",
+    postedAt: hrsAgo(5),
     foundAt: minsAgo(94),
     blocked: true,
   }),
@@ -152,17 +167,23 @@ const TAB_JOBS: JobView[] = [
     title: "Distinguished Engineer",
     company: "Grab",
     location: "Singapore (Hybrid)",
-    postedText: "yesterday",
+    postedText: "1 day ago",
+    postedAt: daysAgo(1),
+    postedPrecision: "day",
     foundAt: minsAgo(1_100),
     watchName: "Japan",
     read: true,
   }),
+  // A legacy record from before the date was stored: no `postedAt`, so the row
+  // falls back to the frozen phrase exactly as it always has, and ages out.
   job({
     id: "6",
     title: "Head of Engineering",
     company: "Sea Group",
     location: "Singapore (Remote)",
     postedText: "yesterday",
+    postedAt: null,
+    postedPrecision: null,
     foundAt: minsAgo(1_240),
     watchName: "Japan",
   }),
@@ -174,6 +195,8 @@ const TAB_JOBS: JobView[] = [
     company: "PT Acme Indonesia",
     location: "Jakarta, Indonesia (On-site)",
     postedText: "1 day ago",
+    postedAt: daysAgo(1),
+    postedPrecision: "day",
     foundAt: minsAgo(1_380),
     opened: true,
     applied: true,

@@ -101,6 +101,21 @@ it read.
 **Click a notification** for the same list as a full tab (an 880px column, opens
 on **All**). An already-open tab is reused rather than duplicated.
 
+### What a card says
+
+Each card carries two ages, because they answer different questions. **Posted**
+is how old the job is; **Found** is how long it has sat in your list. The posted
+age is live — it counts up on its own, `12m` → `6h` → `yesterday` → `5d` → `3w`
+→ `2mo` → `1y` — so a job you found weeks ago never gets stuck reporting the age
+it was when you first saw it. Hover it for the actual date. A `~` in front (`~3w`)
+means LinkedIn only gave a vague "a few weeks ago" and the date is an estimate.
+
+Where a card says **Seen on LinkedIn** instead of a posted age, LinkedIn has
+already marked the posting as one you opened — anywhere, including on LinkedIn
+itself, outside this extension. It is the one hint you get that you looked at a
+role and forgot it. That is not the same as **Opened**, which means you opened it
+*from this list*; a card can carry both.
+
 ### What you can do with a job
 
 - **Click it** → opens the posting in a new tab. The card stays in the list, so

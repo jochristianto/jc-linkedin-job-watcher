@@ -4,6 +4,7 @@ import {
   ExternalLink,
   EyeIcon,
   EyeOffIcon,
+  Footprints,
   History,
 } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
@@ -16,6 +17,8 @@ import {
   formatAgo,
   metaLine,
   monogram,
+  postedAge,
+  postedHover,
   shortAge,
   splitLocation,
   type JobView,
@@ -167,9 +170,29 @@ export function JobRow({
   const meta = metaLine([job.company, job.location]);
 
   const { mode } = splitLocation(job.location);
-  const posted = shortAge(job.postedText);
   const found = formatAgo(now - job.foundAt);
   const mono = monogram(job.company);
+
+  // The posting's own age, four cases (issue #51), in priority order:
+  //  - A stored `postedAt` → a *live* rung recomputed every render, so a job
+  //    found three weeks ago stops insisting it was posted two weeks ago; the
+  //    date in words on hover, and a `~` when the date is only estimated.
+  //  - `linkedInStatus: "viewed"` → no date at all (LinkedIn withheld it), a
+  //    `Seen on LinkedIn` chip instead. A viewed card carries no `postedAt` by
+  //    construction, so the age and the chip are mutually exclusive.
+  //  - No date but a frozen `postedText` → the legacy phrase, exactly as before:
+  //    records saved before #48 have no `postedAt` and age out within 30 days.
+  //  - Nothing → nothing.
+  const seen = job.linkedInStatus === "viewed";
+  const hasDate = job.postedAt != null;
+  const age = hasDate ? postedAge(job.postedAt as number, now) : "";
+  // Only "estimated" earns the tilde; "exact" and "day" are both true at the
+  // resolution the row shows them, so marking them apart would be noise.
+  const ageTilde = job.postedPrecision === "estimated" ? "~" : "";
+  const ageHover = hasDate
+    ? postedHover(job.postedAt as number, job.postedPrecision)
+    : undefined;
+  const frozen = !hasDate && !seen ? shortAge(job.postedText) : "";
 
   // Read and blocked both grey the row, so the row says which one it is.
   const dimmed = job.read || job.blocked;
@@ -331,8 +354,15 @@ export function JobRow({
             {job.watchName && (
               <Chip className="border bg-card">{job.watchName}</Chip>
             )}
-            {posted && (
-              <span className="whitespace-nowrap">Posted {posted} ago</span>
+            {hasDate ? (
+              <span className="whitespace-nowrap" title={ageHover}>
+                Posted {ageTilde}
+                {age}
+              </span>
+            ) : (
+              frozen && (
+                <span className="whitespace-nowrap">Posted {frozen} ago</span>
+              )
             )}
             <span
               title="When your watcher picked it up"
@@ -348,6 +378,23 @@ export function JobRow({
                   aria-hidden="true"
                 />
                 Opened
+              </Chip>
+            )}
+            {/* LinkedIn withheld the date because the posting was opened
+                *somewhere* — including directly on LinkedIn, outside this
+                extension. That is the only signal we have ever had about
+                browsing that happened without us, and it was thrown away until
+                now. It sits with the other chips as a fact about the posting,
+                not beside the title with `Blocked`, which is a verdict on it.
+                It reads next to `Opened` on a row that earns both: "I opened
+                this from here" plus "LinkedIn agrees". */}
+            {seen && (
+              <Chip
+                className="bg-muted"
+                title="LinkedIn withheld the posting date because this job has already been opened — anywhere, including on LinkedIn itself"
+              >
+                <Footprints className="size-2.5 shrink-0" aria-hidden="true" />
+                Seen on LinkedIn
               </Chip>
             )}
           </span>
