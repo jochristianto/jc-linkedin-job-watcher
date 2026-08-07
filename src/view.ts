@@ -50,6 +50,11 @@ function toJobView(job: Job, watches: Watch[], blockedNormalized: string[]): Job
     postedAt: job.postedAt,
     postedPrecision: job.postedPrecision,
     linkedInStatus: job.linkedInStatus,
+    // The flag has existed since the beginning but only ever fed the hide filter;
+    // this surfaces it as a chip (issue #53). `=== true` exactly as
+    // `isHiddenAsReposted` reads it: a record written before the flag existed has
+    // it absent, and absent means "we never saw a marker", not "reposted".
+    isReposted: job.isReposted === true,
     watchName: watch?.name ?? "",
     url: job.url,
     foundAt: job.foundAt,

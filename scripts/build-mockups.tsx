@@ -92,6 +92,7 @@ function job(over: Partial<JobView> = {}): JobView {
     postedAt: NOW - 2 * 3_600_000,
     postedPrecision: "exact",
     linkedInStatus: "posted",
+    isReposted: false,
     watchName: "Indonesia",
     url: "https://www.linkedin.com/jobs/view/3901/",
     foundAt: minsAgo(41),
@@ -135,7 +136,9 @@ const POPUP_JOBS: JobView[] = [
     opened: true,
   }),
   // Location never parsed — the meta line must not leave a dangling separator.
-  // Only an *estimated* date wears the `~`.
+  // Only an *estimated* date wears the `~`. Reposted, too: the amber chip sits
+  // right after the posting age and ahead of `Found …` — a role re-listed weeks
+  // on is exactly the stale-or-never-filled case the marker is for (issue #53).
   job({
     id: "3",
     title: "Principal Engineer",
@@ -144,6 +147,7 @@ const POPUP_JOBS: JobView[] = [
     postedText: "3 weeks ago",
     postedAt: daysAgo(24),
     postedPrecision: "estimated",
+    isReposted: true,
     foundAt: minsAgo(58),
   }),
   job({

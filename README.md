@@ -116,6 +116,12 @@ itself, outside this extension. It is the one hint you get that you looked at a
 role and forgot it. That is not the same as **Opened**, which means you opened it
 *from this list*; a card can carry both.
 
+An amber **Reposted** chip means LinkedIn re-listed the role — often because
+nobody took the first listing, so it may be stale or never filled. It sits right
+after the posted age (or after **Seen on LinkedIn** when there is no date), so a
+possibly-stale row stands out while you skim. If you would rather not see these
+at all, **Hide reposted** in Options drops them from the list entirely.
+
 ### What you can do with a job
 
 - **Click it** → opens the posting in a new tab. The card stays in the list, so
