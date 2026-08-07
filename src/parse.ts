@@ -13,7 +13,7 @@
 
 import { extractJobIds, jobIdOf, type CardLike } from "./scan-probe.ts";
 import { isSavableJob } from "./health.ts";
-import type { Job } from "./types.ts";
+import type { Job, LinkedInStatus } from "./types.ts";
 
 /** The authenticated search page wraps each posting in a job-card container.
  *  Exported so the content script counts and settles the same cards this parses,
@@ -179,7 +179,7 @@ function fieldText(card: Element, selectors: string[]): string {
   return "";
 }
 
-function norm(text: string | null): string {
+function norm(text: string | null | undefined): string {
   return (text ?? "").replace(/\s+/g, " ").trim();
 }
 
@@ -216,13 +216,105 @@ const REPOSTED_MARKER_SELECTORS = [
   ".job-card-job-posting-card-wrapper__footer-items",
 ];
 
+/** One day in ms — the boundary that splits a phrase LinkedIn states to the minute
+ *  (`minute`/`hour`, still fresh) from a coarse range it only rounds (`day` and up). */
+const DAY_MS = 86_400_000;
+
+/** Each LinkedIn age word as a span of milliseconds. `month`/`year` are the round
+ *  30-/365-day approximations an *estimate* is allowed — day precision is the
+ *  ceiling the `<time>` attribute sets, so nothing downstream trusts these to the
+ *  hour anyway. */
+const AGE_UNIT_MS: Record<string, number> = {
+  second: 1_000,
+  minute: 60_000,
+  hour: 3_600_000,
+  day: DAY_MS,
+  week: 7 * DAY_MS,
+  month: 30 * DAY_MS,
+  year: 365 * DAY_MS,
+};
+
+/** LinkedIn's age phrase resolved to a backward offset from "now" (issue #48). */
+export type PostedAge = {
+  /** Milliseconds before `foundAt` the posting went up. */
+  offsetMs: number;
+  /** `true` only for a sub-day unit, whose value LinkedIn states to the minute
+   *  while the posting is fresh — `stampJobs` trusts these over the day-precise
+   *  `<time>` attribute. A coarse unit is a range, so its offset is a midpoint. */
+  precise: boolean;
+};
+
+/**
+ * LinkedIn's posted phrase as an offset in milliseconds, or `null` when no
+ * English number+unit is in it. PURE — no clock: the caller subtracts this from
+ * the `foundAt` it holds (issue #48).
+ *
+ * Takes the FIRST number+unit, exactly as `shortAge` does, so the `visually-hidden`
+ * suffix on a fresh card — `"53 minutes ago Within the past 24 hours"` — reads as
+ * 53 minutes rather than 24 hours (issue #43).
+ *
+ * Sub-day units are exact; a coarse unit spans `[n, n+1)` of itself, so its offset
+ * is the midpoint of the whole-day range it covers — `"3 weeks ago"` is the 21–27
+ * day span, i.e. 24 days, smallest average error and erring in both directions.
+ *
+ * ENGLISH WORDS ONLY, on purpose: a localised interface simply fails this match
+ * and the caller falls through to the `<time datetime>` attribute (still day-
+ * correct) rather than throwing. Do not read the English-only regex as a bug.
+ */
+export function parsePostedAge(postedText: string): PostedAge | null {
+  const m = /(\d+)\s*(second|minute|hour|day|week|month|year)/i.exec(postedText);
+  if (!m) return null;
+  const n = Number(m[1]);
+  const unitMs = AGE_UNIT_MS[m[2]!.toLowerCase()]!;
+  const precise = unitMs < DAY_MS;
+  // Midpoint of the day-range the phrase covers: n*unit + half of (unit − a day).
+  // For "3 weeks" that is 21d + (7d−1d)/2 = 24d exactly.
+  const offsetMs = precise ? n * unitMs : n * unitMs + (unitMs - DAY_MS) / 2;
+  return { offsetMs, precise };
+}
+
+/** Midnight UTC of the card's `<time datetime="YYYY-MM-DD">` attribute, or `null`
+ *  when the card carries no such attribute (a `Viewed`/`Promoted` card has none).
+ *  Day precision is the ceiling — the attribute names the day, never the minute
+ *  (issue #40). PURE: `Date.UTC` is a function of its arguments, not a clock. */
+function postedDayOf(card: Element): number | null {
+  const attr = card.querySelector("time[datetime]")?.getAttribute("datetime")?.trim();
+  const m = attr ? /^(\d{4})-(\d{2})-(\d{2})/.exec(attr) : null;
+  if (!m) return null;
+  return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
+/** The card's exclusive footer state, named. `.job-card-container__footer-job-state`
+ *  is the slot issue #43 found; the footer strip's text is the fallback for a card
+ *  that lost the class. A readable date is the `"posted"` arm — the slot holds the
+ *  date OR one of the badges, never both — so the caller passes whether a date was
+ *  read rather than this re-deciding it. `null` when even the slot was unreadable. */
+function linkedInStatusOf(card: Element, hasDate: boolean): LinkedInStatus {
+  if (hasDate) return "posted";
+  const named = card.querySelector(".job-card-container__footer-job-state");
+  const text = norm(named?.textContent) || footerStripText(card);
+  if (/\bpromoted\b/i.test(text)) return "promoted";
+  if (/\bapplied\b/i.test(text)) return "applied";
+  if (/\bviewed\b/i.test(text)) return "viewed";
+  return null;
+}
+
+/** The footer/metadata strip's text, joined and normalised — the single reader of
+ *  that strip, scanned both by `linkedInStatusOf` (when the named state slot is
+ *  absent) and by `isRepostedCard`. */
+function footerStripText(card: Element): string {
+  const strip = card.querySelectorAll(REPOSTED_MARKER_SELECTORS.join(", "));
+  return Array.from(strip)
+    .map((el) => norm(el.textContent))
+    .join(" ");
+}
+
 /** True only for LinkedIn's "Reposted" marker in the card's footer/metadata strip.
  *  "Promoted" and "Easy Apply" are distinct badges that never contain the word,
  *  and a word-boundary match keeps a title or description mentioning "reposted"
  *  from tripping it (§16, issue #2 finding 3 / issue #30 item 1). */
 function isRepostedCard(card: Element): boolean {
-  const footers = card.querySelectorAll(REPOSTED_MARKER_SELECTORS.join(", "));
-  return Array.from(footers).some((el) => /\breposted\b/i.test(norm(el.textContent)));
+  return /\breposted\b/i.test(footerStripText(card));
 }
 
 /**
@@ -259,13 +351,21 @@ export function parseJobCards(doc: Document): Job[] {
   for (const card of cards) {
     const id = jobIdOf(identityOf(card)) ?? "";
     if (seen.has(id)) continue;
+    const postedText = fieldText(card, ["time"]);
+    // The parser resolves only the day-precise attribute (a pure read, no clock).
+    // The fresh-phrase and estimate cases need `foundAt` and are finished in
+    // `stampJobs` (issue #48); here they stay at the attribute's answer or null.
+    const postedDay = postedDayOf(card);
     const job: Job = {
       id,
       title: fieldText(card, TITLE_SELECTORS),
       company: fieldText(card, COMPANY_SELECTORS),
       location: fieldText(card, LOCATION_SELECTORS),
       isReposted: isRepostedCard(card),
-      postedText: fieldText(card, ["time"]),
+      postedAt: postedDay,
+      postedPrecision: postedDay === null ? null : "day",
+      postedText,
+      linkedInStatus: linkedInStatusOf(card, postedText !== "" || postedDay !== null),
       url: jobUrlOf(card),
       foundAt: 0,
       watchId: "",

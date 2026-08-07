@@ -22,7 +22,9 @@ import { timeToMinutes, type OptionsFormValues } from "./options-form.ts";
  *
  *  "Backup" sits last before the prose, and deliberately nowhere near the fields
  *  it overwrites: importing replaces every setting on the page at once, and a
- *  control that does that should not share a card with the ones it undoes. */
+ *  control that does that should not share a card with the ones it undoes.
+ *  "Diagnostics" follows it — both are about files rather than settings, and it is
+ *  the one section that reaches out to a live LinkedIn tab rather than to storage. */
 export const SETTINGS_SECTIONS = [
   "watches",
   "filters",
@@ -30,6 +32,7 @@ export const SETTINGS_SECTIONS = [
   "retention",
   "notifications",
   "backup",
+  "diagnostics",
   "how",
 ] as const;
 
@@ -42,15 +45,17 @@ export const SECTION_LABELS: Record<SettingsSection, string> = {
   retention: "Retention",
   notifications: "Notifications",
   backup: "Backup",
+  diagnostics: "Diagnostics",
   how: "How this works",
 };
 
 /** Which form fields each section owns. Exhaustive over `OptionsFormValues` by
  *  construction — `sectionOfField` is typed against it, so a field added to the
  *  form without a home here fails to compile rather than silently losing its
- *  unsaved-changes dot. Two sections own nothing and so never carry a dot:
- *  "How this works" is prose, and "Backup" writes straight to storage rather
- *  than through the form — an import is saved the moment it lands. */
+ *  unsaved-changes dot. Three sections own nothing and so never carry a dot:
+ *  "How this works" is prose, "Backup" writes straight to storage rather than
+ *  through the form (an import is saved the moment it lands), and "Diagnostics"
+ *  only reads a live tab and writes a file — neither touches a form field. */
 const SECTION_OF_FIELD: Record<keyof OptionsFormValues, SettingsSection> = {
   watches: "watches",
   blockedCompanies: "filters",

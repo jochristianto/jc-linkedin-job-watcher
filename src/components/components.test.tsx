@@ -10,6 +10,11 @@
 // lives tested as pure functions in view.test.ts, exactly as it did when this
 // layer emitted strings.
 
+// Pin the clock to UTC so the posting-date hover — which reads local time by
+// design — is the same string wherever the suite runs. `postedAt` is anchored to
+// midnight UTC, so in UTC the hover shows exactly that date. Set before any Date.
+process.env.TZ = "UTC";
+
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -44,6 +49,12 @@ function job(overrides: Partial<JobView> = {}): JobView {
     company: "Acme Corp",
     location: "Jakarta, Indonesia",
     postedText: "2 hours ago",
+    // Default to the legacy shape — no stored date — so the row falls back to the
+    // frozen `postedText` phrase. Tests that exercise the live age set `postedAt`.
+    postedAt: null,
+    postedPrecision: null,
+    linkedInStatus: null,
+    isReposted: false,
     watchName: "Indonesia",
     url: "https://www.linkedin.com/jobs/view/3901/",
     foundAt: NOW - 41 * 60_000,
@@ -115,6 +126,131 @@ test("JobRow separates the posting's own age from when the watcher found it", ()
   assert.match(h, /Posted 12h ago/);
   assert.match(h, /Found 41m ago/);
   assert.match(h, /lucide-history/);
+});
+
+test("JobRow computes a LIVE posting age from postedAt, not the frozen phrase", () => {
+  // The whole point of #51: a job found three weeks ago stops insisting it was
+  // posted two weeks ago. The stored phrase says "2 weeks ago"; the row reads
+  // the date against `now` and says the truth.
+  const h = row(
+    job({ postedText: "2 weeks ago", postedAt: NOW - 21 * 86_400_000, postedPrecision: "day" }),
+  );
+  assert.match(h, /Posted 3w ago/);
+  assert.doesNotMatch(h, /2w ago/);
+});
+
+test("JobRow marks an estimated date with a tilde and nothing else does", () => {
+  const estimated = job({ postedAt: NOW - 21 * 86_400_000, postedPrecision: "estimated" });
+  assert.match(row(estimated), /Posted ~3w ago/);
+  // "exact" and "day" are both true at the row's resolution, so no tilde.
+  const day = job({ postedAt: NOW - 21 * 86_400_000, postedPrecision: "day" });
+  assert.match(row(day), /Posted 3w ago/);
+  assert.doesNotMatch(row(day), /~/);
+});
+
+test("JobRow puts the date in words on hover, per precision", () => {
+  const exact = job({ postedAt: Date.UTC(2026, 0, 7, 8, 48), postedPrecision: "exact" });
+  assert.match(row(exact), /title="Posted 7 Jan 2026, 08:48"/);
+  const day = job({ postedAt: Date.UTC(2026, 0, 7), postedPrecision: "day" });
+  assert.match(row(day), /title="Posted 7 Jan 2026"/);
+  const estimated = job({ postedAt: Date.UTC(2026, 0, 7), postedPrecision: "estimated" });
+  assert.match(
+    row(estimated),
+    /title="Posted around 7 Jan 2026 — estimated from LinkedIn&#x27;s wording"/,
+  );
+});
+
+test("JobRow shows 'Seen on LinkedIn' for a viewed card, and never a date beside it", () => {
+  // LinkedIn withheld the date because the posting was opened somewhere; the row
+  // says so instead of falling silent. A viewed card carries no date.
+  const h = row(job({ postedText: "", postedAt: null, linkedInStatus: "viewed" }));
+  assert.match(h, /Seen on LinkedIn/);
+  assert.doesNotMatch(h, /Posted/);
+  // A Lucide icon, not a bare glyph, and not one reused from another action.
+  assert.match(h, /lucide-footprints/);
+});
+
+test("JobRow renders 'Opened' and 'Seen on LinkedIn' together when a row earns both", () => {
+  // "I opened this from here" plus "LinkedIn agrees" — two separate facts.
+  const h = row(job({ postedAt: null, linkedInStatus: "viewed", opened: true }));
+  assert.match(h, />Opened</);
+  assert.match(h, /Seen on LinkedIn/);
+});
+
+test("JobRow still shows the frozen phrase when a record has no stored date", () => {
+  // Records saved before #48 have no `postedAt`; they keep showing what they
+  // always have rather than going blank, and age out within 30 days.
+  const h = row(job({ postedText: "5 hours ago", postedAt: null, linkedInStatus: null }));
+  assert.match(h, /Posted 5h ago/);
+  assert.doesNotMatch(h, /Seen on LinkedIn/);
+});
+
+test("JobRow marks a reposted job with an amber chip, and never an unreposted one", () => {
+  // The flag has always been parsed and stored; issue #53 is only that the row
+  // never showed it. `=== true` — an absent flag reads as "no marker", not yes.
+  assert.match(row(job({ isReposted: true })), />Reposted</);
+  assert.doesNotMatch(row(job({ isReposted: false })), />Reposted</);
+  // Amber, so a reposted row is findable while skimming, not only when read.
+  const h = row(job({ isReposted: true }));
+  assert.match(h, /var\(--warn\)/);
+  // A Lucide icon, not a bare glyph, and not one reused from another action.
+  assert.match(h, /lucide-refresh-cw/);
+});
+
+test("JobRow's Reposted chip carries an accessible name, not just a hover title", () => {
+  // The word alone assumes the reader knows what LinkedIn means by it; the name
+  // says what it is evidence of — and a `title` alone gives a span no accessible
+  // name at all, so it is spelled out for the screen reader too.
+  const h = row(job({ isReposted: true }));
+  assert.match(
+    h,
+    /aria-label="Reposted — re-listed by the employer, the role may be stale or never filled"/,
+  );
+  assert.match(
+    h,
+    /title="Re-listed by the employer — the role may be stale or never filled"/,
+  );
+});
+
+test("JobRow puts the Reposted chip after the posting age and ahead of Found", () => {
+  // The date and the repost are both facts about the posting's own history; Found
+  // is a fact about the watcher, so the line groups them that way.
+  const h = row(job({ isReposted: true, postedAt: NOW - 21 * 86_400_000, postedPrecision: "day" }));
+  assert.ok(
+    h.indexOf("Posted 3w ago") < h.indexOf("Reposted"),
+    "the Reposted chip should follow the posting age",
+  );
+  assert.ok(
+    h.indexOf("Reposted") < h.indexOf("Found 41m ago"),
+    "the Reposted chip should come before Found",
+  );
+});
+
+test("JobRow shows the Reposted chip on a card with no date at all", () => {
+  // It must not depend on the age slot being filled: a reposted card LinkedIn
+  // withheld the date from still gets the chip, sitting after `Seen on LinkedIn`.
+  const seen = row(job({ isReposted: true, postedAt: null, linkedInStatus: "viewed" }));
+  assert.match(seen, />Reposted</);
+  assert.ok(
+    seen.indexOf("Seen on LinkedIn") < seen.indexOf("Reposted"),
+    "the Reposted chip should follow the Seen on LinkedIn chip",
+  );
+  assert.ok(
+    seen.indexOf("Reposted") < seen.indexOf("Found 41m ago"),
+    "the Reposted chip should come before Found even with no date",
+  );
+  // And with no date and no viewed status either — a bare reposted card.
+  const bare = row(job({ isReposted: true, postedAt: null, postedText: "", linkedInStatus: null }));
+  assert.match(bare, />Reposted</);
+});
+
+test("JobRow spells the full word 'Reposted' out, never an abbreviation, on both surfaces", () => {
+  for (const variant of ["tab", "popup"] as const) {
+    const h = row(job({ isReposted: true }), false, variant);
+    assert.match(h, />Reposted</, variant);
+    // The popup wraps the meta line rather than shortening the word to hold height.
+    assert.doesNotMatch(h, />Repost</, variant);
+  }
 });
 
 test("JobRow leads with the employer monogram, blocking being an employer choice", () => {

@@ -101,6 +101,27 @@ it read.
 **Click a notification** for the same list as a full tab (an 880px column, opens
 on **All**). An already-open tab is reused rather than duplicated.
 
+### What a card says
+
+Each card carries two ages, because they answer different questions. **Posted**
+is how old the job is; **Found** is how long it has sat in your list. The posted
+age is live — it counts up on its own, `12m` → `6h` → `yesterday` → `5d` → `3w`
+→ `2mo` → `1y` — so a job you found weeks ago never gets stuck reporting the age
+it was when you first saw it. Hover it for the actual date. A `~` in front (`~3w`)
+means LinkedIn only gave a vague "a few weeks ago" and the date is an estimate.
+
+Where a card says **Seen on LinkedIn** instead of a posted age, LinkedIn has
+already marked the posting as one you opened — anywhere, including on LinkedIn
+itself, outside this extension. It is the one hint you get that you looked at a
+role and forgot it. That is not the same as **Opened**, which means you opened it
+*from this list*; a card can carry both.
+
+An amber **Reposted** chip means LinkedIn re-listed the role — often because
+nobody took the first listing, so it may be stale or never filled. It sits right
+after the posted age (or after **Seen on LinkedIn** when there is no date), so a
+possibly-stale row stands out while you skim. If you would rather not see these
+at all, **Hide reposted** in Options drops them from the list entirely.
+
 ### What you can do with a job
 
 - **Click it** → opens the posting in a new tab. The card stays in the list, so
@@ -288,6 +309,28 @@ Like **Delete all job history**, importing is unavailable while a round is
 running, and for the same reason: it rewrites the seen IDs a round in flight is
 about to compare against. Wait for the round to finish.
 
+### Diagnostics
+
+**Save a copy of this page** captures your open LinkedIn job search as an HTML
+file. When the extension warns that it has stopped reading LinkedIn's page — its
+layout has changed again — this is how you hand over the exact page it is failing
+on, so the change can be diagnosed from the real DOM rather than guessed at.
+
+Open your job search on LinkedIn in another tab first, then press the button. It
+finds that tab, **scrolls the results until every card has loaded** — an
+un-scrolled list renders only a handful, so the scroll is load-bearing, not a
+nicety — and writes the whole page to a file named for the day.
+
+**The file is your own logged-in search** — company names, job titles, and
+whatever else LinkedIn renders about your account. The section says so before the
+file is written, so it is never shared by surprise; keep it to yourself unless you
+mean to send it on. It is the same class of data as the captures used to build the
+extension, which is why those are never committed.
+
+Each way it can go wrong says what to do next rather than failing silently: no
+LinkedIn tab open, a tab that is not on a `/jobs/search/` page, and a signed-out
+session are each reported on the spot.
+
 ### How this works
 
 The last section: what a round actually does, in plain English, plus the things
@@ -328,6 +371,14 @@ A batch of more than 10 jobs arrives as several messages, numbered straight
 through, rather than being cut short. A push that fails can never break a round —
 after three failures in a row you get a soft warning suggesting you re-run **Send
 test message**.
+
+Telegram also carries one health message, not just new jobs: if a field stops
+reading — company names, job titles, the posting date — you get a **once-a-day
+alarm** naming the field, the `0 of N` count, whether jobs are still being found,
+and the fix (**Save a copy of this page**, below). It repeats at most daily while
+the break lasts and stops on its own the first round the field reads again; the
+amber toolbar badge and the popup banner stay lit the whole time regardless. With
+Telegram off you still get the badge and banner — only the phone alarm is skipped.
 
 ---
 

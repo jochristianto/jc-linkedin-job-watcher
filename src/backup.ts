@@ -157,7 +157,14 @@ const jobSchema = z.object({
   company: z.string(),
   location: z.string(),
   isReposted: z.boolean(),
+  // The posting-date fields (issue #48). Optional: a backup exported before they shipped
+  // carries none, and an absent `postedAt` reads as "never captured" — the same
+  // state a `Viewed` card is stored in. Adding optional fields does not bump
+  // BACKUP_VERSION (see above). `postedText` stays required — always written.
+  postedAt: z.number().nullable().optional(),
+  postedPrecision: z.enum(["exact", "day", "estimated"]).nullable().optional(),
   postedText: z.string(),
+  linkedInStatus: z.enum(["posted", "promoted", "viewed", "applied"]).nullable().optional(),
   url: z.string(),
   foundAt: z.number(),
   watchId: z.string(),

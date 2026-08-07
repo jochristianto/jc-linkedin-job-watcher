@@ -45,18 +45,26 @@ import {
 } from "./scan.ts";
 import {
   OK_HEALTH,
+  NO_FIELD_READS,
+  aggregateFieldCounts,
   aggregateOutcome,
+  badgeSeverityWithFieldBreak,
   classifyPage,
-  fieldMissingAcrossAll,
+  reduceFieldHealth,
+  reduceFieldPush,
   reducePushHealth,
   reduceScanHealth,
   shouldRunScan,
+  type FieldReadCounts,
   type PageOutcome,
   type PageSignals,
   type Severity,
 } from "./health.ts";
 import {
+  buildFieldBreakPush,
+  canPush,
   sendAppliedPush,
+  sendFieldBreakPush,
   sendPush,
   type AppliedPushFailure,
   type AppliedPushRequest,
@@ -147,13 +155,23 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
  *  §16.8): the number in slate when healthy, amber on a soft warning, a red `!` on
  *  a hard failure. `badgeFor` decides text+colour; this only calls the browser API.
  *  Settings come along for the blocklist — a blocked company's jobs stay on screen
- *  greyed out, but they no longer count towards the badge. */
+ *  greyed out, but they no longer count towards the badge.
+ *
+ *  A field break (issue #52) is a separate axis, so it is folded in here rather
+ *  than through the passed `severity`: it bumps an otherwise-`ok` badge to amber,
+ *  and every caller — a scan cycle, a resume, a GC prune — reflects it without
+ *  having to know about it. It never overrides a hard red (a challenge outranks a
+ *  dead selector), so it only ever raises `ok` to `warn`. */
 async function updateBadge(severity: Severity): Promise<void> {
-  const [jobs, settings] = await Promise.all([get("jobs"), get("settings")]);
+  const [jobs, settings, fieldHealth] = await Promise.all([
+    get("jobs"),
+    get("settings"),
+    get("fieldHealth"),
+  ]);
   const blocked = settings.blockedCompanies.map((b) => b.normalized);
   const { text, color } = badgeFor(
     unreadCount(jobs, blocked, settings.hideReposted),
-    severity,
+    badgeSeverityWithFieldBreak(severity, fieldHealth),
   );
   await chrome.action.setBadgeText({ text });
   await chrome.action.setBadgeBackgroundColor({ color });
@@ -221,6 +239,34 @@ async function firePush(settings: Settings, newJobs: Job[]): Promise<void> {
   );
 }
 
+/** The once-a-day field-break alarm (issue #54, PRD §8 / §16.4). The badge and the
+ *  banner from #52 already exist and already failed to be noticed twice; this is
+ *  the loud channel on top, landing in the chat the user reads. `reduceFieldPush`
+ *  owns the whole decision — clear on recovery, hold to one push per 24 hours while
+ *  lit, skip entirely when push is unconfigured — and this only posts the message
+ *  it green-lights. Like `firePush`, a swallowed send failure can never break the
+ *  cycle, and an unconfigured push leaves both the state and the standing badge/
+ *  banner untouched. `postings` is the cycle-wide `0 of N` denominator the guard
+ *  judged. */
+async function fireFieldBreakPush(
+  settings: Settings,
+  brokenFields: string[],
+  postings: number,
+): Promise<void> {
+  const cfg = settings.push;
+  const { state, send } = reduceFieldPush(
+    await get("fieldBreakPush"),
+    brokenFields.length > 0,
+    canPush(cfg),
+    Date.now(),
+  );
+  if (send) {
+    const message = buildFieldBreakPush(brokenFields, postings);
+    if (message) await sendFieldBreakPush(message, cfg);
+  }
+  await set("fieldBreakPush", state);
+}
+
 /** Send the `[Applied]` message for one job — PRD §8's push, reused for the answer
  *  to "Did you apply for this job?".
  *
@@ -280,7 +326,7 @@ function waitForTabComplete(tabId: number): Promise<boolean> {
 /** The result of loading one page: the parsed jobs plus its classified outcome
  *  (PRD §16). The classification is `classifyPage`'s — this wrapper only gathers
  *  the raw signals it needs. */
-type PageResult = { jobs: Job[]; outcome: PageOutcome };
+type PageResult = { jobs: Job[]; outcome: PageOutcome; fieldCounts: FieldReadCounts };
 
 /**
  * Open the one window a cycle reads all of its pages in, tucked into the corner
@@ -374,6 +420,7 @@ async function scanPageIn(session: ScanSession, url: string, focused: boolean): 
     let savedCount = 0;
     let slotCount = 0;
     let settled = false;
+    let fieldCounts: FieldReadCounts = NO_FIELD_READS;
     // Whether the page answered at all. Without this, "the content script never
     // replied" and "the page replied that it holds no job list" both arrive as a
     // row of zeros and get diagnosed as the same fault, which they are not.
@@ -389,6 +436,7 @@ async function scanPageIn(session: ScanSession, url: string, focused: boolean): 
         savedCount = res.savedCount;
         slotCount = res.slotCount;
         settled = res.settled;
+        fieldCounts = res.fieldCounts;
       }
     } catch {
       // content script unreachable — the URL-based signals below still classify it
@@ -405,6 +453,7 @@ async function scanPageIn(session: ScanSession, url: string, focused: boolean): 
       savedCount,
       slotCount,
       settled,
+      fieldCounts,
     };
     const outcome = classifyPage(signals);
     // Logged for EVERY page, not just failures, and attributed to its URL while
@@ -424,7 +473,7 @@ async function scanPageIn(session: ScanSession, url: string, focused: boolean): 
       `landed on ${sameSearchPage(finalUrl, url) ? "the requested URL" : finalUrl}`;
     if (outcome === "ok") console.log(line);
     else console.warn(line);
-    return { jobs, outcome };
+    return { jobs, outcome, fieldCounts };
   } finally {
     // The window outlives the page — it is the cycle's, not this call's — so only
     // the borrowed focus is given back here. `closeScanSession` owns the window.
@@ -461,6 +510,9 @@ async function runCycle(settings: Settings, pages: number): Promise<void> {
     const watches = enabledWatches(settings.watches);
     const found: Job[] = [];
     const outcomes: PageOutcome[] = [];
+    // Per-page field-read counts, summed at the end for the separate field-break
+    // axis (issue #52). Collected alongside `outcomes` — one entry per page read.
+    const fieldCountsList: FieldReadCounts[] = [];
     // Logged up front so the per-page lines below can be read as a complete set:
     // without it, a console attached partway through a cycle looks identical to a
     // cycle that only ever scanned one page.
@@ -482,16 +534,16 @@ async function runCycle(settings: Settings, pages: number): Promise<void> {
           const pageUrl = scanPageUrl(watch.url, page);
           // No window means no read at all; report it as the infra failure it is
           // rather than as an empty search, which would trip the back-off.
-          let { jobs, outcome } = session
+          let { jobs, outcome, fieldCounts } = session
             ? await scanPageIn(session, pageUrl, false)
-            : { jobs: [] as Job[], outcome: "load-failed" as PageOutcome };
+            : { jobs: [] as Job[], outcome: "load-failed" as PageOutcome, fieldCounts: NO_FIELD_READS };
           // A load failure retries the page once, then skips it and continues the
           // cycle (PRD §16.5). The retry is infra, not a parser signal, so a
           // persistent `load-failed` is recorded as such — `reduceScanHealth` leaves
           // the empty-scan back-off counter untouched for it.
           if (session && outcome === "load-failed") {
             await sleep(randomPauseMs(settings.pacing.pagePauseMs));
-            ({ jobs, outcome } = await scanPageIn(session, pageUrl, false));
+            ({ jobs, outcome, fieldCounts } = await scanPageIn(session, pageUrl, false));
           }
           // A partial read means the window was on screen but Chrome never painted
           // it — the occluded-window case, which it throttles exactly like a hidden
@@ -500,7 +552,7 @@ async function runCycle(settings: Settings, pages: number): Promise<void> {
           // attempt already failed, and the focus is handed straight back after.
           if (session && outcome === "partial") {
             await sleep(randomPauseMs(settings.pacing.pagePauseMs));
-            ({ jobs, outcome } = await scanPageIn(session, pageUrl, true));
+            ({ jobs, outcome, fieldCounts } = await scanPageIn(session, pageUrl, true));
           }
           // In-cycle pagination guard (issue #30 item 2). A page whose first id
           // repeats the previous page's is `&start=` no longer paginating — the
@@ -518,6 +570,7 @@ async function runCycle(settings: Settings, pages: number): Promise<void> {
           previousFirstId = firstId;
           found.push(...stampJobs(jobs, watch.id, Date.now()));
           outcomes.push(outcome);
+          fieldCountsList.push(fieldCounts);
           if (page < pages) await sleep(randomPauseMs(settings.pacing.pagePauseMs));
         }
         if (w < watches.length - 1) await sleep(randomPauseMs(settings.pacing.watchPauseMs));
@@ -554,15 +607,19 @@ async function runCycle(settings: Settings, pages: number): Promise<void> {
     );
     await set("health", health);
 
-    // Selector-drift telemetry (PRD §16.4): a field blank on EVERY parsed card is
-    // recorded as likely drift; a single blank company on one card is not.
-    const cards = found.map((j) => ({ company: j.company, location: j.location }));
-    for (const field of ["company", "location"] as const) {
-      if (fieldMissingAcrossAll(cards, field)) {
-        console.warn(`[ljw] "${field}" was blank on every card this scan — its selector may have drifted.`);
-      }
-    }
+    // Field-break guard (PRD §16.4, issue #52): the SEPARATE axis from PageOutcome.
+    // Sum the cycle's per-page counts and fold them into their own `fieldHealth`
+    // state — a page can be `ok` on every count above and still have a dead
+    // selector, so this is decided apart from `health` and never ranked against it.
+    // The reducer skips a below-floor sample and fires only at total absence.
+    const fieldCounts = aggregateFieldCounts(fieldCountsList);
+    const fieldHealth = reduceFieldHealth(await get("fieldHealth"), fieldCounts);
+    await set("fieldHealth", fieldHealth);
+    if (fieldHealth.message) console.warn(`[ljw] ${fieldHealth.message}`);
 
+    // Badge reflects the worse of scan health and a field break (issue #52):
+    // `updateBadge` reads `fieldHealth` itself, so a break shows amber even when
+    // the page otherwise read `ok`, and every other badge caller stays in step.
     await updateBadge(health.severity);
     // One merged notification for the whole cycle's new jobs (PRD §3/§9), then the
     // hard-failure health alert if this cycle transitioned into one (§16.8). Both
@@ -572,6 +629,11 @@ async function runCycle(settings: Settings, pages: number): Promise<void> {
     // Additive Telegram push (PRD §8), after the badge and desktop notification so
     // its failure — swallowed by sendPush — can never affect either.
     await firePush(settings, newJobs);
+    // The field-break alarm (issue #54), likewise additive and likewise swallowed:
+    // once a day while the guard above is lit, cleared the moment it recovers. The
+    // badge and banner were set regardless — this is the loud nudge on top, not the
+    // only trace, so an unconfigured or failed push changes nothing already shown.
+    await fireFieldBreakPush(settings, fieldHealth.brokenFields, fieldCounts.postings);
   } finally {
     clearInterval(keepalive);
   }

@@ -4,8 +4,10 @@ import {
   appliedPushNotice,
   escapeHtml,
   buildAppliedMessage,
+  buildFieldBreakPush,
   buildPushMessages,
   sendAppliedPush,
+  sendFieldBreakPush,
   sendPush,
   type AppliedJob,
   type PushConfig,
@@ -373,4 +375,87 @@ test("sendAppliedPush swallows failures — the record is already saved either w
   };
   assert.equal(await sendAppliedPush(applied(), "", enabledCfg, refused as typeof fetch), false);
   assert.equal(await sendAppliedPush(applied(), "", enabledCfg, throwing as typeof fetch), false);
+});
+
+// ── The field-break alarm (issue #54, §8 / §16.4) ────────────────────────────
+
+test("buildFieldBreakPush matches the copy: names the field, gives 0 of N, says jobs still arrive, points at Options", () => {
+  assert.equal(
+    buildFieldBreakPush(["company"], 25),
+    "⚠️ LinkedIn's job list changed\n\n" +
+      "Company names stopped reading — 0 of the 25 jobs on the last scan had one.\n\n" +
+      "Everything else still works. Jobs are still being found and sent to you.\n\n" +
+      "To get it fixed, save a copy of your job-search page while you're logged in. " +
+      "The extension's Options page has a button for it.",
+  );
+});
+
+test("buildFieldBreakPush says jobs have STOPPED arriving when a load-bearing field broke", () => {
+  // A dead `location` is cosmetic; a dead `title` (or `url`) means no job is saved
+  // at all, and that is the one thing the reader needs to know (issue #54, job 3).
+  const title = buildFieldBreakPush(["title"], 25)!;
+  assert.match(title, /Job titles stopped reading — 0 of the 25 jobs/);
+  assert.doesNotMatch(title, /still being found/);
+  assert.match(title, /can't be read while this is broken/);
+
+  assert.match(buildFieldBreakPush(["url"], 25)!, /can't be read while this is broken/);
+});
+
+test("buildFieldBreakPush names every broken field when a deploy kills more than one", () => {
+  const text = buildFieldBreakPush(["company", "location"], 25)!;
+  assert.match(text, /Company names and Locations stopped reading/);
+  // Plural pronoun once more than one field is named.
+  assert.match(text, /had them\./);
+  // company+location are both cosmetic, so jobs are still arriving.
+  assert.match(text, /still being found/);
+});
+
+test("buildFieldBreakPush names the date-or-label invariant readably, not as a raw key", () => {
+  assert.match(buildFieldBreakPush(["dateOrLabel"], 25)!, /Posting dates stopped reading/);
+});
+
+test("buildFieldBreakPush is null when nothing is broken — there is nothing to alarm about", () => {
+  assert.equal(buildFieldBreakPush([], 25), null);
+});
+
+test("sendFieldBreakPush is a no-op (false) when push is off or unconfigured", async () => {
+  const never = () => {
+    throw new Error("fetch should not be called");
+  };
+  const cases: PushConfig[] = [
+    { ...enabledCfg, enabled: false },
+    { ...enabledCfg, botToken: "" },
+    { ...enabledCfg, chatId: "" },
+  ];
+  for (const cfg of cases) {
+    assert.equal(await sendFieldBreakPush("⚠️ …", cfg, never as typeof fetch), false);
+  }
+});
+
+test("sendFieldBreakPush POSTs the alarm to the same endpoint as every other push", async () => {
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  const fakeFetch = async (url: string | URL, init?: RequestInit) => {
+    calls.push({ url: String(url), init: init ?? {} });
+    return { ok: true } as Response;
+  };
+
+  const text = buildFieldBreakPush(["company"], 25)!;
+  const ok = await sendFieldBreakPush(text, enabledCfg, fakeFetch as typeof fetch);
+
+  assert.equal(ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]!.url, "https://api.telegram.org/bot123:ABC/sendMessage");
+  const body = JSON.parse(String(calls[0]!.init.body));
+  assert.equal(body.chat_id, "42");
+  assert.equal(body.text, text);
+});
+
+test("sendFieldBreakPush swallows failures — a dead phone must not break the scan that noticed the break", async () => {
+  const refused = async () =>
+    ({ ok: false, status: 400, text: async () => "" }) as unknown as Response;
+  const throwing = async () => {
+    throw new Error("network down");
+  };
+  assert.equal(await sendFieldBreakPush("⚠️ …", enabledCfg, refused as typeof fetch), false);
+  assert.equal(await sendFieldBreakPush("⚠️ …", enabledCfg, throwing as typeof fetch), false);
 });

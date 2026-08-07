@@ -43,7 +43,10 @@ function job(overrides: Partial<Job> = {}): Job {
     company: "Acme Corp",
     location: "Remote",
     isReposted: false,
+    postedAt: null,
+    postedPrecision: null,
     postedText: "2 hours ago",
+    linkedInStatus: null,
     url: "https://www.linkedin.com/jobs/view/1/",
     foundAt: NOW,
     watchId: "w1",
@@ -153,6 +156,19 @@ test("a job record with none of the three apply fields is still valid", () => {
   const result = parseBackup(asText(backup({ jobs: { "1": job() } })));
   assert.equal(result.ok, true);
   assert.equal(result.ok && "applied" in (result.backup.jobs["1"] ?? {}), false);
+});
+
+test("a job record with none of the posting-date fields still imports (backup predates issue #48)", () => {
+  // A file exported before postedAt/postedPrecision/linkedInStatus shipped carries
+  // none of them; they are optional in the schema, so it imports unchanged and
+  // BACKUP_VERSION does not move for an added optional field.
+  const legacy = job({ id: "1" });
+  delete (legacy as { postedAt?: unknown }).postedAt;
+  delete (legacy as { postedPrecision?: unknown }).postedPrecision;
+  delete (legacy as { linkedInStatus?: unknown }).linkedInStatus;
+  const result = parseBackup(asText(backup({ jobs: { "1": legacy } })));
+  assert.equal(result.ok, true);
+  assert.equal(result.ok && "postedAt" in (result.backup.jobs["1"] ?? {}), false);
 });
 
 test("the seen map survives, which is what stops a restore re-announcing", () => {

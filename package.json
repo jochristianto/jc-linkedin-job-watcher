@@ -3,6 +3,7 @@
   "scripts": {
     "sandcastle": "npm run sandcastle:preflight && npx tsx .sandcastle/main.mts",
     "sandcastle:preflight": "npx tsx .sandcastle/preflight.mts",
+    "sandcastle:clean": "node .sandcastle/clean.mjs",
     "typecheck": "tsc --noEmit",
     "build": "vite build && vite build --config vite.content.config.ts",
     "build:dev": "vite build --mode prefill && vite build --config vite.content.config.ts",

@@ -16,8 +16,10 @@ import {
   parseJobCards,
   postingIdsOn,
 } from "./parse.ts";
-import { pollUntilSettled, type SettleSample } from "./scan-probe.ts";
+import { fieldReadCounts, NO_FIELD_READS } from "./health.ts";
+import { pollUntilSettled, type PollResult, type SettleSample } from "./scan-probe.ts";
 import { readScanToken, scanTokenMatches, type ScanRequest, type ScanResponse } from "./scan.ts";
+import type { CaptureRequest, CaptureResponse } from "./capture.ts";
 import type { Job } from "./types.ts";
 
 /** Poll cadence for walking the lazy list — issue #5's 60–90s cycle budget. The
@@ -57,7 +59,11 @@ function scrollStep(el: Element): boolean {
  * LinkedIn later starts recycling rows: it costs one cheap re-parse per step and
  * removes any dependence on what happens to be in the DOM at the final instant.
  */
-async function readPage(): Promise<ScanResponse> {
+async function walkResultsList(): Promise<{
+  found: Map<string, Job>;
+  seenIds: Set<string>;
+  settle: PollResult;
+}> {
   const found = new Map<string, Job>();
   const seenIds = new Set<string>();
 
@@ -83,19 +89,54 @@ async function readPage(): Promise<ScanResponse> {
   };
 
   const settle = await pollUntilSettled({ sample, sleep, now: () => Date.now() }, POLL_OPTS);
+  return { found, seenIds, settle };
+}
+
+async function readPage(): Promise<ScanResponse> {
+  const { found, seenIds, settle } = await walkResultsList();
+  const jobs = Array.from(found.values());
 
   // The classified-outcome signals (§16): where we landed, whether the list
   // container is even present, and the three counts — never a bare "0 cards".
   // The *decision* (empty vs partial vs structure-changed vs logged-out …) is
   // classifyPage's, run in the background against these; this only reads them off.
   return {
-    jobs: Array.from(found.values()),
+    jobs,
     settled: settle.settled,
     finalUrl: window.location.href,
     hasResultsList: document.querySelector(RESULTS_LIST_SELECTOR) !== null,
     cardCount: seenIds.size,
     savedCount: found.size,
     slotCount: settle.expected,
+    // Per-field present-counts for the separate field-break axis (issue #52). Read
+    // off the parsed postings here so `reduceFieldHealth` in the background stays
+    // pure numbers, the way classifyPage already takes only the counts above.
+    fieldCounts: fieldReadCounts(jobs),
+  };
+}
+
+/**
+ * Scroll the results list until its cards materialise, then hand back the whole
+ * page serialised (issue #49). The scroll is load-bearing, not a nicety: an
+ * un-scrolled list paints only a handful of real cards, so a capture taken without
+ * walking it first is a capture of nothing — the same reason the scan walks it.
+ *
+ * It returns the page whatever state it is in. A page with no results list, or one
+ * that yielded no cards, is exactly the breakage a capture is meant to diagnose,
+ * so it is saved rather than refused; the *decision* about a signed-out redirect
+ * (`isLoggedOutUrl`) is the options page's, made against `finalUrl`.
+ *
+ * `outerHTML` rather than a full `XMLSerializer` walk: it is what the fixture test
+ * in `parse.test.ts` reads back, and the doctype is prepended so the saved file
+ * opens as a standards-mode document.
+ */
+async function capturePage(): Promise<CaptureResponse> {
+  const { seenIds } = await walkResultsList();
+  return {
+    html: `<!DOCTYPE html>\n${document.documentElement.outerHTML}`,
+    finalUrl: window.location.href,
+    hasResultsList: document.querySelector(RESULTS_LIST_SELECTOR) !== null,
+    cardCount: seenIds.size,
   };
 }
 
@@ -131,6 +172,29 @@ chrome.runtime.onMessage.addListener((message: ScanRequest, _sender, sendRespons
       cardCount: 0,
       savedCount: 0,
       slotCount: document.querySelectorAll(SLOT_SELECTOR).length,
+      fieldCounts: NO_FIELD_READS,
+    });
+  });
+  return true; // keep the message channel open for the async reply
+});
+
+chrome.runtime.onMessage.addListener((message: CaptureRequest, _sender, sendResponse) => {
+  if (message?.type !== "LJW_CAPTURE") return undefined;
+  // No token gate, deliberately (see CaptureRequest): the gate stops the background
+  // scraping a hand-opened tab, but a capture is the user asking to save exactly
+  // that tab, from a click on the extension's own Options page. Only extension
+  // contexts can send this message, so a web page can never reach here.
+  //
+  // Answer even if the walk throws, for the same reason readPage does: a channel
+  // that closes empty is indistinguishable from an unreachable tab, and the page
+  // would report the wrong next step.
+  void capturePage().then(sendResponse, (err) => {
+    console.error("[ljw] capture failed:", err);
+    sendResponse({
+      html: "",
+      finalUrl: window.location.href,
+      hasResultsList: false,
+      cardCount: 0,
     });
   });
   return true; // keep the message channel open for the async reply

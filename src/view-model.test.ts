@@ -1,3 +1,9 @@
+// Pin the clock to UTC so the calendar rungs and the hover dates are the same
+// strings wherever the suite runs. `postedAt` is anchored to midnight UTC, so in
+// UTC "local time" (which the ladder reads by design) is that same date — exactly
+// what the author's own +07/+09 timezone sees. Set before any Date is touched.
+process.env.TZ = "UTC";
+
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -8,6 +14,8 @@ import {
   metaLine,
   formatCountdown,
   monogram,
+  postedAge,
+  postedHover,
   shortAge,
   splitLocation,
   visibleJobs,
@@ -116,6 +124,102 @@ test("formatAgo reports one coarse unit, never a false-precision second one", ()
 test("formatAgo never says 0m — something found this second was still found", () => {
   assert.equal(formatAgo(0), "1m");
   assert.equal(formatAgo(-5_000), "1m");
+});
+
+// ── postedAge: the live ladder off `postedAt` (issue #51) ────────────────────
+
+const MIN = 60_000;
+const HOUR = 3_600_000;
+const DAY = 86_400_000;
+// A fixed "now" at midnight UTC so the day-and-above rungs are pure calendar
+// differences with no time-of-day drift.
+const NOW = Date.UTC(2026, 7, 7);
+
+/** `postedAge` for a posting whose age is `ms` before `NOW`. */
+const ageAt = (ms: number) => postedAge(NOW - ms, NOW);
+
+test("postedAge floors the sub-hour rung to whole minutes, never 0m", () => {
+  // Something posted this second was still posted — a chip reading "0m" looks
+  // like a bug rather than like news.
+  assert.equal(ageAt(0), "1m ago");
+  assert.equal(ageAt(12 * MIN), "12m ago");
+  assert.equal(ageAt(59 * MIN), "59m ago");
+});
+
+test("postedAge crosses from minutes to hours at exactly one hour", () => {
+  assert.equal(ageAt(59 * MIN), "59m ago");
+  assert.equal(ageAt(60 * MIN), "1h ago");
+});
+
+test("postedAge reports whole hours below a day, rounded", () => {
+  assert.equal(ageAt(6 * HOUR), "6h ago");
+  assert.equal(ageAt(23 * HOUR), "23h ago");
+});
+
+test("postedAge switches to the calendar clock at 24 hours — a day reads 'yesterday'", () => {
+  // The last duration rung, then the first calendar one: "1d" reads worse and
+  // means the same, so a single calendar day is special-cased to a word.
+  assert.equal(ageAt(23 * HOUR), "23h ago");
+  assert.equal(ageAt(24 * HOUR), "yesterday");
+  assert.equal(ageAt(1 * DAY), "yesterday");
+});
+
+test("postedAge counts plain days from two up to six", () => {
+  assert.equal(ageAt(2 * DAY), "2d ago");
+  assert.equal(ageAt(5 * DAY), "5d ago");
+  assert.equal(ageAt(6 * DAY), "6d ago");
+});
+
+test("postedAge rounds to weeks from seven days to twenty-nine", () => {
+  assert.equal(ageAt(7 * DAY), "1w ago");
+  assert.equal(ageAt(29 * DAY), "4w ago");
+});
+
+test("postedAge rounds weeks half-up, erring older: 24 days is 3w, 25 days is 4w", () => {
+  // A stale job that looks fresh costs an application; a fresh one that looks
+  // stale costs a glance. The tie breaks towards older.
+  assert.equal(ageAt(24 * DAY), "3w ago");
+  assert.equal(ageAt(25 * DAY), "4w ago");
+});
+
+test("postedAge rounds to months from thirty days to 364, at 30.44 days each", () => {
+  assert.equal(ageAt(30 * DAY), "1mo ago");
+  assert.equal(ageAt(364 * DAY), "12mo ago");
+});
+
+test("postedAge never abbreviates a months-old posting to 'm' — that is minutes", () => {
+  // "Posted 3m ago" about a three-month-old posting is the one lie that matters
+  // most when deciding whether to bother applying.
+  const threeMonths = ageAt(91 * DAY);
+  assert.equal(threeMonths, "3mo ago");
+  assert.doesNotMatch(threeMonths, /\dm ago/);
+});
+
+test("postedAge rounds to years at 365 days and beyond", () => {
+  assert.equal(ageAt(365 * DAY), "1y ago");
+  assert.equal(ageAt(730 * DAY), "2y ago");
+});
+
+// ── postedHover: the date in words, per precision (issue #51) ─────────────────
+
+test("postedHover spells an exact date to the minute", () => {
+  const posted = Date.UTC(2026, 7, 7, 8, 48);
+  assert.equal(postedHover(posted, "exact"), "Posted 7 Aug 2026, 08:48");
+});
+
+test("postedHover spells a day-precise date without a time", () => {
+  const posted = Date.UTC(2026, 6, 17);
+  assert.equal(postedHover(posted, "day"), "Posted 17 Jul 2026");
+});
+
+test("postedHover says an estimated date is a guess, in words", () => {
+  // The one case that has to explain itself: the row's `~` carries the guess,
+  // the hover says so rather than leave the glyph alone.
+  const posted = Date.UTC(2026, 6, 17);
+  assert.equal(
+    postedHover(posted, "estimated"),
+    "Posted around 17 Jul 2026 — estimated from LinkedIn's wording",
+  );
 });
 
 test("splitLocation lifts the work mode out of its trailing bracket", () => {

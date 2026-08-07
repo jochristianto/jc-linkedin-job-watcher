@@ -54,6 +54,9 @@ New jobs surface in two places: a badge count on the extension icon, and a deskt
 ### List view
 
 - Shows unread jobs, newest first: title, company, location, posted time, source watch
+- The **posting age is live**, recomputed from the stored date each time the row draws (issue #51), so a job found three weeks ago stops insisting it was posted two weeks ago. The ladder reads `12m` / `6h` / `yesterday` / `5d` / `3w` / `2mo` / `1y`, rounded half-up so a tie errs *older* (24 days is `3w`, 25 is `4w`) and using `mo` for months so a three-month-old posting never reads `3m` (`m` is minutes). Below a day it is an elapsed duration; at a day and above a calendar difference, because the stored date is only day-precise up there and "yesterday" is a calendar word. Hover gives the date in words; an **estimated** date wears a `~` and says so on hover. A record saved before the date was stored keeps showing its frozen phrase, unchanged, and ages out within 30 days
+- Where LinkedIn withheld the date — because the posting has already been opened *anywhere*, including directly on LinkedIn outside this extension — the row carries a **`Seen on LinkedIn`** chip instead of a date. That is distinct from `Opened` (you opened it *from this list*): the two co-occur, and the informative case is `Seen on LinkedIn` without `Opened` — a posting looked at on LinkedIn and forgotten. The chip sits in the meta line with the other chips, not beside the title with `Blocked`: it is a fact about the posting, not a verdict on it
+- A card LinkedIn marked **`Reposted`** — the employer re-listed the role, often because nobody took the first listing — carries an amber **`Reposted`** chip (issue #53). It sits immediately after the posting-age slot (after `Posted … ago`, or after `Seen on LinkedIn` where there is no date) and ahead of `Found …`: the date and the repost are both facts about the posting's own history, while `Found …` is a fact about the watcher. Amber, not grey, so a possibly-stale row is findable while skimming; the full word on both surfaces, the popup wrapping the line rather than abbreviating. It is a chip, not a badge beside the title, for the same reason `Seen on LinkedIn` is — a detail of the posting, not a verdict on it. `Job.isReposted` has existed since the beginning and only ever fed the hide filter; this surfaces it. With **Hide reposted** on the row never renders, so the chip and the filter never both appear. Read as `=== true`: a record written before the flag existed has it absent, which means "no marker seen", not "reposted"
 - Badge on the extension icon counts the jobs you have not looked at yet
 - Click a job → opens it in a new tab, clears the row's unread dot and takes it off the badge, and tags the row "Opened". Looking is not dismissing, though: the row itself **stays in the list**, so a job you clicked into is still there when you come back to it
 - Each row has its own "mark as read" button — the only action that greys a row and drops it out of "New". It toggles, so a mis-click is one press back, and un-ticking a row you had opened puts its dot back
@@ -114,7 +117,19 @@ type Job = {
   company: string;
   location: string;
   isReposted: boolean;
-  postedText: string; // "2 hours ago"
+  // LinkedIn's own posting date, kept as a real date rather than the frozen phrase
+  // it was true at scan time (issue #48). `postedAt` is resolved four ways per card
+  // — fresh phrase to the minute, `<time datetime>` attribute to the day, coarse
+  // phrase to a midpoint estimate, or nothing — and `postedPrecision` says which;
+  // only `"estimated"` shows a `~`. `linkedInStatus` reads the exclusive footer
+  // slot, the one honest answer to why a card has no date. All three are optional
+  // in a backup file: records and files written before this shipped carry none,
+  // and an absent `postedAt` reads as "never captured" — the same state a `Viewed`
+  // card is stored in. `postedText` stays required — it has always been written.
+  postedAt: number | null;
+  postedPrecision: "exact" | "day" | "estimated" | null;
+  postedText: string; // "2 hours ago" — the words LinkedIn rendered, unchanged
+  linkedInStatus: "posted" | "promoted" | "viewed" | "applied" | null;
   url: string;
   foundAt: number;
   watchId: string; // which saved search surfaced it
@@ -476,6 +491,24 @@ Desktop notification and push both fire. They serve different moments — one fo
 
 Silent push failure is the most likely thing to go wrong — a wrong chat ID produces no error you'd notice for days. A test button that reports success or failure inline removes that whole class of problem.
 
+### A third message: the field-break alarm (issue #54)
+
+Push carried new jobs only — never health. The field-break guard (§16.4) lights a badge and a popup banner, but those *already existed and already failed*: the extension went quiet twice and it was weeks before anyone noticed the amber badge that was there the whole time. So the guard's finding also goes out over Telegram, the one channel that persists in a chat the user reads rather than firing once into an empty room.
+
+```text
+⚠️ LinkedIn's job list changed
+
+Company names stopped reading — 0 of the 25 jobs on the last scan had one.
+
+Everything else still works. Jobs are still being found and sent to you.
+
+To get it fixed, save a copy of your job-search page while you're logged in. The extension's Options page has a button for it.
+```
+
+Four jobs, in order (`buildFieldBreakPush`, proved against this copy): **name the field** ("LinkedIn changed" is not actionable); **give the count** (`0 of N`, so whoever fixes it has the number); **say whether jobs are still arriving** — a dead `location` is cosmetic but a dead `title`/`url` means no job is saved at all, so the third line flips to "New jobs can't be read while this is broken"; and **name the one action that helps** — the Options capture button (§ Diagnostics / issue #49), which is why #54 is blocked on it, a message naming a button that does not exist being worse than none.
+
+**Cadence — once a day while broken.** Scans run every ~5 minutes, so this is the difference between ~288 pushes a day and one. The user's call, chosen over "once per break" and a weekly nudge: a fix can take a fortnight, and a daily alert about something already known is how a guard earns an uninstall — but the badge and banner stay lit continuously regardless, so the daily push is a nudge on top of a standing signal, not the only trace. State is one `lastPushedAt` (`'fieldBreakPush'` key) that spaces the send; `reduceFieldPush` is the pure gate (injected `lastPushedAt`, literal `now`). Recovery is immediate — the first scan that reads the field again clears the state and stops the pushes, so a *later* break pushes again rather than staying suppressed. A push that fails is swallowed exactly like §8's others, and with Telegram unconfigured the guard still lights the badge and banner and nothing throws. (Bounding the cadence — daily for a fortnight, weekly after — is offered to a later ticket if it bites, not built unasked.)
+
 ---
 
 ## 9. Key flows
@@ -687,6 +720,8 @@ export function parseJobCards(doc: Document): Job[] { ... }
 parseJobCards(document);
 ```
 
+`parseJobCards` reads only the `Document` — including the `<time datetime>` attribute and the age phrase — and never a clock (issue #48). Reading an attribute is not reading a clock: the parser resolves the attribute to a `postedAt` at day precision and reads the footer's exclusive state into `linkedInStatus`, but the phrase cases (fresh-to-the-minute and coarse-estimate) need `foundAt`, which the pure `stampJobs` supplies later. So both halves stay provable against literal inputs, and no `Date.now()` is ever injected into the reader.
+
 - **Fixtures live in** `.scratch/linkedin-job-watcher/fixtures/page-1/` and `.../page-2/` — **gitignored** (a saved logged-in page carries profile chrome; it must never be committed, per `.gitignore` and issue #2).
 - **A test loads a fixture with `node:fs` + a DOM parser** (`linkedom` or `jsdom`, dev-dependency only) and asserts the parsed IDs/fields. Because fixtures are gitignored, the parser test **skips cleanly (`test.skip`) when its fixture file is absent** so CI/other machines stay green; it runs wherever the human has captured the page.
 - **Refreshing when LinkedIn changes:** re-capture the two pages into the same folders (issue #2 checklist), re-run `npm test`, update selectors until green. The failing parser test is the signal that LinkedIn moved the DOM (PRD §12).
@@ -782,7 +817,17 @@ The unifying idea: the content script never reports a bare "0 cards." It reports
 
 3. **Zero cards parsed — "no results" vs "LinkedIn changed the page."** Told apart by **whether the results-list container is present at all**, not by the card count. Container present, zero cards → `empty` (a genuine "no results for this search," benign). Container **absent** → `structure-changed` (the selectors are dead — LinkedIn moved the DOM). **Behaviour:** `structure-changed` warns **immediately** (a missing list is unambiguous); `empty` only warns after `emptyScansBeforeBackoff` (default 3) consecutive empties, since one quiet search is normal. Both feed the §15 back-off counter, so a broken parser also lengthens the interval instead of hammering. **Signal:** amber badge + banner "Reading may be broken." No desktop notification — soft failures use the passive channels to avoid notification fatigue.
 
-4. **Partial parse.** Each field fails independently (§12). A job with a valid `id`, `title` and `url` is **saved and shown** even if `company`/`location` came back blank — the list view already drops blank meta parts (`renderJobRow`, mockups/render.ts). Only the three load-bearing fields are required (`isSavableJob`): id for dedupe, url to open, title to show; a card missing any of them is dropped. A field blank on **every** card in a scan (`fieldMissingAcrossAll`) is a soft selector-drift signal worth recording — a per-job blank is not.
+   **One named cause of a missing list — the new results surface (issue #50 / #47).** LinkedIn runs two job-search surfaces at once: the classic `/jobs/search/` this plan is built and tested against, and a newer `/jobs/search-results/` with build-hashed class names and no readable card-level date. When a missing results list is paired with a final URL that is *not* on `/jobs/search/`, the outcome is `search-moved` rather than the generic `structure-changed`, and the banner says so: "LinkedIn moved your search to its new results page, which this extension cannot read yet." Same amber severity and back-off behaviour — this only sharpens the message from a shrug into something actionable. The URL check sits *after* the challenge and logged-out checks in `classifyPage`, so it can never outrank an account-safety signal (a redirect to `/authwall` or `/checkpoint/` still classifies as logged-out / challenge). This is the trigger recorded on #47: if this outcome ever fires, supporting the new surface reopens as its own effort — no second selector set is added here.
+
+4. **Partial parse.** Each field fails independently (§12). A job with a valid `id`, `title` and `url` is **saved and shown** even if `company`/`location` came back blank — the list view already drops blank meta parts (`renderJobRow`, mockups/render.ts). Only the three load-bearing fields are required (`isSavableJob`): id for dedupe, url to open, title to show; a card missing any of them is dropped.
+
+   **Field-break guard — notice when a field stops reading (issue #52).** A soft drift signal on its **own axis**, decided by its own pure reducer (`reduceFieldHealth`) and persisted in its own key (`'fieldHealth'`), exactly as `reducePushHealth`/`pushHealth` sit beside scan health — **not** a new `PageOutcome` arm. Folding it into that worst-first enum would force a ranking and let a `structure-changed` on one watch mask a field break on another; a page can be `ok` on every §16.3 count and still have a dead selector.
+
+   - **What is guarded:** the four always-present fields — `title`, `company`, `location`, `url` (0 blank across 50 measured postings) — plus one **invariant** that stands in for the one field that *cannot* be counted. The posting **date** is legitimately absent from a third to two-thirds of a healthy page (LinkedIn withholds it on opened postings, showing a `Viewed` badge instead), so a guard on the raw date count would have fired on both healthy captures. The invariant instead: **every posting carries a `<time>` date *or* a footer state label, never neither** (50/50, no exceptions). Read straight off `linkedInStatus` (§5): `posted` = a date was read, `viewed`/`promoted`/`applied` = a label, `null` = neither — so an unobserved `Promoted` card counts rather than trips a false alarm. **Reposted is deliberately excluded** — no reposted card has ever been captured, so there is no baseline for "normal."
+   - **The threshold is a cliff, not a slope:** fires only when a guarded field is present on **zero** of the scan's postings, never a ratio. A class rename hits every card in one deploy, so a real break is `0 of N`, not `18 of 25`; `COMPLETE_READ_RATIO` (0.9) guards a different question — did we read the whole list — and is deliberately **not** reused. A **sample floor** of 5 postings (a judgement call, not from the captures) means `0 of 1` never trips the alarm; below it the scan is not judged and the prior state is carried unchanged.
+   - **Behaviour:** amber badge + a popup banner naming the field(s) and the count, **plus a once-a-day Telegram alarm** (issue #54, §8). No desktop notification (like the other soft failures). The badge and banner from #52 already existed and already failed to be noticed — the extension went quiet twice and it was weeks before anyone saw the amber badge sitting there — so #54 adds the one channel that persists in a chat the user actually reads. The strict `0-of-N` threshold is what pays for a channel that loud: a false positive is close to impossible, which is the only reason a daily alarm is defensible. The state persists across scans and clears on the first scan that reads every field again.
+
+   A field blank on **every** card in a scan used to be only a console log; this guard turns that observation into a persisted, surfaced state (`fieldHealth`), on its own axis so it can be acted on rather than lost in the noise.
 
 5. **Tab fails to load** (timeout, network down, 5xx). Outcome `load-failed`. **Behaviour:** **retry that one page once** (blips are transient), then **skip** it and continue the cycle — a transient failure on one watch must not abort the others. Crucially, `load-failed` **does not** count toward the empty-scan back-off: it's an infra failure, not a parser signal, so a flaky network doesn't masquerade as "LinkedIn changed the page." **Signal:** none in v1 beyond a logged event (repeated total-network-outage warning is deferred — if LinkedIn is fully unreachable the user has bigger cues).
 
@@ -794,8 +839,8 @@ The unifying idea: the content script never reports a bare "0 cards." It reports
 
 | Mechanism | Drives | v1? |
 | --- | --- | --- |
-| **Badge colour** | `severity`: default (ok) / amber (warn) / red (error) | **v1** |
-| **Popup banner** | `message` — one line describing the problem and the fix | **v1** |
+| **Badge colour** | `severity`: default (ok) / amber (warn) / red (error); a field break (§16.4) bumps an otherwise-ok badge to amber | **v1** |
+| **Popup banner** | `message` — one line describing the problem and the fix; a field break stacks its own amber banner | **v1** |
 | **Desktop notification** | **Hard** failures only (`challenge`, `logged-out`), once on transition | **v1** |
 | **Options error log** | A rolling list of the last N failure events with timestamps | **Deferred** — badge + banner + notification cover "find out"; a full log UI is post-v1 |
 
@@ -803,7 +848,7 @@ The split: hard failures (challenge, logged out) get an active push — a deskto
 
 ### Structural consequence
 
-Per §14, the decision logic is pure and tested (`src/health.ts` + `src/health.test.ts`): `classifyPage`, `aggregateOutcome`, `reduceScanHealth`, `isSavableJob`, `fieldMissingAcrossAll`, `reducePushHealth`, `isLockStale`. The content script reads the live DOM/URL into a `PageSignals`; `background.ts` persists the `HealthState`, sets the badge, and fires notifications — none of that is unit-tested, all of the decisions are.
+Per §14, the decision logic is pure and tested (`src/health.ts` + `src/health.test.ts`): `classifyPage`, `aggregateOutcome`, `reduceScanHealth`, `isSavableJob`, `fieldReadCounts`/`aggregateFieldCounts`/`reduceFieldHealth` (the field-break axis, §16.4), `reduceFieldPush` (its once-a-day Telegram cadence, §8/issue #54), `reducePushHealth`, `isLockStale`. The message that alarm carries is `buildFieldBreakPush` in `src/push.ts`, proved against its copy. The content script reads the live DOM/URL into a `PageSignals` — including the per-field present-counts and the date-or-label count — and `background.ts` persists the `HealthState`/`fieldHealth`/`fieldBreakPush`, sets the badge, and fires notifications — none of that is unit-tested, all of the decisions are.
 
 ---
 

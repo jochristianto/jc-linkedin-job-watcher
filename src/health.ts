@@ -31,6 +31,11 @@ import type { BackoffConfig } from "./schedule.ts";
  *                         supposed to prevent, so it is never reported as `ok`.
  * - `structure-changed` — the results list itself was absent. Selectors are dead
  *                         — LinkedIn moved the DOM (PRD §12), not an empty search.
+ * - `search-moved`      — the results list was absent *and* the tab did not land
+ *                         on the classic `/jobs/search/` surface: LinkedIn moved
+ *                         this account onto its newer `/jobs/search-results/` page
+ *                         (PRD §16, issue #50 / #47), which the reader can't parse
+ *                         yet. A specific, nameable cause of `structure-changed`.
  * - `logged-out`        — the tab landed on a login wall / authwall (failure 1).
  * - `challenge`         — landed on a checkpoint / captcha / verification page
  *                         (failure 2). The most dangerous for the account.
@@ -42,6 +47,7 @@ export type PageOutcome =
   | "empty"
   | "partial"
   | "structure-changed"
+  | "search-moved"
   | "logged-out"
   | "challenge"
   | "load-failed";
@@ -78,6 +84,10 @@ export type PageSignals = {
   slotCount: number;
   /** Whether the walk down the list ran to completion. */
   settled: boolean;
+  /** Per-field present-counts and the date-or-label invariant count for this page
+   *  (issue #52). Read off the postings by the content script; fed to the separate
+   *  {@link reduceFieldHealth} axis, never into {@link classifyPage}. */
+  fieldCounts: FieldReadCounts;
 };
 
 /**
@@ -128,7 +138,15 @@ export function classifyPage(s: PageSignals): PageOutcome {
   ) {
     return "logged-out";
   }
-  if (!s.hasResultsList) return "structure-changed";
+  if (!s.hasResultsList) {
+    // Same broken outcome, but a nameable cause when we can point to it: a tab
+    // that ended anywhere other than the classic `/jobs/search/` surface was
+    // moved onto LinkedIn's newer results page, which the reader can't parse yet
+    // (issue #50 / #47). Ranked below logged-out/challenge above, so this URL
+    // check can never outrank an account-safety signal.
+    if (!url.includes("/jobs/search/")) return "search-moved";
+    return "structure-changed";
+  }
   if (s.cardCount === 0) return "empty";
   if (isPartialRead(s)) return "partial";
   return "ok";
@@ -145,8 +163,11 @@ const RANK: Record<PageOutcome, number> = {
   // that loaded and was only half-read drops postings on every single cycle.
   partial: 3,
   "structure-changed": 4,
-  "logged-out": 5,
-  challenge: 6,
+  // Above structure-changed: same amber severity, but when a cycle has both, the
+  // specific "moved to the new surface" message is the one worth showing (#50).
+  "search-moved": 5,
+  "logged-out": 6,
+  challenge: 7,
 };
 
 /**
@@ -218,6 +239,9 @@ export const OK_HEALTH: HealthState = {
  * - `structure-changed`→ a dead selector is unambiguous, so warn **immediately**
  *                        (amber), no threshold wait (§16.3). Still counts toward
  *                        the empty-scan back-off.
+ * - `search-moved`     → same as structure-changed, but with the specific message
+ *                        that LinkedIn moved the account to its new results page
+ *                        (§16, issue #50) — actionable, not a shrug.
  * - `empty`            → could just be a quiet search, so it only warns once it
  *                        has repeated `emptyScansBeforeBackoff` times (§16.3 /
  *                        §15.6). Increments the counter.
@@ -255,6 +279,19 @@ export function reduceScanHealth(
         severity: "warn",
         consecutiveEmptyScans: n,
         message: "No job list on the page — LinkedIn may have changed its layout. Reading may be broken.",
+        notify: false,
+      };
+    }
+    case "search-moved": {
+      // A named structure-changed: warn at once and feed the same back-off
+      // counter, but say *why* the page can't be read — LinkedIn moved this
+      // account onto its newer results surface, unsupported for now (#50 / #47).
+      const n = prior.consecutiveEmptyScans + 1;
+      return {
+        mode: "active",
+        severity: "warn",
+        consecutiveEmptyScans: n,
+        message: "LinkedIn moved your search to its new results page, which this extension cannot read yet.",
         notify: false,
       };
     }
@@ -302,17 +339,260 @@ export function isSavableJob(job: { id: string; title: string; url: string }): b
   return job.id.trim() !== "" && job.title.trim() !== "" && job.url.trim() !== "";
 }
 
+// ── Field-break guard (issue #52, PRD §16.4) ─────────────────────────────────
+//
+// Sits beside reduceScanHealth exactly as reducePushHealth does, because a field
+// break is a DIFFERENT AXIS from PageOutcome. A page can be `ok` on every count —
+// list present, whole list read — and still have a dead selector, so folding this
+// into that enum would force a ranking and let a `structure-changed` on one watch
+// mask a field break on another. Its own state, its own pure reducer, decided
+// against plain numbers with no DOM and no clock.
+//
+// It guards the four always-present fields (title/company/location/url — 0 blank
+// across 50 measured postings) plus one invariant that stands in for the one field
+// that CANNOT be counted: the posting date, legitimately absent from a third to
+// two-thirds of a healthy page because LinkedIn withholds it on opened postings.
+// A guard on the raw date count would have fired on both healthy captures. The
+// invariant instead: every posting carries a `<time>` date OR a footer state label,
+// never neither (50/50, no exceptions). Counting dates drifts with the user's
+// browsing; counting dates-or-labels does not. Reposted is deliberately excluded —
+// no reposted card has ever been captured, so there is no baseline for "normal".
+
+/** The always-present fields this guard counts, in a stable display order. */
+export const GUARDED_FIELDS = ["title", "company", "location", "url"] as const;
+export type GuardedField = (typeof GUARDED_FIELDS)[number];
+
+/** Per-field present-counts read off a scan's postings, plus the date-or-label
+ *  invariant count (issue #52). Plain numbers so {@link reduceFieldHealth} needs
+ *  no DOM. The content script reads these off the live page (`fieldReadCounts`);
+ *  the decision is made here. */
+export type FieldReadCounts = {
+  /** Postings evaluated — the sample the {@link FIELD_SAMPLE_FLOOR} guards. */
+  postings: number;
+  /** Postings each guarded field was present (non-blank) on. */
+  title: number;
+  company: number;
+  location: number;
+  url: number;
+  /** Postings carrying a `<time>` date OR a footer state label — the invariant
+   *  that replaces the uncountable date field. */
+  dateOrLabel: number;
+};
+
+/** All-zero counts — the empty / unreachable page, and the sum identity. */
+export const NO_FIELD_READS: FieldReadCounts = {
+  postings: 0,
+  title: 0,
+  company: 0,
+  location: 0,
+  url: 0,
+  dateOrLabel: 0,
+};
+
 /**
- * Soft selector-drift signal (PRD §16.4): given the jobs from a scan, is `field`
- * empty on *every* one? A single blank company is a per-job quirk; blank across
- * all cards means that field's selector likely drifted. Returns false for an
- * empty set (nothing parsed is a §16.3 concern, handled by the outcome, not here).
+ * Count how many of a scan's postings each guarded field read on, plus the
+ * date-or-label invariant (issue #52). Pure over the parsed jobs — no DOM.
+ *
+ * The invariant is read straight off `linkedInStatus`: the parser folds both date
+ * arms and every state badge into it (`posted` = a `<time>` was read;
+ * `viewed`/`promoted`/`applied` = a state label), so a non-null status is exactly
+ * "this posting carries a date or a state label". `null` — neither — is the only
+ * value that fails the invariant, which is what makes an unobserved `Promoted`
+ * card count rather than trip a false alarm.
  */
-export function fieldMissingAcrossAll(
-  jobs: ReadonlyArray<Record<string, string>>,
-  field: string,
-): boolean {
-  return jobs.length > 0 && jobs.every((j) => (j[field] ?? "").trim() === "");
+export function fieldReadCounts(
+  jobs: ReadonlyArray<{
+    title: string;
+    company: string;
+    location: string;
+    url: string;
+    linkedInStatus: string | null;
+  }>,
+): FieldReadCounts {
+  const counts = { ...NO_FIELD_READS, postings: jobs.length };
+  for (const j of jobs) {
+    if (j.title.trim() !== "") counts.title++;
+    if (j.company.trim() !== "") counts.company++;
+    if (j.location.trim() !== "") counts.location++;
+    if (j.url.trim() !== "") counts.url++;
+    if (j.linkedInStatus !== null) counts.dateOrLabel++;
+  }
+  return counts;
+}
+
+/** Sum a cycle's per-page counts into one (issue #52). A field break is judged
+ *  cycle-wide: a selector dies in a single deploy, so it reads 0 across every page
+ *  of every watch, and the pages' counts add up before the reducer sees them. An
+ *  empty cycle (no watches scanned) is {@link NO_FIELD_READS}, which the sample
+ *  floor then skips. */
+export function aggregateFieldCounts(list: ReadonlyArray<FieldReadCounts>): FieldReadCounts {
+  return list.reduce<FieldReadCounts>(
+    (a, c) => ({
+      postings: a.postings + c.postings,
+      title: a.title + c.title,
+      company: a.company + c.company,
+      location: a.location + c.location,
+      url: a.url + c.url,
+      dateOrLabel: a.dateOrLabel + c.dateOrLabel,
+    }),
+    NO_FIELD_READS,
+  );
+}
+
+/** Postings a scan must yield before its field counts are trusted (issue #52). A
+ *  judgement call, NOT measured from the captures: `0 of 1` must never trip the
+ *  alarm, and a handful of cards is too small a sample to call a selector dead
+ *  rather than a quiet search. Five is the floor below which a scan is not judged. */
+export const FIELD_SAMPLE_FLOOR = 5;
+
+/** Friendly names for the guarded fields and the invariant, for the banner. */
+const FIELD_LABELS: Record<string, string> = {
+  title: "job title",
+  company: "company name",
+  location: "location",
+  url: "job link",
+  dateOrLabel: "posting date or status",
+};
+
+/**
+ * The persisted field-break record (`'fieldHealth'` storage key, issue #52). Kept
+ * apart from the scan {@link HealthState} — a field break is a different axis from
+ * "was the page readable?" — exactly as {@link PushHealthState} sits beside it.
+ * Persists across scans; cleared on the first scan that reads every field again.
+ */
+export type FieldHealthState = {
+  /** The guarded fields (and/or the `dateOrLabel` invariant) that read 0-of-N on
+   *  the last judged scan, in {@link GUARDED_FIELDS} order, or `[]` when healthy. A
+   *  list because one deploy can kill more than one selector at once. */
+  brokenFields: string[];
+  /** Amber banner naming the field(s) and the count, or null when healthy. */
+  message: string | null;
+};
+
+/** The healthy starting point (every field reading). */
+export const OK_FIELD_HEALTH: FieldHealthState = { brokenFields: [], message: null };
+
+/**
+ * Decide whether a field has stopped reading (issue #52, PRD §16.4). A cliff, not
+ * a slope: fires only when a guarded field is present on ZERO of the scan's
+ * postings. A class rename hits every card in one deploy, so a real break is
+ * `0 of N`, never `18 of 25`; a ratio would cry wolf on a busy page, and a guard
+ * that is never wrong still works in a year. `COMPLETE_READ_RATIO` guards a
+ * different question (did we read the whole list) and is deliberately NOT reused.
+ *
+ * Below {@link FIELD_SAMPLE_FLOOR} postings the scan is not judged at all — too
+ * small a sample to tell a dead selector from a quiet search — and the prior state
+ * is carried unchanged, so a break already recorded stays recorded and a healthy
+ * state stays healthy.
+ *
+ * Pure: plain numbers in, no DOM, no clock.
+ */
+export function reduceFieldHealth(
+  prior: FieldHealthState,
+  counts: FieldReadCounts,
+): FieldHealthState {
+  if (counts.postings < FIELD_SAMPLE_FLOOR) return prior;
+
+  const broken: string[] = [];
+  for (const field of GUARDED_FIELDS) {
+    if (counts[field] === 0) broken.push(field);
+  }
+  // The invariant that stands in for the uncountable date field: 0 postings
+  // carrying either a date or a state label means the footer slot stopped reading.
+  if (counts.dateOrLabel === 0) broken.push("dateOrLabel");
+
+  if (broken.length === 0) return { ...OK_FIELD_HEALTH };
+
+  const names = broken.map((f) => FIELD_LABELS[f] ?? f);
+  const list =
+    names.length === 1
+      ? names[0]
+      : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  const noun = broken.length === 1 ? "this field" : "these fields";
+  const message =
+    `LinkedIn showed no ${list} on any of ${counts.postings} postings — ` +
+    `its layout may have changed, so ${noun} stopped reading.`;
+  return { brokenFields: broken, message };
+}
+
+/**
+ * Fold a field break into a badge severity (issue #52). A field break is a
+ * separate axis, so it bumps an otherwise-`ok` badge to amber but never overrides
+ * a hard red — a challenge outranks a dead selector. Shared by both badge painters
+ * (the background after a cycle, the list view after a local read/block) so the
+ * two can't drift apart, the same reason `badgeFor` is shared.
+ */
+export function badgeSeverityWithFieldBreak(
+  severity: Severity,
+  fieldHealth: FieldHealthState,
+): Severity {
+  return severity === "ok" && fieldHealth.message !== null ? "warn" : severity;
+}
+
+// ── Field-break push cadence (issue #54, PRD §8 / §16.4) ─────────────────────
+//
+// The field-break guard above lights a badge and a banner that already exist —
+// and that already failed to be noticed, twice. #54 is the loud channel on top:
+// a Telegram push that lands in a chat the user actually reads. The strict
+// 0-of-N threshold on #52 is what pays for a channel this loud; a false positive
+// there is close to impossible, which is the only reason a daily alarm is
+// defensible. This is the pure cadence gate that spaces the send: at most one
+// push per 24 hours while the guard is lit, cleared the moment it recovers.
+
+/** How long to wait between field-break pushes while the guard stays lit (issue
+ *  #54). Scans run every ~5 minutes, so without this a single break would push
+ *  ~288 times a day; the badge and banner stay lit continuously regardless, so a
+ *  daily push is a nudge on top of a standing signal, not the only trace. Chosen
+ *  over "once per break" and a weekly nudge — a fix can take a fortnight and a
+ *  daily alert about something already known is how a guard earns an uninstall,
+ *  but the user made that call knowingly. Bounding it (daily then weekly) is
+ *  offered to a later ticket, not built unasked. */
+export const FIELD_BREAK_PUSH_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+/** The persisted field-break push record (`'fieldBreakPush'` storage key, issue
+ *  #54). One field: when the last field-break push went out, so {@link reduceFieldPush}
+ *  can space the next one. Its own key, apart from `fieldHealth` (the axis it
+ *  watches) and `pushHealth` (a different push concern), the same separate-axis
+ *  footing every other health state sits on. */
+export type FieldPushState = { lastPushedAt: number | null };
+
+/** The starting point — nothing pushed yet, so the next lit guard pushes at once. */
+export const NO_FIELD_PUSH: FieldPushState = { lastPushedAt: null };
+
+/**
+ * Decide whether this cycle sends the field-break push, and the state to persist
+ * (issue #54, PRD §8). Pure: an injected `lastPushedAt` and a literal `now`, never
+ * a real clock, so the once-a-day cadence is proved by `node --test`.
+ *
+ * - **Not broken** → clear the state ({@link NO_FIELD_PUSH}) and send nothing. The
+ *   first healthy scan wipes `lastPushedAt`, so a later break pushes immediately
+ *   rather than staying suppressed by a send from the break before it. Recovery is
+ *   immediate, matching how {@link reduceFieldHealth} clears its own state.
+ * - **Broken but push not configured** → carry the prior state untouched and send
+ *   nothing, exactly as `firePush` leaves `pushHealth` untouched when it never
+ *   attempts a send. The badge and banner still light (that is `fieldHealth`, a
+ *   separate axis); this only governs the push. Not advancing `lastPushedAt` here
+ *   means adding credentials later still pushes at once rather than being spaced
+ *   out by a send that never happened.
+ * - **Broken, configured, and due** (never pushed, or ≥ `intervalMs` ago) → send,
+ *   and stamp `lastPushedAt` to `now`. Stamped whether or not the send lands — the
+ *   push is a nudge on a standing badge/banner, so a failed one waits out the day
+ *   like a delivered one rather than retrying every five minutes.
+ * - **Broken, configured, not yet due** → carry the prior state and send nothing.
+ */
+export function reduceFieldPush(
+  prior: FieldPushState,
+  broken: boolean,
+  configured: boolean,
+  now: number,
+  intervalMs: number = FIELD_BREAK_PUSH_INTERVAL_MS,
+): { state: FieldPushState; send: boolean } {
+  if (!broken) return { state: NO_FIELD_PUSH, send: false };
+  if (!configured) return { state: prior, send: false };
+  if (prior.lastPushedAt !== null && now - prior.lastPushedAt < intervalMs) {
+    return { state: prior, send: false };
+  }
+  return { state: { lastPushedAt: now }, send: true };
 }
 
 /** The persisted push-failure record (`'pushHealth'` storage key, PRD §16.7). Kept
