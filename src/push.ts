@@ -252,7 +252,7 @@ export function buildFieldBreakPush(brokenFields: string[], postings: number): s
     names.length === 1
       ? names[0]
       : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-  const pronoun = brokenFields.length === 1 ? "one" : "them";
+  const pronoun = names.length === 1 ? "one" : "them";
   const detail = `${list} stopped reading — 0 of the ${postings} jobs on the last scan had ${pronoun}.`;
 
   // Job 3: is work still being found? Only a break in a load-bearing field stops
