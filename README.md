@@ -288,6 +288,28 @@ Like **Delete all job history**, importing is unavailable while a round is
 running, and for the same reason: it rewrites the seen IDs a round in flight is
 about to compare against. Wait for the round to finish.
 
+### Diagnostics
+
+**Save a copy of this page** captures your open LinkedIn job search as an HTML
+file. When the extension warns that it has stopped reading LinkedIn's page — its
+layout has changed again — this is how you hand over the exact page it is failing
+on, so the change can be diagnosed from the real DOM rather than guessed at.
+
+Open your job search on LinkedIn in another tab first, then press the button. It
+finds that tab, **scrolls the results until every card has loaded** — an
+un-scrolled list renders only a handful, so the scroll is load-bearing, not a
+nicety — and writes the whole page to a file named for the day.
+
+**The file is your own logged-in search** — company names, job titles, and
+whatever else LinkedIn renders about your account. The section says so before the
+file is written, so it is never shared by surprise; keep it to yourself unless you
+mean to send it on. It is the same class of data as the captures used to build the
+extension, which is why those are never committed.
+
+Each way it can go wrong says what to do next rather than failing silently: no
+LinkedIn tab open, a tab that is not on a `/jobs/search/` page, and a signed-out
+session are each reported on the spot.
+
 ### How this works
 
 The last section: what a round actually does, in plain English, plus the things

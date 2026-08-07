@@ -17,7 +17,7 @@
 // find — and the header's summary line stays readable while you change the very
 // numbers it describes.
 
-import { Clock, Download, Eraser, Upload, X } from "lucide-react";
+import { Camera, Clock, Download, Eraser, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 
 import { AppIcon } from "@/components/app-icon.tsx";
@@ -62,6 +62,14 @@ import {
   type ImportBackupRequest,
   type ImportBackupResponse,
 } from "@/backup.ts";
+import {
+  captureFilename,
+  captureMessage,
+  isLoggedOutUrl,
+  pickCaptureTab,
+  type CaptureRequest,
+  type CaptureResponse,
+} from "@/capture.ts";
 import {
   historyCounts,
   historyPhrase,
@@ -135,8 +143,8 @@ async function closeSettingsTab(): Promise<void> {
  * by a URL nobody released is the whole export sitting in memory until the tab
  * closes.
  */
-function downloadTextFile(filename: string, text: string): void {
-  const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+function downloadTextFile(filename: string, text: string, type = "application/json"): void {
+  const url = URL.createObjectURL(new Blob([text], { type }));
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
@@ -243,6 +251,7 @@ export function OptionsPage() {
   const [testStatus, setTestStatus] = useState<Status>(NO_STATUS);
   const [clearStatus, setClearStatus] = useState<Status>(NO_STATUS);
   const [backupStatus, setBackupStatus] = useState<Status>(NO_STATUS);
+  const [captureStatus, setCaptureStatus] = useState<Status>(NO_STATUS);
   // A file that has been read and validated but not yet applied. Holding it here
   // is what makes the confirm dialog able to say what is actually in the file
   // rather than asking you to agree to an unknown quantity — and it means a
@@ -586,6 +595,53 @@ export function OptionsPage() {
           : "Nothing was imported — the extension's background worker did not answer.",
       kind: "err",
     });
+  }
+
+  /**
+   * Save a copy of the live LinkedIn job-search page (issue #49), so a broken
+   * layout can be diagnosed from the actual DOM rather than guessed at.
+   *
+   * The decisions are all in `capture.ts`: which open tab to capture, what the
+   * file is called, and the sentence each outcome shows. This wrapper only does
+   * the three side effects the ticket keeps out of the tested layer — find the
+   * tabs, ask the content script to scroll and serialise the page, and download
+   * the result. A signed-out session that redirected only once the tab was
+   * messaged is caught here too (`isLoggedOutUrl`), because the tab URL looked
+   * fine when it was picked.
+   */
+  function onCapturePage(): void {
+    void (async () => {
+      setCaptureStatus({ message: "Finding your LinkedIn job search…", kind: "" });
+      const tabs = await chrome.tabs
+        .query({ url: "https://www.linkedin.com/*" })
+        .catch(() => [] as chrome.tabs.Tab[]);
+      const pick = pickCaptureTab(tabs);
+      if (!pick.ok) {
+        setCaptureStatus(captureMessage({ kind: pick.reason }));
+        return;
+      }
+
+      setCaptureStatus({ message: "Scrolling the results so every card loads…", kind: "" });
+      const req: CaptureRequest = { type: "LJW_CAPTURE" };
+      const res = (await chrome.tabs
+        .sendMessage(pick.tabId, req)
+        .catch(() => undefined)) as CaptureResponse | undefined;
+      if (!res) {
+        setCaptureStatus(captureMessage({ kind: "unreachable" }));
+        return;
+      }
+      if (isLoggedOutUrl(res.finalUrl)) {
+        setCaptureStatus(captureMessage({ kind: "logged-out" }));
+        return;
+      }
+      if (!res.html) {
+        setCaptureStatus(captureMessage({ kind: "failed" }));
+        return;
+      }
+
+      downloadTextFile(captureFilename(Date.now()), res.html, "text/html");
+      setCaptureStatus(captureMessage({ kind: "saved", cardCount: res.cardCount }));
+    })();
   }
 
   /** Jump the scroll container to a section. The rail highlights it immediately
@@ -1306,6 +1362,57 @@ export function OptionsPage() {
                     </AlertDialogFooter>
                   </AlertDialogContent>
                 </AlertDialog>
+              </div>
+            </Section>
+
+            <Section
+              id="diagnostics"
+              description="For when the extension warns that it has stopped reading LinkedIn’s page. Saving a copy of your open job search captures the exact page it is failing on, so the layout change can be diagnosed from the real thing instead of guessed at."
+            >
+              <div className="flex flex-col gap-3.5">
+                <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2.5">
+                  <div className="min-w-0 flex-1 basis-65">
+                    <p className="text-[13px] font-semibold">Save a copy of this page</p>
+                    <p className="mt-0.5 text-xs leading-snug text-muted-foreground text-pretty">
+                      Open your job search on LinkedIn in another tab, then press this. It
+                      scrolls the results so every card loads and writes the page to an
+                      HTML file.
+                      {/* The file is the user's own logged-in search — company names,
+                          job titles, everything LinkedIn renders about the account. Said
+                          plainly, and *before* the file is written, so it is never shared
+                          by surprise. Same class of data as the gitignored fixtures. */}
+                      <span className="font-medium text-foreground">
+                        {" "}
+                        The file holds your own job-search results — company names, job
+                        titles and whatever else LinkedIn shows you — so keep it to
+                        yourself unless you mean to share it.
+                      </span>
+                    </p>
+                  </div>
+                  {/* Camera — a snapshot of the page. Not the Export row's Download,
+                      which saves a settings file, nor any other icon on the page:
+                      one glyph, one action. */}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    id="capture-page"
+                    onClick={onCapturePage}
+                    className="shrink-0"
+                  >
+                    <Camera aria-hidden="true" />
+                    Save a copy of this page
+                  </Button>
+                </div>
+
+                {/* Whole-sentence outcomes — a failure names the next step — so the
+                    status gets its own line under the row rather than a corner of it,
+                    the same as the Backup section. */}
+                <StatusText
+                  id="capture-status"
+                  status={captureStatus}
+                  className="block text-right"
+                />
               </div>
             </Section>
 
