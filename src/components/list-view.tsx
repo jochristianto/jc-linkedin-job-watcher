@@ -132,15 +132,20 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
    *  from in here, and nothing else would notice until the next cycle. Same
    *  `badgeFor` the background uses, so the two can't drift apart. */
   const refreshBadge = useCallback(async () => {
-    const [jobs, settings, health] = await Promise.all([
+    const [jobs, settings, health, fieldHealth] = await Promise.all([
       storage.get("jobs"),
       storage.get("settings"),
       storage.get("health"),
+      storage.get("fieldHealth"),
     ]);
     const blocked = settings.blockedCompanies.map((b) => b.normalized);
+    // A field break bumps an otherwise-ok badge to amber, matching the background's
+    // updateBadge (issue #52); it never overrides a hard red.
+    const severity =
+      health.severity === "ok" && fieldHealth.message !== null ? "warn" : health.severity;
     const { text, color } = badgeFor(
       unreadCount(Object.values(jobs), blocked, settings.hideReposted),
-      health.severity,
+      severity,
     );
     await chrome.action.setBadgeText({ text });
     await chrome.action.setBadgeBackgroundColor({ color });
@@ -165,6 +170,9 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
       severity: state.health.severity,
       message: state.health.message,
       pushWarn: state.pushHealth.warn,
+      // A dead field selector — a separate axis from scan health (issue #52),
+      // shown as its own amber banner.
+      fieldBreakMessage: state.fieldHealth.message,
       armedBlockId,
       quietHours: state.settings.quietHours,
       nextScanAt: state.nextScanAt,

@@ -4,20 +4,21 @@ import * as storage from "@/storage.ts";
 import { SCAN_ALARM_NAME } from "@/schedule.ts";
 import type { JobsMap } from "@/storage.ts";
 import type { HealthState, ScanState, Settings } from "@/types.ts";
-import type { PushHealthState } from "@/health.ts";
+import type { FieldHealthState, PushHealthState } from "@/health.ts";
 
 /** The storage keys the list view renders from. A background cycle rewriting any
  *  of them — the one a "Scan now" click just started, or a routine alarm tick —
  *  repaints an open popup/tab, so "Scanning…" turns back into the list on its
  *  own. `ui` is excluded on purpose: this view writes it, and subscribing would
  *  only make it re-render itself. */
-const RENDERED_KEYS = ["jobs", "settings", "health", "pushHealth", "scanState"] as const;
+const RENDERED_KEYS = ["jobs", "settings", "health", "pushHealth", "fieldHealth", "scanState"] as const;
 
 export type ExtensionState = {
   jobs: JobsMap;
   settings: Settings;
   health: HealthState;
   pushHealth: PushHealthState;
+  fieldHealth: FieldHealthState;
   scanState: ScanState;
   /** When the armed one-shot alarm is due to fire, or null when no alarm exists.
    *  Read from `chrome.alarms` rather than storage because no key mirrors it —
@@ -48,11 +49,12 @@ export function useExtensionState(): {
   const [state, setState] = useState<ExtensionState | null>(null);
 
   const reload = useCallback(async () => {
-    const [jobs, settings, health, pushHealth, scanState, alarm] = await Promise.all([
+    const [jobs, settings, health, pushHealth, fieldHealth, scanState, alarm] = await Promise.all([
       storage.get("jobs"),
       storage.get("settings"),
       storage.get("health"),
       storage.get("pushHealth"),
+      storage.get("fieldHealth"),
       storage.get("scanState"),
       chrome.alarms.get(SCAN_ALARM_NAME),
     ]);
@@ -61,6 +63,7 @@ export function useExtensionState(): {
       settings,
       health,
       pushHealth,
+      fieldHealth,
       scanState,
       nextScanAt: alarm?.scheduledTime ?? null,
     });

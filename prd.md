@@ -798,7 +798,15 @@ The unifying idea: the content script never reports a bare "0 cards." It reports
 
    **One named cause of a missing list — the new results surface (issue #50 / #47).** LinkedIn runs two job-search surfaces at once: the classic `/jobs/search/` this plan is built and tested against, and a newer `/jobs/search-results/` with build-hashed class names and no readable card-level date. When a missing results list is paired with a final URL that is *not* on `/jobs/search/`, the outcome is `search-moved` rather than the generic `structure-changed`, and the banner says so: "LinkedIn moved your search to its new results page, which this extension cannot read yet." Same amber severity and back-off behaviour — this only sharpens the message from a shrug into something actionable. The URL check sits *after* the challenge and logged-out checks in `classifyPage`, so it can never outrank an account-safety signal (a redirect to `/authwall` or `/checkpoint/` still classifies as logged-out / challenge). This is the trigger recorded on #47: if this outcome ever fires, supporting the new surface reopens as its own effort — no second selector set is added here.
 
-4. **Partial parse.** Each field fails independently (§12). A job with a valid `id`, `title` and `url` is **saved and shown** even if `company`/`location` came back blank — the list view already drops blank meta parts (`renderJobRow`, mockups/render.ts). Only the three load-bearing fields are required (`isSavableJob`): id for dedupe, url to open, title to show; a card missing any of them is dropped. A field blank on **every** card in a scan (`fieldMissingAcrossAll`) is a soft selector-drift signal worth recording — a per-job blank is not.
+4. **Partial parse.** Each field fails independently (§12). A job with a valid `id`, `title` and `url` is **saved and shown** even if `company`/`location` came back blank — the list view already drops blank meta parts (`renderJobRow`, mockups/render.ts). Only the three load-bearing fields are required (`isSavableJob`): id for dedupe, url to open, title to show; a card missing any of them is dropped.
+
+   **Field-break guard — notice when a field stops reading (issue #52).** A soft drift signal on its **own axis**, decided by its own pure reducer (`reduceFieldHealth`) and persisted in its own key (`'fieldHealth'`), exactly as `reducePushHealth`/`pushHealth` sit beside scan health — **not** a new `PageOutcome` arm. Folding it into that worst-first enum would force a ranking and let a `structure-changed` on one watch mask a field break on another; a page can be `ok` on every §16.3 count and still have a dead selector.
+
+   - **What is guarded:** the four always-present fields — `title`, `company`, `location`, `url` (0 blank across 50 measured postings) — plus one **invariant** that stands in for the one field that *cannot* be counted. The posting **date** is legitimately absent from a third to two-thirds of a healthy page (LinkedIn withholds it on opened postings, showing a `Viewed` badge instead), so a guard on the raw date count would have fired on both healthy captures. The invariant instead: **every posting carries a `<time>` date *or* a footer state label, never neither** (50/50, no exceptions). Read straight off `linkedInStatus` (§5): `posted` = a date was read, `viewed`/`promoted`/`applied` = a label, `null` = neither — so an unobserved `Promoted` card counts rather than trips a false alarm. **Reposted is deliberately excluded** — no reposted card has ever been captured, so there is no baseline for "normal."
+   - **The threshold is a cliff, not a slope:** fires only when a guarded field is present on **zero** of the scan's postings, never a ratio. A class rename hits every card in one deploy, so a real break is `0 of N`, not `18 of 25`; `COMPLETE_READ_RATIO` (0.9) guards a different question — did we read the whole list — and is deliberately **not** reused. A **sample floor** of 5 postings (a judgement call, not from the captures) means `0 of 1` never trips the alarm; below it the scan is not judged and the prior state is carried unchanged.
+   - **Behaviour:** amber badge + a popup banner naming the field(s) and the count. No desktop notification (like the other soft failures); the Telegram push that actually gets noticed is #54, which this stands on. The state persists across scans and clears on the first scan that reads every field again.
+
+   A field blank on **every** card in a scan used to be only a console log; this guard turns that observation into a persisted, surfaced state (`fieldHealth`), on its own axis so it can be acted on rather than lost in the noise.
 
 5. **Tab fails to load** (timeout, network down, 5xx). Outcome `load-failed`. **Behaviour:** **retry that one page once** (blips are transient), then **skip** it and continue the cycle — a transient failure on one watch must not abort the others. Crucially, `load-failed` **does not** count toward the empty-scan back-off: it's an infra failure, not a parser signal, so a flaky network doesn't masquerade as "LinkedIn changed the page." **Signal:** none in v1 beyond a logged event (repeated total-network-outage warning is deferred — if LinkedIn is fully unreachable the user has bigger cues).
 
@@ -810,8 +818,8 @@ The unifying idea: the content script never reports a bare "0 cards." It reports
 
 | Mechanism | Drives | v1? |
 | --- | --- | --- |
-| **Badge colour** | `severity`: default (ok) / amber (warn) / red (error) | **v1** |
-| **Popup banner** | `message` — one line describing the problem and the fix | **v1** |
+| **Badge colour** | `severity`: default (ok) / amber (warn) / red (error); a field break (§16.4) bumps an otherwise-ok badge to amber | **v1** |
+| **Popup banner** | `message` — one line describing the problem and the fix; a field break stacks its own amber banner | **v1** |
 | **Desktop notification** | **Hard** failures only (`challenge`, `logged-out`), once on transition | **v1** |
 | **Options error log** | A rolling list of the last N failure events with timestamps | **Deferred** — badge + banner + notification cover "find out"; a full log UI is post-v1 |
 
@@ -819,7 +827,7 @@ The split: hard failures (challenge, logged out) get an active push — a deskto
 
 ### Structural consequence
 
-Per §14, the decision logic is pure and tested (`src/health.ts` + `src/health.test.ts`): `classifyPage`, `aggregateOutcome`, `reduceScanHealth`, `isSavableJob`, `fieldMissingAcrossAll`, `reducePushHealth`, `isLockStale`. The content script reads the live DOM/URL into a `PageSignals`; `background.ts` persists the `HealthState`, sets the badge, and fires notifications — none of that is unit-tested, all of the decisions are.
+Per §14, the decision logic is pure and tested (`src/health.ts` + `src/health.test.ts`): `classifyPage`, `aggregateOutcome`, `reduceScanHealth`, `isSavableJob`, `fieldReadCounts`/`aggregateFieldCounts`/`reduceFieldHealth` (the field-break axis, §16.4), `reducePushHealth`, `isLockStale`. The content script reads the live DOM/URL into a `PageSignals` — including the per-field present-counts and the date-or-label count — and `background.ts` persists the `HealthState`/`fieldHealth`, sets the badge, and fires notifications — none of that is unit-tested, all of the decisions are.
 
 ---
 

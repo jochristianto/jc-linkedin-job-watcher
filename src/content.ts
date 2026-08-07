@@ -16,6 +16,7 @@ import {
   parseJobCards,
   postingIdsOn,
 } from "./parse.ts";
+import { fieldReadCounts, NO_FIELD_READS } from "./health.ts";
 import { pollUntilSettled, type PollResult, type SettleSample } from "./scan-probe.ts";
 import { readScanToken, scanTokenMatches, type ScanRequest, type ScanResponse } from "./scan.ts";
 import type { CaptureRequest, CaptureResponse } from "./capture.ts";
@@ -93,19 +94,24 @@ async function walkResultsList(): Promise<{
 
 async function readPage(): Promise<ScanResponse> {
   const { found, seenIds, settle } = await walkResultsList();
+  const jobs = Array.from(found.values());
 
   // The classified-outcome signals (§16): where we landed, whether the list
   // container is even present, and the three counts — never a bare "0 cards".
   // The *decision* (empty vs partial vs structure-changed vs logged-out …) is
   // classifyPage's, run in the background against these; this only reads them off.
   return {
-    jobs: Array.from(found.values()),
+    jobs,
     settled: settle.settled,
     finalUrl: window.location.href,
     hasResultsList: document.querySelector(RESULTS_LIST_SELECTOR) !== null,
     cardCount: seenIds.size,
     savedCount: found.size,
     slotCount: settle.expected,
+    // Per-field present-counts for the separate field-break axis (issue #52). Read
+    // off the parsed postings here so `reduceFieldHealth` in the background stays
+    // pure numbers, the way classifyPage already takes only the counts above.
+    fieldCounts: fieldReadCounts(jobs),
   };
 }
 
@@ -166,6 +172,7 @@ chrome.runtime.onMessage.addListener((message: ScanRequest, _sender, sendRespons
       cardCount: 0,
       savedCount: 0,
       slotCount: document.querySelectorAll(SLOT_SELECTOR).length,
+      fieldCounts: NO_FIELD_READS,
     });
   });
   return true; // keep the message channel open for the async reply
