@@ -299,9 +299,9 @@ function linkedInStatusOf(card: Element, hasDate: boolean): LinkedInStatus {
   return null;
 }
 
-/** The footer/metadata strip's text, joined — the fallback `linkedInStatusOf`
- *  scans when the named state slot is absent. Reuses the same footer selectors the
- *  Reposted marker reads, since it is the same strip. */
+/** The footer/metadata strip's text, joined and normalised — the single reader of
+ *  that strip, scanned both by `linkedInStatusOf` (when the named state slot is
+ *  absent) and by `isRepostedCard`. */
 function footerStripText(card: Element): string {
   const strip = card.querySelectorAll(REPOSTED_MARKER_SELECTORS.join(", "));
   return Array.from(strip)
@@ -314,8 +314,7 @@ function footerStripText(card: Element): string {
  *  and a word-boundary match keeps a title or description mentioning "reposted"
  *  from tripping it (§16, issue #2 finding 3 / issue #30 item 1). */
 function isRepostedCard(card: Element): boolean {
-  const footers = card.querySelectorAll(REPOSTED_MARKER_SELECTORS.join(", "));
-  return Array.from(footers).some((el) => /\breposted\b/i.test(norm(el.textContent)));
+  return /\breposted\b/i.test(footerStripText(card));
 }
 
 /**
