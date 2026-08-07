@@ -45,6 +45,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -59,9 +66,22 @@ import {
   parseBackup,
   serializeBackup,
   type BackupFile,
+} from "@/backup.ts";
+import { ImportPreview } from "@/components/import-preview.tsx";
+import {
+  KEEP_MINE,
+  importSteps,
+  importedPhrase,
+  planImport,
   type ImportBackupRequest,
   type ImportBackupResponse,
-} from "@/backup.ts";
+  type ImportMode,
+  type ImportStep,
+  type ImportTarget,
+  type SettingChoiceKey,
+  type SettingChoices,
+  type SettingSide,
+} from "@/import-plan.ts";
 import {
   captureFilename,
   captureMessage,
@@ -252,11 +272,23 @@ export function OptionsPage() {
   const [clearStatus, setClearStatus] = useState<Status>(NO_STATUS);
   const [backupStatus, setBackupStatus] = useState<Status>(NO_STATUS);
   const [captureStatus, setCaptureStatus] = useState<Status>(NO_STATUS);
-  // A file that has been read and validated but not yet applied. Holding it here
-  // is what makes the confirm dialog able to say what is actually in the file
-  // rather than asking you to agree to an unknown quantity — and it means a
-  // damaged file is reported before anything is confirmed, not after.
-  const [pendingImport, setPendingImport] = useState<BackupFile | null>(null);
+  // An import in progress: a file that has been read and validated, the state it
+  // is being compared against, and the two decisions being made about it. Holding
+  // it here is what makes the wizard able to say what would actually change rather
+  // than asking you to agree to an unknown quantity — and it means a damaged file
+  // is reported before any of it is opened, not after.
+  //
+  // `target` is snapshotted once, when the file is chosen, and deliberately NOT
+  // refreshed between steps: a preview that changes under you while you are
+  // reading it is worse than one that is a minute stale, and the worker recomputes
+  // the whole plan against live storage under the scan lock anyway.
+  const [pendingImport, setPendingImport] = useState<{
+    backup: BackupFile;
+    target: ImportTarget;
+    mode: ImportMode;
+    choices: SettingChoices;
+    step: ImportStep;
+  } | null>(null);
   // What is actually stored right now, so the Retention section can say what
   // deleting it would cost instead of asking you to confirm an unknown quantity.
   const [history, setHistory] = useState<HistoryCounts>({ jobs: 0, seen: 0 });
@@ -324,6 +356,26 @@ export function OptionsPage() {
   const dirtyIn = useMemo(() => dirtySections(changed), [changed]);
 
   const estimate = useMemo(() => (form ? estimateLoad(form) : null), [form]);
+
+  // What the pending import would do. The same `planImport` the worker runs, so
+  // the wizard cannot describe an outcome the write does not produce — only the
+  // inputs can drift, and re-reading those under the lock is the worker's job.
+  // Recomputed when the mode or a ticked row changes, which is a full pass over
+  // the two maps: a few milliseconds even at the 50,000-id hard cap, and only on
+  // a click.
+  const plan = useMemo(
+    () =>
+      pendingImport
+        ? planImport(
+            pendingImport.backup,
+            pendingImport.target,
+            pendingImport.mode,
+            pendingImport.choices,
+          )
+        : null,
+    [pendingImport],
+  );
+  const steps = useMemo(() => (plan ? importSteps(plan.diff) : []), [plan]);
 
   /**
    * Whether a cycle is really in flight — the state the delete control is
@@ -521,13 +573,18 @@ export function OptionsPage() {
   }
 
   /**
-   * Read and validate a chosen file, then hand it to the confirm dialog.
+   * Read and validate a chosen file, snapshot what it would be compared against,
+   * and open the wizard on its first screen.
    *
-   * Validation happens here, before anything is confirmed, so a damaged or
+   * Validation happens here, before anything is previewed, so a damaged or
    * foreign file is refused with a message that names the problem instead of
-   * opening a dialog about a file that was never going to import.
+   * opening a wizard about a file that was never going to import.
    *
-   * The input's value is cleared at the end: without it, choosing the same file
+   * The three keys read here are the same three `onExport` reads, and they are the
+   * only reason the preview can talk about *your* data rather than only about the
+   * file's. Merge is the mode it opens on: it is the one that cannot lose anything.
+   *
+   * The input's value is cleared at the start: without it, choosing the same file
    * twice in a row fires no `change` event, and re-importing the backup you just
    * fixed would silently do nothing.
    */
@@ -542,13 +599,41 @@ export function OptionsPage() {
         setBackupStatus({ message: result.error, kind: "err" });
         return;
       }
+      const [settings, seen, jobs] = await Promise.all([
+        storage.get("settings"),
+        storage.get("seen"),
+        storage.get("jobs"),
+      ]);
       setBackupStatus(NO_STATUS);
-      setPendingImport(result.backup);
+      setPendingImport({
+        backup: result.backup,
+        target: { settings, seen, jobs },
+        mode: "merge",
+        choices: KEEP_MINE,
+        step: "mode",
+      });
     })();
   }
 
+  /** Move the wizard, keeping everything else about the pending import. */
+  function onStep(step: ImportStep): void {
+    setPendingImport((cur) => (cur ? { ...cur, step } : cur));
+  }
+
+  /** Switching mode re-plans everything, so the step it left you on may no longer
+   *  exist — back to the first screen, which is where the mode cards are anyway. */
+  function onMode(mode: ImportMode): void {
+    setPendingImport((cur) => (cur ? { ...cur, mode, step: "mode" } : cur));
+  }
+
+  function onChoose(key: SettingChoiceKey, side: SettingSide): void {
+    setPendingImport((cur) =>
+      cur ? { ...cur, choices: { ...cur.choices, [key]: side } } : cur,
+    );
+  }
+
   /**
-   * Apply the file the dialog just confirmed, and repaint the page from what was
+   * Apply the file the wizard just confirmed, and repaint the page from what was
    * written.
    *
    * The write goes through the worker for the reason the delete does — it touches
@@ -556,20 +641,32 @@ export function OptionsPage() {
    * them (see `importBackup` in background.ts) — so this reports whichever answer
    * comes back, including the refusal while a round is in flight.
    *
+   * What is sent is the file plus the two DECISIONS, never the merged result this
+   * page just previewed. The worker re-reads storage under the lock and re-plans
+   * against it, which is what makes a round finishing (or the popup blocking a
+   * company) while the wizard was open survive the import. The counts reported
+   * back are the recomputed ones, so the status line says what happened rather
+   * than what the preview promised.
+   *
    * On success the form is re-seeded from storage rather than from the file:
-   * what lands in `settings` is the file's values with *this browser's* Telegram
-   * credentials merged back in, and the fields must show what was actually
-   * written. That also drops any unsaved edits, which is correct — a restore
-   * replaces the configuration, and half of the old one surviving as a dirty
-   * field would be neither state.
+   * what lands in `settings` is what the plan produced with *this browser's*
+   * Telegram credentials carried through, and the fields must show what was
+   * actually written. That also drops any unsaved edits, which is correct — an
+   * import rewrites the configuration, and half of the old one surviving as a
+   * dirty field would be neither state.
    */
   async function onConfirmImport(): Promise<void> {
-    const backup = pendingImport;
+    const pending = pendingImport;
     setPendingImport(null);
-    if (!backup) return;
+    if (!pending) return;
 
     setBackupStatus({ message: "Importing…", kind: "" });
-    const req: ImportBackupRequest = { type: "LJW_IMPORT", backup };
+    const req: ImportBackupRequest = {
+      type: "LJW_IMPORT",
+      backup: pending.backup,
+      mode: pending.mode,
+      choices: pending.choices,
+    };
     const res = (await chrome.runtime
       .sendMessage(req)
       .catch(() => undefined)) as ImportBackupResponse | undefined;
@@ -583,7 +680,7 @@ export function OptionsPage() {
       setSaveStatus(NO_STATUS);
       await refreshRetentionState();
       setBackupStatus({
-        message: `Imported ${backupPhrase(res.counts)}.`,
+        message: `Backup ${importedPhrase(res.counts, res.mode)}.`,
         kind: "ok",
       });
       return;
@@ -1277,9 +1374,13 @@ export function OptionsPage() {
                   <div className="min-w-0 flex-1 basis-65">
                     <p className="text-[13px] font-semibold">Import a file</p>
                     <p className="mt-0.5 text-xs leading-snug text-muted-foreground text-pretty">
-                      Replaces everything in the file — it is a restore, not a
-                      merge, so anything not in the file goes. Your Telegram
-                      credentials are kept.
+                      Nothing is written until you have seen what would change.
+                      Choose{" "}
+                      <span className="font-medium text-foreground">Merge</span>{" "}
+                      to add the file to what you already have, or{" "}
+                      <span className="font-medium text-foreground">Replace</span>{" "}
+                      to make this browser match it exactly — only Replace removes
+                      anything. Your Telegram credentials are kept either way.
                       {scanning && " Unavailable while a scan is running."}
                     </p>
                   </div>
@@ -1320,48 +1421,48 @@ export function OptionsPage() {
 
                 {/* Opened by a file having been read and validated, not by a
                     click — which is why it is controlled rather than wrapped
-                    around a trigger. By the time it appears the file's contents
-                    are known, so it can name them. */}
-                <AlertDialog
+                    around a trigger. By the time it appears, both the file's
+                    contents and what they would do to this browser are known.
+
+                    A `Dialog` rather than the `AlertDialog` this used to be: Radix
+                    gives that one `role="alertdialog"`, no close affordance and a
+                    two-button footer, which is right for a destructive confirmation
+                    and wrong for a review you page through. And a dialog rather
+                    than an inline panel because the page's pinned Save button
+                    writes `settings` from the form — left reachable during an
+                    import, it could write the pre-import form state straight back
+                    over what the import just landed. */}
+                <Dialog
                   open={pendingImport !== null}
                   onOpenChange={(open) => {
                     if (!open) setPendingImport(null);
                   }}
                 >
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>
-                        Replace your settings and history?
-                      </AlertDialogTitle>
-                      <AlertDialogDescription>
-                        This backup holds{" "}
-                        {pendingImport
-                          ? backupPhrase(backupCounts(pendingImport))
-                          : "nothing"}
-                        , and importing it replaces what is in this browser
-                        outright — watches, filters, schedule, retention, job
-                        records and seen ids. Anything not in the file is
-                        removed, and there is no undo. Your Telegram bot token
-                        and chat id are the one exception: they are never in a
-                        backup, so the ones saved here are kept.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel id="import-cancel">
-                        Keep what I have
-                      </AlertDialogCancel>
-                      <AlertDialogAction
-                        id="import-confirm"
-                        onClick={() => void onConfirmImport()}
-                        className={cn(
-                          buttonVariants({ variant: "destructive" }),
-                        )}
-                      >
-                        Import and replace
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
+                  <DialogContent className="max-h-[85vh] sm:max-w-lg">
+                    <DialogHeader className="sr-only">
+                      <DialogTitle>Import a backup</DialogTitle>
+                      <DialogDescription>
+                        Review what this file would change before anything is written.
+                      </DialogDescription>
+                    </DialogHeader>
+                    {pendingImport && plan && (
+                      <ImportPreview
+                        backup={pendingImport.backup}
+                        diff={plan.diff}
+                        steps={steps}
+                        step={pendingImport.step}
+                        mode={pendingImport.mode}
+                        choices={pendingImport.choices}
+                        scanning={scanning}
+                        onMode={onMode}
+                        onChoose={onChoose}
+                        onStep={onStep}
+                        onConfirm={() => void onConfirmImport()}
+                        onCancel={() => setPendingImport(null)}
+                      />
+                    )}
+                  </DialogContent>
+                </Dialog>
               </div>
             </Section>
 

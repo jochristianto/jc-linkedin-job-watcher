@@ -82,14 +82,14 @@ import {
   type ClearHistoryRequest,
   type ClearHistoryResponse,
 } from "./gc.ts";
+import { reconcileUi } from "./backup.ts";
 import {
-  backupCounts,
-  backupPhrase,
-  reconcileUi,
-  restoredSettings,
+  importedPhrase,
+  planImport,
   type ImportBackupRequest,
   type ImportBackupResponse,
-} from "./backup.ts";
+  type ImportTarget,
+} from "./import-plan.ts";
 import { buildScanNotification, SCAN_NOTIFICATION_ID } from "./notify.ts";
 import { focusOrOpenJobsTab } from "./jobs-tab.ts";
 import type { HealthState, Job, Settings } from "./types.ts";
@@ -928,39 +928,54 @@ async function clearAllHistory(): Promise<ClearHistoryResponse> {
  * catch-up this is not survives.
  *
  * The file has already been validated on the page (`parseBackup`), so by the time
- * it arrives here it is known to be well-formed; what is left is the two things
- * only this side knows. `restoredSettings` carries this browser's Telegram
- * credentials through — they are never in a file — and `reconcileUi` un-points
- * the view state from a watch or job the import removed.
+ * it arrives here it is known to be well-formed. What arrives with it is the user's
+ * two DECISIONS — merge or replace, and which settings rows they ticked over to the
+ * file — never a computed result, and this function is where that pays off: the
+ * three keys are re-read *under the lock* and `planImport` is run again against
+ * them. The page's preview was built against a snapshot taken when the file was
+ * chosen, and a wizard takes minutes; in between, a cycle can finish and write both
+ * history keys, and the popup can block a company or flip the master switch. Only
+ * recomputing here makes the write a function of the state it is actually landing
+ * on. It is safe to differ from the preview because a merge only ever adds, so the
+ * recomputed result can only contain *more* — which is also why the counts sent
+ * back are the recomputed ones rather than the promised ones.
+ *
+ * `reconcileUi` still un-points the view state from a watch or job that is no
+ * longer there, which under replace is most of them and under merge is none.
  *
  * Writing `settings` is what re-arms the cadence: the `storage.onChanged`
  * listener below reconciles the alarm to whatever was just written, so a backup
  * carrying `manualOnly` or a different interval takes effect without this having
  * to know about alarms at all.
  */
-async function importBackup(backup: ImportBackupRequest["backup"]): Promise<ImportBackupResponse> {
+async function importBackup(req: ImportBackupRequest): Promise<ImportBackupResponse> {
   const current = await get("settings");
   const recovered = recoverStaleLock(await get("scanState"), Date.now(), current.staleLockMs);
   if (recovered.state.isScanning) return { imported: false, reason: "scanning" };
   await set("scanState", holdLock(recovered.state, Date.now()));
 
   try {
-    const settings = restoredSettings(backup.settings, current);
-    const ui = reconcileUi(await get("ui"), backup.jobs, settings.watches);
+    const target: ImportTarget = {
+      settings: current,
+      seen: await get("seen"),
+      jobs: await get("jobs"),
+    };
+    const plan = planImport(req.backup, target, req.mode, req.choices);
+    const ui = reconcileUi(await get("ui"), plan.jobs, plan.settings.watches);
     // `seen` and `jobs` before `settings`: the settings write is what wakes the
-    // alarm reconciler, and it should find the restored history already in place.
-    await set("seen", backup.seen);
-    await set("jobs", backup.jobs);
+    // alarm reconciler, and it should find the imported history already in place.
+    await set("seen", plan.seen);
+    await set("jobs", plan.jobs);
     await set("ui", ui);
-    await set("settings", settings);
+    await set("settings", plan.settings);
 
-    const counts = backupCounts(backup);
-    console.log(`[ljw] backup imported — ${backupPhrase(counts)}`);
-    // The restored records carry their own read/unread state, so the count on the
+    const counts = plan.diff.counts;
+    console.log(`[ljw] backup ${importedPhrase(counts, req.mode)}`);
+    // The imported records carry their own read/unread state, so the count on the
     // toolbar is almost certainly not the one that was there a moment ago. The
     // colour still belongs to the health this has not changed.
     await updateBadge((await get("health")).severity);
-    return { imported: true, counts };
+    return { imported: true, mode: req.mode, counts };
   } finally {
     await set("scanState", endScan(await get("scanState")));
   }
@@ -1074,13 +1089,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 /** The options page's "Import a backup" (see {@link importBackup}). Handled here
  *  for the same reason the delete is: the import writes `seen` and `jobs`, and
  *  only the worker can hold the scan lock that serialises them. The file arrives
- *  already validated. Channel kept open for the async reply, as above; a failure
- *  is answered rather than left silent, so the page can say nothing was imported
- *  instead of appearing to hang. */
+ *  already validated, and the whole request is passed through rather than picked
+ *  apart — the mode and the ticked rows are what the worker needs to recompute the
+ *  plan. Channel kept open for the async reply, as above; a failure is answered
+ *  rather than left silent, so the page can say nothing was imported instead of
+ *  appearing to hang. */
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const req = message as ImportBackupRequest | undefined;
   if (req?.type !== "LJW_IMPORT") return;
-  importBackup(req.backup).then(sendResponse, (err) => {
+  importBackup(req).then(sendResponse, (err) => {
     console.error("[ljw] Import failed:", err);
     sendResponse({ imported: false, reason: "failed" } satisfies ImportBackupResponse);
   });

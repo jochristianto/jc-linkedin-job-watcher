@@ -233,6 +233,23 @@ test("the options mockup carries the how-it-works explainer and its repo link", 
   assert.match(html, /href="https:\/\/github\.com\/jochristianto\/jc-linkedin-job-watcher"/);
 });
 
+test("the options mockup shows the import wizard, including what replacing removes", () => {
+  // The screens the Backup section opens over the page. They are in the mockup at
+  // all because `ImportPreview` takes everything it shows as props — and the one
+  // worth a screenshot is Replace's, since naming the removals is the whole reason
+  // the wizard exists.
+  const html = read("./options.html");
+  assert.match(html, /data-step="mode"/);
+  assert.match(html, /data-step="lists"/);
+  assert.match(html, /data-step="confirm"/);
+  // Two modes, two icons, and neither is one the Backup card already uses.
+  assert.match(html, /lucide-git-merge/);
+  assert.match(html, /lucide-replace/);
+  assert.match(html, /data-line="removed"/);
+  // A line opened onto its names, so the mockup shows both states of a line.
+  assert.match(html, /aria-expanded="true"/);
+});
+
 test("every mockup draws its icons as Lucide SVG, never a font glyph", () => {
   const glyphs = /[\u{2190}-\u{21FF}\u{2200}-\u{22FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{1F300}-\u{1FAFF}]/u;
   for (const name of [...LIST_VIEWS, "./states.html", "./options.html"]) {
