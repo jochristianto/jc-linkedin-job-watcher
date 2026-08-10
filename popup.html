@@ -4,6 +4,40 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>LinkedIn Job Watcher</title>
+    <!-- Chrome sizes the popup window from `document.documentElement.scrollWidth`,
+         and within one opening that only ever grows: scrollWidth on the root
+         never reports less than the viewport, so once the window is wide it
+         stays wide. One frame in which anything reaches past the panel is enough
+         to strand it — a tooltip or dialog portalled to <body> and measured
+         before collision detection shifts it back inside, the 8px default body
+         margin if the stylesheet has not landed yet — and the 380px panel spends
+         the rest of that opening beside a band of empty background.
+
+         `contain: paint` is what caps it. Not `overflow: hidden` and not
+         `overflow: clip`: measured in Chrome, both still report the full
+         overflow through scrollWidth (520 for a 220px box sitting at x=300 in a
+         380px document), so neither changes what the popup is sized from. Paint
+         containment does two things that together do — it makes the root the
+         containing block for out-of-flow descendants, so portalled content can
+         no longer escape to the initial containing block, and it stops overflow
+         propagating to the viewport. Same measurement: 380. Height is untouched
+         (a 900px document still measures 900), so the popup still sizes itself
+         vertically as before.
+
+         Inline here rather than in tokens.css so it applies on the very first
+         frame, before the bundle's stylesheet. The 380 is the popup shell's own
+         width — `w-95` in <ListView>, variant "popup" — which stays there
+         because the mockups render that shell standalone; this is the frame
+         around it. -->
+    <style>
+      html {
+        width: 380px;
+        contain: paint;
+      }
+      body {
+        margin: 0;
+      }
+    </style>
   </head>
   <body>
     <!-- The shared <ListView> mounts here. The only thing that differs from the
