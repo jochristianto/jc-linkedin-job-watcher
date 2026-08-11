@@ -11,7 +11,15 @@
 import { readFileSync } from "node:fs";
 import { parseHTML } from "linkedom";
 
+/** Defaults to the 24-hour-filtered capture (#59). Pass a path to run against
+ *  another — the unfiltered one from #68 exercises `Viewed`, `Applied` and
+ *  coarse ages, which the filtered capture cannot:
+ *
+ *    node docs/prototypes/new-ui-fields.mjs \
+ *      .scratch/linkedin-job-watcher/fixtures/new-ui/linkedin-jobs-search-nofilter-2026-08-11.html
+ */
 const FIXTURE =
+  process.argv[2] ??
   ".scratch/linkedin-job-watcher/fixtures/new-ui/linkedin-jobs-search-2026-08-11.html";
 
 /** The card root. Structural (`role="button"`) + the one semantic attribute the
