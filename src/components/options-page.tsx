@@ -181,6 +181,18 @@ const NO_STATUS: Status = { message: "", kind: "" };
 const SCROLL_MARGIN = 16;
 const SPY_OFFSET = 80;
 
+/** Why the two history controls are unavailable, and — the part worth saying —
+ *  what to do about it. A round holds the scan lock for a minute or so, and both
+ *  of these write the keys it is holding. The way past it is not only waiting:
+ *  the master switch in the popup *stops* a round outright (§ master), throwing
+ *  away what it had read, so it frees the lock straight away. */
+const SCAN_IN_PROGRESS_HINT =
+  " Unavailable while a scan is running — wait for it, or turn the watcher's on/off switch off to stop it now.";
+
+/** The same way out, after the worker has already refused the write. */
+const SCAN_IN_PROGRESS_WAY_OUT =
+  "Wait for it to finish, or turn the watcher's on/off switch off to stop it now.";
+
 /** How often the scan lock is re-judged against the clock (see `scanning`). Far
  *  coarser than the list view's one-second countdown: nothing here counts down,
  *  and the only thing that changes on this tick is whether a lock has aged into
@@ -526,7 +538,7 @@ export function OptionsPage() {
     setClearStatus({
       message:
         res?.reason === "scanning"
-          ? "A scan is running — nothing was deleted. Try again when it finishes."
+          ? `A scan is running — nothing was deleted. ${SCAN_IN_PROGRESS_WAY_OUT}`
           : "Nothing was deleted — the extension's background worker did not answer.",
       kind: "err",
     });
@@ -688,7 +700,7 @@ export function OptionsPage() {
     setBackupStatus({
       message:
         res?.reason === "scanning"
-          ? "A scan is running — nothing was imported. Try again when it finishes."
+          ? `A scan is running — nothing was imported. ${SCAN_IN_PROGRESS_WAY_OUT}`
           : "Nothing was imported — the extension's background worker did not answer.",
       kind: "err",
     });
@@ -1167,7 +1179,7 @@ export function OptionsPage() {
                         {historyPhrase(history)}
                       </span>{" "}
                       right now. Your settings are not touched.
-                      {scanning && " Unavailable while a scan is running."}
+                      {scanning && SCAN_IN_PROGRESS_HINT}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-3">
@@ -1381,7 +1393,7 @@ export function OptionsPage() {
                       <span className="font-medium text-foreground">Replace</span>{" "}
                       to make this browser match it exactly — only Replace removes
                       anything. Your Telegram credentials are kept either way.
-                      {scanning && " Unavailable while a scan is running."}
+                      {scanning && SCAN_IN_PROGRESS_HINT}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-3">

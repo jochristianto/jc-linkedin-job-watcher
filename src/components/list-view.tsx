@@ -403,11 +403,11 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
    * nothing to ask about, and the prompt simply doesn't render.
    *
    * Being *rendered* is `JobList`'s: the question is pinned in this job's own card
-   * and nowhere else, so if a chip, a New⇄All switch or a paused list has the row
+   * and nowhere else, so if a chip, a New⇄All switch or a stopped list has the row
    * off screen, the question is not asked yet — it waits in `pendingApplyId` and is
    * asked the next time that row is in front of you. It used to fall back to a band
    * under the header, which is how the question ended up hovering over a list it was
-   * no longer about — or, as in a paused popup, over no list at all.
+   * no longer about — or, as in a stopped popup, over no list at all.
    */
   const pendingApplyJobId = useMemo(
     () => (pendingApplyId && state?.jobs[pendingApplyId] ? pendingApplyId : null),
@@ -593,7 +593,7 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
                 job?" is asked in the job's own card further down, never as a band up
                 here (see `pendingApplyJobId`). */}
 
-            {/* Paused (§ master): the whole app body collapses to one message —
+            {/* Stopped (§ master): the whole app body collapses to one message —
                 no toolbar, no list, no footer — so the switch in the header is
                 the only thing to act on. Everything below is watching-on. */}
             {view.enabled ? (
@@ -670,7 +670,7 @@ export function ListView({ variant, defaultMode, title }: ListViewProps) {
             ) : (
               <div className="flex flex-1 flex-col overflow-y-auto">
                 <EmptyState
-                  kind="paused"
+                  kind="stopped"
                   action={{ label: "Turn watching on", onClick: () => onToggleEnabled(true) }}
                 />
               </div>

@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   KEEPALIVE_PING_MS,
+  abortScan,
   IDLE_LIFECYCLE,
   requestCatchUp,
   beginScan,
@@ -163,4 +164,51 @@ test("a startup that finds a stuck lock still keeps its catch-up owed", () => {
   assert.equal(next.isScanning, false);
   const { pages } = beginScan(next, STALE_MS + 2, 4, 1);
   assert.equal(pages, 4);
+});
+
+// ── § master: the switch going off stops the round, it does not pause it ─────
+
+test("abortScan releases a live cycle's lock however fresh it is", () => {
+  // The one thing recoverStaleLock will not do. A cycle that took the lock a
+  // second ago is exactly the cycle the switch is being flipped to stop, so the
+  // clock is not consulted at all.
+  const running = state({ isScanning: true, startedAt: 1_000, openTabIds: [7, 8] });
+  const { tabIdsToClose, state: next } = abortScan(running);
+  assert.deepEqual(tabIdsToClose, [7, 8]);
+  assert.equal(next.isScanning, false);
+  assert.equal(next.startedAt, null);
+  assert.deepEqual(next.openTabIds, []);
+});
+
+test("abortScan hands back the scan window's tabs to be swept", () => {
+  // The stopped cycle may never run its own cleanup — the tab ids are the only
+  // record that a window is still on screen.
+  const { tabIdsToClose } = abortScan(state({ isScanning: true, startedAt: 5, openTabIds: [42] }));
+  assert.deepEqual(tabIdsToClose, [42]);
+});
+
+test("abortScan owes the next round a catch-up — the stopped one stored nothing", () => {
+  // beginScan had already consumed the flag for the round being stopped, and that
+  // round wrote nothing, so the gap it leaves is answered the same way a quiet
+  // window or a closed Chrome is: the first round back runs deep.
+  const { state: next } = abortScan(state({ isScanning: true, startedAt: 1_000 }));
+  assert.equal(next.pendingCatchUp, true);
+  const { pages } = beginScan(next, 2_000, 4, 1);
+  assert.equal(pages, 4);
+});
+
+test("abortScan owes a catch-up even when nothing was running", () => {
+  // Switching off while idle leaves a gap too — it is however long the switch
+  // stays off, not just the remainder of an interrupted round.
+  const { state: next } = abortScan(state());
+  assert.equal(next.pendingCatchUp, true);
+});
+
+test("abortScan returns the state unchanged when there is nothing left to stop", () => {
+  // Every Options save while watching is off would otherwise rewrite this key to
+  // say exactly what it already said; identity is how the wrapper skips the write.
+  const stopped = state({ pendingCatchUp: true });
+  const { tabIdsToClose, state: next } = abortScan(stopped);
+  assert.deepEqual(tabIdsToClose, []);
+  assert.equal(next, stopped);
 });

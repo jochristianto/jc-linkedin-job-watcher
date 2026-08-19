@@ -65,7 +65,7 @@ const NOTES: [string, string][] = [
   ],
   [
     "The switch in the popup header stops everything",
-    "until you turn it back on — a full pause, not just quieter.",
+    "until you turn it back on — a full stop, not just quieter. A round already running is stopped where it stands and what it had read is thrown away, so nothing half-scanned is ever stored.",
   ],
   [
     "Reading LinkedIn this way is against their terms.",

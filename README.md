@@ -154,8 +154,12 @@ waiting when you come back from LinkedIn.
 
 ### The rest of the list
 
-- **The on/off switch** in the header pauses the whole extension. Nothing is
-  scanned — not even by **Scan now** — until you turn it back on.
+- **The on/off switch** in the header stops the whole extension. Nothing is
+  scanned — not even by **Scan now** — until you turn it back on. It stops rather
+  than pauses: a round already running is abandoned where it stands, its window
+  closes, and everything it had read is thrown away rather than stored, so
+  switching off mid-round never leaves you with half a round's jobs. The first
+  round after you switch it back on looks deeper (4 pages) to cover the gap.
 - **Scan now** runs a round immediately, ignoring the interval and quiet hours.
   It says _Scanning…_ from the moment you press it, not when the background gets
   round to answering. The list repaints itself when the round finishes, and the
@@ -166,7 +170,7 @@ waiting when you come back from LinkedIn.
   new jobs…_ while a round runs, otherwise a live countdown (_Next scan in 4m
   12s_). It reads the real armed alarm, so it cannot drift from the actual
   schedule. Inside quiet hours it says so. Under manual-only it reads _Manual
-  only — press Scan now_, and when the extension is switched off, _Paused_.
+  only — press Scan now_, and when the extension is switched off, _Stopped_.
 - **Watch chips** filter the list to one search; the count still covers all of
   them. **New ⇄ All** switches between unread-only and everything. **Mark all as
   read** clears both at once.
@@ -226,7 +230,7 @@ Filtered jobs are still recorded as seen, so they never resurface later.
 itself — nothing is loaded from LinkedIn until you press **Scan now**. Everything
 else carries on as normal: your searches stay on, and a manual round updates the
 list, the count, the notification and Telegram exactly as a scheduled one would.
-It is _not_ the same as the header's on/off switch, which pauses the whole
+It is _not_ the same as the header's on/off switch, which stops the whole
 extension including the button; this one just hands the timing to you. Your
 interval, jitter and quiet hours are kept as you set them, greyed out while it is
 on, and go straight back into service when you switch it off.
@@ -331,7 +335,9 @@ behind it — pushes are skipped and the Notifications section says so.
 Like **Delete all job history**, importing is unavailable while a round is
 running, and for the same reason: it rewrites the seen IDs a round in flight is
 about to compare against. If a round starts while the wizard is open, the last
-screen says so and the button is unavailable until it finishes. The counts you are
+screen says so and the button is unavailable until it finishes — or until you
+turn the header's on/off switch off, which stops that round on the spot and hands
+the import a clean store rather than making you wait it out. The counts you are
 shown are recomputed against live storage at the moment of the write, so anything
 that landed while you were reading — a round finishing, a company blocked from a
 job row — survives a merge rather than being quietly overwritten.

@@ -135,7 +135,7 @@ export type EmptyKind =
   // The master switch is off (§ master): the list, toolbar and footer are all
   // hidden and this takes their place. Never produced by `pickEmptyKind` — the
   // `<ListView>` renders it directly, ahead of the normal empty-state logic.
-  | "paused";
+  | "stopped";
 
 /** The two places the list view mounts (PRD §4). The popup is a fixed 380px
  *  panel that closes on an outside click; the tab is a full page. It is the only
@@ -184,8 +184,9 @@ export type ScanButtonState = "idle" | "scanning" | "halted";
  *                   is the setting working, not a fault, so it reads as a standing
  *                   state rather than as something missing.
  * - `disabled`    — the user flipped the master switch off (§ master). The whole
- *                   loop is paused on purpose, so the bar says "Paused" rather
- *                   than counting down to a scan that isn't coming.
+ *                   loop is stopped on purpose — the round that was running was
+ *                   dropped with it — so the bar says "Stopped" rather than
+ *                   counting down to a scan that isn't coming.
  */
 export type ScanStatus =
   | { kind: "scanning" }

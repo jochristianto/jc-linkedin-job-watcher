@@ -719,9 +719,9 @@ test("scanStatus goes silent when no search is enabled", () => {
   assert.deepEqual(scanStatus({ ...base, watches: [], now: NOW }), { kind: "off" });
 });
 
-test("scanStatus says Paused when the master switch is off (§ master)", () => {
+test("scanStatus says Stopped when the master switch is off (§ master)", () => {
   // Off means off: even with a watch enabled and an alarm armed, the loop is
-  // paused on purpose, so the footer must not count down to a scan that won't run.
+  // stopped on purpose, so the footer must not count down to a scan that won't run.
   assert.deepEqual(
     scanStatus({ ...base, enabled: false, nextScanAt: NOW + 300_000, now: NOW }),
     { kind: "disabled" },
@@ -729,24 +729,27 @@ test("scanStatus says Paused when the master switch is off (§ master)", () => {
 });
 
 test("scanStatus: the master switch outranks a stale halt", () => {
-  // A loop turned off should read as paused, not as a challenge waiting on Resume.
+  // A loop turned off should read as stopped, not as a challenge waiting on Resume.
   assert.deepEqual(
     scanStatus({ ...base, enabled: false, scanMode: "halted", now: NOW }),
     { kind: "disabled" },
   );
 });
 
-test("scanStatus: a cycle in flight still wins over the master switch", () => {
-  // Toggling off mid-scan lets that cycle finish; only the next status is paused.
+test("scanStatus: the master switch outranks a lock still showing as scanning", () => {
+  // Toggling off STOPS the round rather than letting it finish (§ master), so a
+  // lock still visible under an off switch is the trace of a worker that died
+  // mid-round — not a scan to report. Saying "Scanning…" there would promise
+  // activity that has already been abandoned and its results thrown away.
   assert.deepEqual(
     scanStatus({ ...base, enabled: false, scanning: true, now: NOW }),
-    { kind: "scanning" },
+    { kind: "disabled" },
   );
 });
 
 test("scanStatus treats an absent master switch as on (upgrade back-compat)", () => {
   // Settings written before the switch existed have no `enabled`; they keep
-  // counting down rather than reading as paused.
+  // counting down rather than reading as stopped.
   assert.deepEqual(scanStatus({ ...base, nextScanAt: NOW + 300_000, now: NOW }), {
     kind: "waiting",
     remainingMs: 300_000,
@@ -780,7 +783,7 @@ test("scanStatus: manual-only outranks an alarm left armed from before the switc
 });
 
 test("scanStatus: the master switch and a live cycle both outrank manual-only", () => {
-  // Paused is a stronger statement than manual — under it the button is gone too —
+  // Stopped is a stronger statement than manual — under it the button is gone too —
   // and a cycle in flight is simply what is happening, however it was started.
   assert.deepEqual(scanStatus({ ...base, manualOnly: true, enabled: false, now: NOW }), {
     kind: "disabled",

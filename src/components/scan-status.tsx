@@ -34,7 +34,7 @@ function statusFace(status: ScanStatus): { icon: LucideIcon; text: string } {
     case "off":
       return { icon: Clock, text: "" };
     case "disabled":
-      return { icon: PowerOff, text: "Paused — turn on to scan" };
+      return { icon: PowerOff, text: "Stopped — turn on to scan" };
   }
 }
 
@@ -73,11 +73,11 @@ export function ScanStatusBar({ status, unread, watchCount }: ScanStatusBarProps
   const { icon: Icon, text } = statusFace(status);
   const scanning = status.kind === "scanning";
 
-  // Paused is a state, not a tally: counting down jobs "new" under a switch the
+  // Stopped is a state, not a tally: counting down jobs "new" under a switch the
   // user deliberately turned off invites the reading that scanning is continuing.
   const counts =
     status.kind === "disabled"
-      ? "Paused"
+      ? "Stopped"
       : unread === undefined || watchCount === undefined
         ? null
         : `${unread} new · ${plural(watchCount, "watch", "watches")}`;

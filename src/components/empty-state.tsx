@@ -41,10 +41,10 @@ const EMPTY_STATES: Record<EmptyKind, { icon: LucideIcon; title: string; body: s
     title: "Last scan failed",
     body: "LinkedIn's page may have changed — selectors returned nothing. See Options.",
   },
-  paused: {
+  stopped: {
     icon: PowerOff,
     title: "Watching is off",
-    body: "No scans, no notifications. Your watches and history stay exactly where they are.",
+    body: "No scans, no notifications. Any round that was running was stopped and dropped — your watches and history stay exactly where they are.",
   },
 };
 
