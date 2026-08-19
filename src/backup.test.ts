@@ -1,3 +1,10 @@
+// Pin the clock east of Greenwich, where the export filename is decided: the
+// stamp reads the local wall clock, and under UTC — where "local" *is* UTC — a
+// test of that would pass just as well on a name built the old, UTC way. +07 has
+// no DST, so the strings below are the same wherever the suite runs. Set before
+// any Date is touched.
+process.env.TZ = "Asia/Jakarta";
+
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -360,8 +367,29 @@ test("an empty backup says so rather than saying nothing", () => {
 
 // ── The file on disk ─────────────────────────────────────────────────────────
 
-test("the filename is dated, so a folder of them sorts newest-last", () => {
-  assert.equal(backupFilename(NOW), "linkedin-job-watcher-backup-2025-07-30.json");
+test("the filename is stamped to the second, so a folder of them sorts newest-last", () => {
+  // NOW is midnight UTC, which is 07:00:00 on the same date in the pinned +07 zone.
+  assert.equal(backupFilename(NOW), "linkedin-job-watcher-backup-20250730-070000.json");
+});
+
+test("the stamp is the local clock, not UTC — the two can be on different days", () => {
+  // 2025-07-29T20:00Z: still yesterday by the ISO date, already today on the wall.
+  assert.equal(
+    backupFilename(NOW - 4 * 3_600_000),
+    "linkedin-job-watcher-backup-20250730-030000.json",
+  );
+});
+
+test("single-digit months, days and times are padded, so the names stay sortable", () => {
+  // 2025-01-05T09:08:07 local — every field a candidate for losing its zero.
+  assert.equal(
+    backupFilename(1_736_042_887_000),
+    "linkedin-job-watcher-backup-20250105-090807.json",
+  );
+});
+
+test("a second export the same day gets its own name rather than the browser's `(1)`", () => {
+  assert.notEqual(backupFilename(NOW), backupFilename(NOW + 60_000));
 });
 
 test("the text is indented and newline-terminated, so it can be read and diffed", () => {

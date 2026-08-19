@@ -287,8 +287,10 @@ Everything above, as one readable JSON file — and back again.
 blocklists, the schedule, the retention limits, the notification preferences, and
 the job history that stops a posting being announced twice. It comes from what is
 **stored**, not from the fields on screen, so press **Save settings** first if you
-want unsaved edits in it. The file is named for the day it was written, and it is
-indented rather than minified so you can open it, read it and hand-edit it.
+want unsaved edits in it. The file is named for the local date and time it was
+written, down to the second — so two exports in one afternoon are two files rather
+than one and a `(1)` — and it is indented rather than minified so you can open it,
+read it and hand-edit it.
 
 **Your Telegram bot token and chat id are never written to a backup.** That is
 enforced in the code rather than remembered — the exported shape simply has no
