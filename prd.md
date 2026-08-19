@@ -28,7 +28,7 @@ New jobs surface in two places: a badge count on the extension icon, and a deskt
 
 ### Scanning
 
-- A **master on/off switch** in the list header (`Settings.enabled`, default on). Off clears the routine alarm and makes "Scan now" inert — the whole loop stops until it is turned back on. Distinct from a *per-watch* toggle, which silences one search
+- A **master on/off switch** in the list header (`Settings.enabled`, default on). Off clears the routine alarm and makes "Scan now" inert — the whole loop stops until it is turned back on. It is a **stop, not a pause**: a round already in flight is aborted where it stands, its window closed and everything it had read discarded unstored, and the scan lock is released at once (§17, decision 6). Distinct from a *per-watch* toggle, which silences one search
 - **"Only scan when I press Scan now"** (`Settings.manualOnly`, default off). No alarm is ever armed, so nothing is loaded from LinkedIn until the button is pressed — but the watches stay on and a manual round behaves exactly like a scheduled one. It hands the *timing* to the user; the master switch above stops the loop outright (§15, decision 7)
 - Configurable interval, default **60 minutes**, with **±30 minutes jitter** — every wake lands somewhere in 30–90 minutes (§15)
 - Configurable page depth, default **1 page** per search — page 2 is mostly stale when sorted by date; the startup / quiet-hours catch-up scan (default 4 pages) recovers anything that drifted deeper during a gap (§15)
@@ -159,7 +159,7 @@ type BlockedCompany = {
 };
 
 type Settings = {
-  enabled: boolean; // default true — the master switch (§3). Off stops the loop AND "Scan now"
+  enabled: boolean; // default true — the master switch (§3). Off stops the loop AND "Scan now", and aborts the round in flight (§17.6)
   manualOnly: boolean; // default false — no alarm is armed; "Scan now" is the only trigger (§15.7)
   watches: Watch[];
   blockedCompanies: BlockedCompany[];
@@ -787,7 +787,7 @@ Eight decisions, eight answers:
 
 | Setting | Default | Why |
 | --- | --- | --- |
-| `enabled` | true | The master switch; off stops the loop and the manual button both (§3) |
+| `enabled` | true | The master switch; off stops the loop, the manual button and the round in flight (§3, §17.6) |
 | `manualOnly` | false | Scheduled rounds are the point; the escape hatch is opt-in (decision 7) |
 | `intervalMinutes` | 60 | Hourly is as fresh as the postings are; 5 min was volume for nothing (decision 1) |
 | `jitterMinutes` | 30 | Every wake lands in 30–90 min, so there is no period to recognise (decision 3) |
@@ -925,6 +925,40 @@ Five decisions, five answers:
    closed-Chrome gap are the same problem (§9). If a stale-lock sweep happens to
    run on that first startup tick, the flag survives it (`recoverStaleLock`
    preserves `pendingCatchUp`), so the catch-up is never dropped.
+
+6. **The master switch is a stop, not a pause** (issue: an import refused mid-round).
+   Turning scanning off used to clear the alarm and leave the round in flight to
+   run itself out. Three things followed, all wrong. The scan window stayed on
+   screen after the user had said stop. The round still reached its write, so
+   switching off halfway quietly stored and announced a batch of jobs. And the
+   round kept the scan lock for the rest of its 60–90s — which is the lock **"Import
+   a backup" and "Delete all job history" both need** (§7, §20), so the two
+   controls stayed refused long after the loop was supposedly off, or for the full
+   `staleLockMs` if the worker had been torn down in between. That last one is the
+   reason this changed: the user had already said "stop", and the extension's
+   answer to "then let me import" was "a scan is running".
+
+   **Decision:** off aborts the round. `abortScan` (lifecycle.ts) is the pure part
+   — it releases the lock **without consulting the staleness clock**, because
+   unlike `recoverStaleLock` the lock it is taking is usually a *live* cycle's, and
+   taking it off that cycle is the whole point; it hands back `openTabIds` for the
+   wrapper to sweep; and it sets `pendingCatchUp`, since a stopped round stored
+   nothing and the gap it leaves is the same gap a quiet window or a closed Chrome
+   leaves (decision 5). It returns the state unchanged when there is nothing to
+   stop, so the settings saves that arrive while watching is off cost no write.
+
+   **Nothing collected mid-round survives.** A cycle only becomes stored state in
+   its tail — one dedupe, one `seen` write, one `jobs` write, then badge,
+   notification and push — so the abort check sits immediately before that tail and
+   returns. Not "written then rolled back": never written. The next round after the
+   switch goes back on re-reads those pages anyway, and dedupe by job id makes that
+   lossless (decision 4).
+
+   **Who can be holding the lock:** a cycle, or an import/delete in progress. The
+   second must not be released from under itself, and both are always the same
+   worker's own, so an in-memory count (`maintenanceHolds`) is enough to tell them
+   apart. The aborted cycle's own `finally` is guarded the same way — by the time it
+   runs, the lock it would release may belong to the import the stop just unblocked.
 
 ### The revised startup handler
 

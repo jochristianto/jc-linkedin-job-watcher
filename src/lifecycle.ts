@@ -5,7 +5,7 @@
 // an extension API, nothing in memory survives a teardown, and the dead air in a
 // cycle is the wait for LinkedIn to render (`tabs.create` resolves before the
 // page loads). This module is the pure-logic reference for what to *do* about
-// them — the five decisions §17 settles:
+// them — the decisions §17 settles:
 //
 //   1. Keepalive, not restartability. A 25s API ping (`KEEPALIVE_PING_MS`) keeps
 //      a full cycle alive; a lost cycle costs one skipped scan and dedupe is by
@@ -18,6 +18,9 @@
 //   5. The startup / quiet-resume catch-up is a *consumable flag*, not an inline
 //      scan, so it fires exactly once whether or not Chrome replays the missed
 //      alarm on relaunch (issue #3's open question, verified in #5).
+//   6. The master switch is a STOP, not a pause: `abortScan` takes the lock off a
+//      live cycle whatever the clock says, so the round is abandoned unstored and
+//      an import can go ahead at once (§ master / §17 decision 6).
 //
 // Like `filter.ts`, `schedule.ts` and `health.ts` it touches no chrome.*, no DOM
 // and no network — `now`, tab ids and settings all come in as arguments — so
@@ -168,5 +171,45 @@ export function recoverStaleLock(
   return {
     tabIdsToClose: state.openTabIds,
     state: { ...state, isScanning: false, startedAt: null, openTabIds: [] },
+  };
+}
+
+/**
+ * Stop a cycle dead and release the lock — the master switch going off mid-round
+ * (§ master).
+ *
+ * The difference from {@link endScan} is the difference between a cycle *ending*
+ * and a cycle being *stopped*. `endScan` runs when the round has already written
+ * what it found and closed the window it borrowed, so there is nothing left to
+ * give back. This runs when the user turned watching off halfway through, so
+ * neither is true: the scan window is still on screen, and the round will never
+ * reach the write that would have made it worth anything. So the tracked tabs are
+ * handed back to be swept, exactly as {@link recoverStaleLock} does — and unlike
+ * that one, *whatever the clock says*. A stale lock is one nobody is holding; this
+ * one is most likely held by a live cycle, and taking it off that cycle is the
+ * whole point. Releasing it here is what lets an import (§ backup) go ahead the
+ * moment the switch is off, rather than waiting out a round that no longer has a
+ * reason to finish.
+ *
+ * `pendingCatchUp` is *set* rather than left alone. A stopped round stores
+ * nothing, so the time it covered — plus however long the switch stays off — is a
+ * gap, the same shape of gap a quiet window or a closed Chrome leaves (§9 / §17
+ * decision 5), and it is answered the same way: the first round after the switch
+ * goes back on runs deep.
+ *
+ * Returns the state **unchanged** when there is nothing to stop — no lock, no
+ * tabs, a catch-up already owed — so the wrapper can skip the write. Settings are
+ * saved while watching is off (every Options save is one), and each of those
+ * would otherwise rewrite this key to say precisely what it already said.
+ */
+export function abortScan(state: ScanLifecycleState): {
+  tabIdsToClose: number[];
+  state: ScanLifecycleState;
+} {
+  const idle = !state.isScanning && state.openTabIds.length === 0 && state.pendingCatchUp;
+  if (idle) return { tabIdsToClose: [], state };
+  return {
+    tabIdsToClose: state.openTabIds,
+    state: { ...endScan(state), pendingCatchUp: true },
   };
 }

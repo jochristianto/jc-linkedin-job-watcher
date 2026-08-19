@@ -349,7 +349,7 @@ export type ViewContext = {
    *  (PRD §14). Defaults to `Date.now()` for callers that render no countdown. */
   now?: number;
   /** The master on/off switch (`settings.enabled`, § master). `false` = the user
-   *  paused the whole loop from the header: the footer says "Paused" and the
+   *  stopped the whole loop from the header: the footer says "Stopped" and the
    *  header hides "Scan now". Absent (settings from before the switch existed)
    *  reads as on, so callers pass `settings.enabled !== false`. */
   enabled?: boolean;
@@ -397,11 +397,13 @@ export function scanButtonState(ctx: ViewContext): ScanButtonState {
 /**
  * What the footer status bar says — the answer to "is this thing still running?".
  *
- * The order is the priority order. A live cycle wins over everything: while the
- * lock is held the extension *is* scanning, whatever the schedule or the health
- * record say — and a just-clicked "Scan now" counts as live from the click, not
- * from the worker's reply (see `pendingScan`), so the countdown can never keep
- * ticking under a button you already pressed. A halted loop comes next, because there is genuinely nothing armed
+ * The order is the priority order. The master switch wins over everything, for
+ * the reason in the code below: off is a stop, so there is no round left to
+ * report on. Then a live cycle — while the lock is held the extension *is*
+ * scanning, whatever the schedule or the health record say, and a just-clicked
+ * "Scan now" counts as live from the click, not from the worker's reply (see
+ * `pendingScan`), so the countdown can never keep ticking under a button you
+ * already pressed. A halted loop comes next, because there is genuinely nothing armed
  * to count down to (§16.2 waits for a manual resume). With no enabled search
  * there is nothing to scan either, so the bar goes away entirely rather than
  * promise a scan that would find nothing. Only then is it a countdown — and a
@@ -415,11 +417,14 @@ export function scanButtonState(ctx: ViewContext): ScanButtonState {
  * coming. The health banner above already explains the situation.
  */
 export function scanStatus(ctx: ViewContext): ScanStatus {
-  if (isScanning(ctx)) return { kind: "scanning" };
-  // The master switch (§ master) outranks the schedule and the health record: a
-  // loop the user turned off is paused whatever a stale halt or armed alarm says.
-  // A cycle already in flight still wins above — it finishes, then this takes over.
+  // The master switch (§ master) outranks everything, a live cycle included: off
+  // *stops* the round in flight rather than letting it finish, so by the time the
+  // switch reads off there is no cycle left for "Scanning…" to be describing. A
+  // lock still showing in storage under an off switch is the trace of a worker
+  // that died mid-round, and reporting that as a scan in progress would promise
+  // activity that has not only stopped but been thrown away.
   if (ctx.enabled === false) return { kind: "disabled" };
+  if (isScanning(ctx)) return { kind: "scanning" };
   if (ctx.scanMode === "halted") return { kind: "halted" };
   if (!ctx.watches.some((w) => w.enabled)) return { kind: "off" };
   // Manual only (§ manual-only) outranks the countdown rather than falling through
@@ -462,8 +467,8 @@ export type ViewProps = {
   emptyKind: EmptyKind | null;
   scanButton: ScanButtonState;
   status: ScanStatus;
-  /** The master on/off switch (§ master). `false` = the user paused everything:
-   *  the header hides "Scan now" and the whole body collapses to the paused
+  /** The master on/off switch (§ master). `false` = the user stopped everything:
+   *  the header hides "Scan now" and the whole body collapses to the stopped
    *  message. `ctx.enabled` absent (pre-switch settings) reads as on. */
   enabled: boolean;
   /** The health banner and the §16.7 push warning, in the order they stack. Both

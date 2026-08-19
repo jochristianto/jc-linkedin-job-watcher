@@ -837,7 +837,7 @@ const EMPTY_KINDS = [
   "no-new",
   "scanning",
   "scan-error",
-  "paused",
+  "stopped",
 ] as const satisfies readonly EmptyKind[];
 
 test("EmptyState gives a distinct, actionable message per situation", () => {
@@ -847,7 +847,7 @@ test("EmptyState gives a distinct, actionable message per situation", () => {
   assert.match(html(<EmptyState kind="no-watches" />), /Options|Add a search/i);
   assert.match(html(<EmptyState kind="no-new" />), /caught up|no new/i);
   assert.match(html(<EmptyState kind="scan-error" />), /failed|broke|selector/i);
-  assert.match(html(<EmptyState kind="paused" />), /paused|watching is off/i);
+  assert.match(html(<EmptyState kind="stopped" />), /stopped|watching is off/i);
 });
 
 test("each empty state gets its own Lucide icon, sized as artwork not a button", () => {
@@ -857,7 +857,7 @@ test("each empty state gets its own Lucide icon, sized as artwork not a button",
     "no-new": /lucide-circle-check/,
     scanning: /lucide-refresh-cw/,
     "scan-error": /lucide-triangle-alert/,
-    paused: /lucide-power-off/,
+    stopped: /lucide-power-off/,
   };
   for (const kind of EMPTY_KINDS) {
     const h = html(<EmptyState kind={kind} />);
@@ -1012,10 +1012,10 @@ test("ListHeader leaves the tab's controls in a row, with no menu button", () =>
   }
 });
 
-test("ListHeader's menu button admits when watching is paused", () => {
+test("ListHeader's menu button admits when watching is stopped", () => {
   // A shut menu says nothing about the state of what is inside it, and "the loop
   // is off" is the one thing you must not have to open a menu to find out.
-  assert.match(header({ variant: "popup", enabled: false }), /id="header-menu"[^>]*aria-label="Menu — watching is paused"/);
+  assert.match(header({ variant: "popup", enabled: false }), /id="header-menu"[^>]*aria-label="Menu — watching is stopped"/);
   assert.match(header({ variant: "popup", enabled: true }), /id="header-menu"[^>]*aria-label="Menu"/);
 });
 
@@ -1036,7 +1036,7 @@ test("ListHeader renders the master on/off switch, checked while watching", () =
 });
 
 test("ListHeader hides Scan now while the master switch is off", () => {
-  // Nothing to scan while paused, so the manual trigger goes away with the loop;
+  // Nothing to scan while stopped, so the manual trigger goes away with the loop;
   // the switch itself is the way back on.
   for (const variant of ["tab", "popup"] as const) {
     assert.doesNotMatch(header({ variant, enabled: false }), /id="scan-now"/, variant);
@@ -1050,7 +1050,7 @@ test("HeaderMenu says what the master switch is currently doing", () => {
   // The header only ever had a tooltip for this. A list row has room to say it
   // outright, and the switch is the one control here worth a sentence.
   assert.match(menu({ enabled: true }), />Watching for jobs</);
-  assert.match(menu({ enabled: false }), />Paused</);
+  assert.match(menu({ enabled: false }), />Stopped</);
 });
 
 test("ListHeader omits the expand control in the tab, which already is one", () => {
@@ -1134,11 +1134,11 @@ test("ScanStatusBar renders nothing at all when there is nothing to scan", () =>
   assert.equal(html(<ScanStatusBar status={{ kind: "off" }} />), "");
 });
 
-test("ScanStatusBar says Paused when the master switch is off (§ master)", () => {
+test("ScanStatusBar says Stopped when the master switch is off (§ master)", () => {
   // Unlike `off`, this one renders: the user turned it off and the bar confirms it.
   const h = html(<ScanStatusBar status={{ kind: "disabled" }} />);
   assert.match(h, /data-kind="disabled"/);
-  assert.match(h, /Paused/);
+  assert.match(h, /Stopped/);
   assert.match(h, /lucide-power-off/);
 });
 
@@ -1150,7 +1150,7 @@ test("ScanStatusBar reads manual-only as a standing state, not a missing schedul
   assert.match(h, /Manual only — press Scan now/);
   assert.doesNotMatch(h, /No scan scheduled/);
   // The counts stay: a manual round is a full round, so the unread total is as
-  // real here as under a countdown — only `disabled` replaces it with "Paused".
+  // real here as under a countdown — only `disabled` replaces it with "Stopped".
   assert.match(h, /2 new · 3 watches/);
 });
 

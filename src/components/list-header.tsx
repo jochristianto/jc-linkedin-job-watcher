@@ -26,8 +26,9 @@ export type ListHeaderProps = {
   badge: number;
   scanButton: ScanButtonState;
   variant: ViewVariant;
-  /** The master on/off switch (§ master). Off pauses the whole loop and hides
-   *  "Scan now" — there is nothing to scan until it's back on. */
+  /** The master on/off switch (§ master). Off stops the whole loop — the round in
+   *  flight included — and hides "Scan now": there is nothing to scan until it's
+   *  back on. */
   enabled: boolean;
   /** A watch chip is filtering the list, so the bulk read only reaches that
    *  watch's jobs (see `markAllRead`). Changes nothing but the words on the
@@ -140,10 +141,10 @@ export function HeaderMenu({
           className="flex min-w-0 flex-1 cursor-pointer flex-col"
         >
           <span className="text-[13px] font-medium">
-            {enabled ? "Watching for jobs" : "Paused"}
+            {enabled ? "Watching for jobs" : "Stopped"}
           </span>
           <span className="text-[11.5px] text-muted-foreground">
-            {enabled ? "Scans run on their schedule" : "No scans until you resume"}
+            {enabled ? "Scans run on their schedule" : "No scans until you turn it back on"}
           </span>
         </label>
         <Switch
@@ -151,7 +152,7 @@ export function HeaderMenu({
           id="master-switch"
           checked={enabled}
           onCheckedChange={onToggleEnabled}
-          aria-label={enabled ? "Watching for jobs — turn off" : "Paused — turn on"}
+          aria-label={enabled ? "Watching for jobs — turn off" : "Stopped — turn on"}
         />
       </div>
 
@@ -189,8 +190,8 @@ export function HeaderMenu({
  *
  *  What it must not cost is knowing the loop is off: the switch used to say so
  *  from the header, and a menu says nothing while it is shut. So the trigger
- *  carries a dot when paused — the same marker the rows use for "this one needs
- *  you" — and the footer still spells "Paused" out in words. */
+ *  carries a dot when stopped — the same marker the rows use for "this one needs
+ *  you" — and the footer still spells "Stopped" out in words. */
 function HeaderMenuButton(props: MenuControls) {
   const [open, setOpen] = useState(false);
 
@@ -202,7 +203,7 @@ function HeaderMenuButton(props: MenuControls) {
     run();
   };
 
-  const label = props.enabled ? "Menu" : "Menu — watching is paused";
+  const label = props.enabled ? "Menu" : "Menu — watching is stopped";
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -306,7 +307,7 @@ export function ListHeader({
       <div className="ml-auto flex shrink-0 items-center gap-0.5">
         {variant === "popup" ? (
           <>
-            {/* Nothing to scan while paused, so the manual trigger goes away
+            {/* Nothing to scan while stopped, so the manual trigger goes away
                 with the loop — the switch inside the menu is the way back on. */}
             {enabled && (
               <Tooltip>
@@ -363,19 +364,19 @@ export function ListHeader({
                     checked={enabled}
                     onCheckedChange={onToggleEnabled}
                     aria-label={
-                      enabled ? "Watching for jobs — turn off" : "Paused — turn on"
+                      enabled ? "Watching for jobs — turn off" : "Stopped — turn on"
                     }
                   />
                 </span>
               </TooltipTrigger>
               <TooltipContent>
                 {enabled
-                  ? "Watching — click to pause"
-                  : "Paused — click to resume"}
+                  ? "Watching — click to stop"
+                  : "Stopped — click to start"}
               </TooltipContent>
             </Tooltip>
 
-            {/* Nothing to scan while paused, so the manual trigger goes away
+            {/* Nothing to scan while stopped, so the manual trigger goes away
                 with it. */}
             {enabled && <ScanButton state={scanButton} onScan={onScan} />}
 

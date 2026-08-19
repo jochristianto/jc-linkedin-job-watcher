@@ -18,6 +18,7 @@ import type { FilterRules } from "./filter.ts";
 import { nextScanDelayMs, randomPauseMs, SCAN_ALARM_NAME } from "./schedule.ts";
 import {
   KEEPALIVE_PING_MS,
+  abortScan,
   beginScan,
   endScan,
   holdLock,
@@ -146,8 +147,38 @@ async function scanWindowBounds(): Promise<chrome.windows.CreateData> {
 type ScanSession = { windowId: number; tabId: number };
 
 /** Sleep for a drawn pause length — the in-cycle pacing (PRD §9/§15 decision 5).
- *  A plain timer; the *length* is decided by the tested `randomPauseMs`. */
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+ *  A plain timer; the *length* is decided by the tested `randomPauseMs`.
+ *
+ *  It cuts short when the cycle is stopped (§ master). The longest pause in a
+ *  round is twelve seconds between watches, and a switch flipped off in the
+ *  middle of one would otherwise leave the scan window sitting on screen for the
+ *  rest of it — "stop" has to mean the window goes now, not shortly. */
+const sleep = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve) => {
+    if (signal?.aborted) return resolve();
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener("abort", done, { once: true });
+  });
+
+/** The cycle running in this worker right now, or null — the handle the master
+ *  switch pulls to stop it (see {@link stopScanning}). In memory on purpose: a
+ *  cycle only exists while the worker that started it is alive, so a worker that
+ *  came back from a teardown has nothing to stop, and the stuck lock the dead one
+ *  left is `abortScan`'s job, not this handle's. */
+let liveCycle: AbortController | null = null;
+
+/** How many maintenance writes (an import, a history delete) are holding the scan
+ *  lock right now. Both are this worker's own and both are seconds long, so a
+ *  counter is enough to tell "the lock belongs to a cycle" — which the master
+ *  switch may take away — from "the lock belongs to a write in progress", which
+ *  it must not: releasing that one would hand a second writer the two history
+ *  keys while the first is still writing them. */
+let maintenanceHolds = 0;
 
 // ── Badge ────────────────────────────────────────────────────────────────────
 
@@ -500,8 +531,14 @@ function filterRulesOf(settings: Settings): FilterRules {
  *  Every watch's results are collected and merged into ONE batch before a single
  *  dedupe (PRD §5), so a role surfacing under two searches notifies only once. The
  *  keepalive interval (PRD §17 decision 1) runs for the whole cycle and is cleared
- *  in the `finally`. */
-async function runCycle(settings: Settings, pages: number): Promise<void> {
+ *  in the `finally`.
+ *
+ *  `signal` is the master switch (§ master). Aborted, the round gives up at the
+ *  next page boundary, closes its window and returns *before* the tail that
+ *  writes anything — so a stopped round leaves no trace at all: not a seen id, not
+ *  a job record, not a notification. See {@link stopScanning} for why that is the
+ *  wanted behaviour rather than a lost round. */
+async function runCycle(settings: Settings, pages: number, signal: AbortSignal): Promise<void> {
   const keepalive = setInterval(() => {
     void chrome.runtime.getPlatformInfo();
   }, KEEPALIVE_PING_MS);
@@ -524,13 +561,17 @@ async function runCycle(settings: Settings, pages: number): Promise<void> {
     // fresh one per page: a single window tucked in the corner for a minute is far
     // less disruptive than nine that each appear and vanish. Opened only if there
     // is actually something to scan, and always closed in the `finally` below.
-    const session = watches.length > 0 ? await openScanSession() : null;
+    const session = watches.length > 0 && !signal.aborted ? await openScanSession() : null;
     try {
       for (const [w, watch] of watches.entries()) {
+        if (signal.aborted) break;
         // The first posting id of the page just read, for the pagination guard
         // below. Reset per watch — a repeat only means anything within one search.
         let previousFirstId: string | null = null;
         for (let page = 1; page <= pages; page++) {
+          // The page boundary is where a stop lands: a page half-read is not worth
+          // finishing when nothing this round read will be stored anyway.
+          if (signal.aborted) break;
           const pageUrl = scanPageUrl(watch.url, page);
           // No window means no read at all; report it as the infra failure it is
           // rather than as an empty search, which would trip the back-off.
@@ -542,7 +583,7 @@ async function runCycle(settings: Settings, pages: number): Promise<void> {
           // persistent `load-failed` is recorded as such — `reduceScanHealth` leaves
           // the empty-scan back-off counter untouched for it.
           if (session && outcome === "load-failed") {
-            await sleep(randomPauseMs(settings.pacing.pagePauseMs));
+            await sleep(randomPauseMs(settings.pacing.pagePauseMs), signal);
             ({ jobs, outcome, fieldCounts } = await scanPageIn(session, pageUrl, false));
           }
           // A partial read means the window was on screen but Chrome never painted
@@ -551,7 +592,7 @@ async function runCycle(settings: Settings, pages: number): Promise<void> {
           // only point at which the scan takes focus, it only happens when the quiet
           // attempt already failed, and the focus is handed straight back after.
           if (session && outcome === "partial") {
-            await sleep(randomPauseMs(settings.pacing.pagePauseMs));
+            await sleep(randomPauseMs(settings.pacing.pagePauseMs), signal);
             ({ jobs, outcome, fieldCounts } = await scanPageIn(session, pageUrl, true));
           }
           // In-cycle pagination guard (issue #30 item 2). A page whose first id
@@ -571,12 +612,32 @@ async function runCycle(settings: Settings, pages: number): Promise<void> {
           found.push(...stampJobs(jobs, watch.id, Date.now()));
           outcomes.push(outcome);
           fieldCountsList.push(fieldCounts);
-          if (page < pages) await sleep(randomPauseMs(settings.pacing.pagePauseMs));
+          if (page < pages) await sleep(randomPauseMs(settings.pacing.pagePauseMs), signal);
         }
-        if (w < watches.length - 1) await sleep(randomPauseMs(settings.pacing.watchPauseMs));
+        if (w < watches.length - 1) await sleep(randomPauseMs(settings.pacing.watchPauseMs), signal);
       }
     } finally {
       if (session) await closeScanSession(session);
+    }
+
+    // Stopped mid-round (§ master): the switch went off while this was walking
+    // pages, so the round ends here and everything it read is dropped on the
+    // floor. Nothing below has run — not the dedupe, so no id is written to
+    // `seen`; not the merge, so no record is written to `jobs`; and not the
+    // health reduce, the badge, the notification or the push. That is exactly
+    // what makes this a stop rather than a pause: a round only becomes stored
+    // state in the tail below, so leaving before it is what lets the round be
+    // treated as never having happened — which is in turn what lets an import
+    // (§ backup) land on a clean, unlocked store the moment the switch is off.
+    //
+    // The switch is re-read rather than only trusting the abort, because the two
+    // arrive by different roads: the popup writes `settings` first and messages
+    // the worker second, and the message is the half that a teardown can swallow.
+    // Reading the flag here is what makes the promise — a round never lands after
+    // you switched off — hold whichever half got through.
+    if (signal.aborted || (await get("settings")).enabled === false) {
+      console.log(`[ljw] cycle stopped — ${found.length} read, nothing stored`);
+      return;
     }
 
     // Merge-before-dedupe (PRD §5): one dedupe over every watch's results so a
@@ -646,11 +707,14 @@ async function runCycle(settings: Settings, pages: number): Promise<void> {
  *  "Scan now", and `ensureAlarmExists` on install and startup — which is why the
  *  manual-only switch is enforced in this one place rather than at each caller. */
 async function armNextAlarm(settings: Settings): Promise<void> {
-  // "Only scan when I press Scan now" (§ manual-only): there is no cadence to arm.
-  // It *clears* rather than simply returning so an alarm armed before the switch
-  // was turned on can't survive to fire; the alarm is also what every countdown
-  // in the UI reads, so leaving one would promise a scan that will never run.
-  if (settings.manualOnly === true) {
+  // The master switch off (§ master) and "Only scan when I press Scan now"
+  // (§ manual-only) are the two states with no cadence to arm, and they are
+  // enforced here rather than at each caller for the same reason: every route
+  // that arms goes through this one function. Both *clear* rather than simply
+  // returning, so an alarm armed before the switch was flipped can't survive to
+  // fire; the alarm is also what every countdown in the UI reads, so leaving one
+  // would promise a scan that will never run.
+  if (settings.enabled === false || settings.manualOnly === true) {
     await chrome.alarms.clear(ALARM_NAME);
     return;
   }
@@ -694,7 +758,14 @@ async function ensureAlarmExists(settings: Settings): Promise<void> {
  * would be silently gone until the next Chrome restart or manual scan.
  */
 async function syncAlarmToSettings(settings: Settings): Promise<void> {
-  if (settings.enabled === false || settings.manualOnly === true) {
+  // The master switch is the one of the two that stops a round already running
+  // (§ master, {@link stopScanning}); manual-only only takes the cadence away, and
+  // a round in flight under it is a round the user asked for by hand.
+  if (settings.enabled === false) {
+    await stopScanning();
+    return;
+  }
+  if (settings.manualOnly === true) {
     await chrome.alarms.clear(ALARM_NAME);
     return;
   }
@@ -725,12 +796,79 @@ async function takeScanLock(settings: Settings, state: ScanLifecycleState): Prom
  *  of a minute later when the cycle ends (and a crash mid-cycle can't strand the
  *  cadence on the old, already-passed alarm). */
 async function runLockedCycle(settings: Settings, pages: number, rearm = true): Promise<void> {
+  const controller = new AbortController();
+  liveCycle = controller;
   try {
-    await runCycle(settings, pages);
+    await runCycle(settings, pages, controller.signal);
   } finally {
-    await set("scanState", endScan(await get("scanState")));
-    if (rearm) await armNextAlarm(settings);
+    // Only the cycle that is still *the* live one clears up after itself. A
+    // stopped round reaches here after {@link stopScanning} has already released
+    // the lock, and in the seconds between the two an import may have taken that
+    // lock for itself — releasing it a second time here would pull it out from
+    // under a write in progress. The re-arm goes the same way: the stop cleared
+    // the alarm on purpose, and arming a fresh one from this `finally` would
+    // schedule the loop the switch was just turned off to end.
+    if (liveCycle === controller) {
+      liveCycle = null;
+      await set("scanState", endScan(await get("scanState")));
+      // Re-read rather than re-using the snapshot this cycle started with. A round
+      // takes a minute, and the master switch, the interval or the manual-only
+      // switch can all have been changed inside it — arming from the snapshot
+      // would schedule the loop as it was when the round began, not as it is now.
+      if (rearm) await armNextAlarm(await get("settings"));
+    }
   }
+}
+
+/**
+ * Stop scanning now — the master switch going off (§ master).
+ *
+ * The switch used to be a pause: it cleared the alarm and left whatever round was
+ * in flight to run itself out, holding the scan lock for the length of it. That
+ * made three things wrong at once. The scan window stayed on screen after the
+ * user had said stop; the round still wrote its results, so switching off midway
+ * quietly announced a batch of jobs; and — the reason this exists — "Import a
+ * backup" and "Delete all job history" both need that lock, so the two controls
+ * stayed refused for up to a minute and a half after the loop was supposedly off,
+ * or up to `staleLockMs` if the worker had been torn down in between.
+ *
+ * So off means stopped:
+ *
+ *  1. the live cycle is aborted, which drops it out at its next page boundary
+ *     *before* the tail that writes anything (see {@link runCycle}) — everything
+ *     that round had read goes with it;
+ *  2. the alarm is cleared, so no next round is coming;
+ *  3. the lock is released and the scan window's tabs are swept, whether or not
+ *     the cycle holding it is still alive to notice — `abortScan` ignores the
+ *     staleness clock precisely because the lock it is taking is usually a live
+ *     cycle's.
+ *
+ * Step 3 is skipped while a maintenance write holds the lock (`maintenanceHolds`)
+ * — that write is the thing the stop is trying to unblock, and it releases the
+ * lock itself as it finishes.
+ *
+ * Nothing here touches the badge, the health record or the stored jobs: stopping
+ * is the loop ending, not the history changing.
+ */
+async function stopScanning(): Promise<void> {
+  // Abort before releasing anything: the point of ordering it first is that the
+  // cycle stops walking pages while the lock is still visibly its own.
+  const cycle = liveCycle;
+  liveCycle = null;
+  cycle?.abort();
+
+  await chrome.alarms.clear(ALARM_NAME);
+
+  if (maintenanceHolds > 0) return;
+
+  const before = await get("scanState");
+  const { tabIdsToClose, state } = abortScan(before);
+  // Identity means there was nothing to stop — no lock, no window, a catch-up
+  // already owed. Every Options save made while watching is off arrives here, and
+  // none of them should cost a write.
+  if (state !== before) await set("scanState", state);
+  await Promise.all(tabIdsToClose.map((id) => chrome.tabs.remove(id).catch(() => {})));
+  if (cycle || tabIdsToClose.length > 0) console.log("[ljw] scanning stopped — switch off");
 }
 
 /**
@@ -897,6 +1035,8 @@ async function clearAllHistory(): Promise<ClearHistoryResponse> {
   const recovered = recoverStaleLock(await get("scanState"), Date.now(), settings.staleLockMs);
   if (recovered.state.isScanning) return { cleared: false, reason: "scanning" };
   await set("scanState", holdLock(recovered.state, Date.now()));
+  // This lock is a write's, not a cycle's — see `maintenanceHolds`.
+  maintenanceHolds++;
 
   try {
     const [seen, jobs, ui] = await Promise.all([get("seen"), get("jobs"), get("ui")]);
@@ -911,6 +1051,7 @@ async function clearAllHistory(): Promise<ClearHistoryResponse> {
     await updateBadge((await get("health")).severity);
     return { cleared: true, removed };
   } finally {
+    maintenanceHolds--;
     await set("scanState", endScan(await get("scanState")));
   }
 }
@@ -953,6 +1094,11 @@ async function importBackup(req: ImportBackupRequest): Promise<ImportBackupRespo
   const recovered = recoverStaleLock(await get("scanState"), Date.now(), current.staleLockMs);
   if (recovered.state.isScanning) return { imported: false, reason: "scanning" };
   await set("scanState", holdLock(recovered.state, Date.now()));
+  // This lock is a write's, not a cycle's — see `maintenanceHolds`. It matters
+  // here in particular: the settings this writes may themselves carry the master
+  // switch turned off, and the `storage.onChanged` listener answers that with a
+  // stop — which would otherwise release the lock from under this very function.
+  maintenanceHolds++;
 
   try {
     const target: ImportTarget = {
@@ -977,6 +1123,7 @@ async function importBackup(req: ImportBackupRequest): Promise<ImportBackupRespo
     await updateBadge((await get("health")).severity);
     return { imported: true, mode: req.mode, counts };
   } finally {
+    maintenanceHolds--;
     await set("scanState", endScan(await get("scanState")));
   }
 }
@@ -1046,7 +1193,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   void (async () => {
     try {
       if (req.enabled) await ensureAlarmExists(await get("settings"));
-      else await chrome.alarms.clear(ALARM_NAME);
+      else await stopScanning();
       sendResponse({ ok: true });
     } catch (err) {
       console.error("[ljw] Toggle failed:", err);
