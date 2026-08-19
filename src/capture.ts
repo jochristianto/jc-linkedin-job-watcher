@@ -124,9 +124,9 @@ export function pickCaptureTab(tabs: TabLike[]): PickResult {
   return { ok: false, reason: "not-search-page" };
 }
 
-/** What the download is called: `linkedin-jobs-search-2026-08-07.html`. Dated like
- *  the backup file, so a folder of captures sorts newest-last and reads in order;
- *  `.html` so the gated fixture test in `parse.test.ts` picks it up by extension. */
+/** What the download is called: `linkedin-jobs-search-2026-08-07.html`. Dated, so
+ *  a folder of captures sorts newest-last and reads in order; `.html` so the gated
+ *  fixture test in `parse.test.ts` picks it up by extension. */
 export function captureFilename(capturedAt: number): string {
   const date = new Date(capturedAt).toISOString().slice(0, 10);
   return `linkedin-jobs-search-${date}.html`;

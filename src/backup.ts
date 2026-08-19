@@ -124,12 +124,28 @@ export function serializeBackup(file: BackupFile): string {
   return `${JSON.stringify(file, null, 2)}\n`;
 }
 
-/** What the download is called: `linkedin-job-watcher-backup-2026-07-30.json`.
- *  Dated, because the first thing you want from a folder of these is the newest;
- *  sortable, because the second thing you want is them in order. */
+const pad2 = (n: number): string => String(n).padStart(2, "0");
+
+/** What the download is called: `linkedin-job-watcher-backup-20260730-142305.json`.
+ *  Stamped, because the first thing you want from a folder of these is the newest;
+ *  sortable, because the second thing you want is them in order; down to the
+ *  second, because a day is not fine enough — two exports on one afternoon used to
+ *  land on the same name, and the browser silently filed the second as `… (1)`,
+ *  which sorts nowhere and says nothing about when it was taken.
+ *
+ *  `YYYYMMDD-HHMMSS`: the one hyphen in the stamp is the one that earns its place,
+ *  splitting the day from the time. Both halves stay fixed-width and zero-padded,
+ *  which is the whole reason a plain alphabetical sort puts these in order.
+ *
+ *  Read off the local clock rather than `toISOString()`, which is UTC: east of
+ *  Greenwich an early-morning export was filed under yesterday, and west of it a
+ *  late-evening one under tomorrow. The file's own `exportedAt` stays ISO/UTC, so
+ *  the unambiguous instant is still in there for anyone who needs it. */
 export function backupFilename(exportedAt: number): string {
-  const date = new Date(exportedAt).toISOString().slice(0, 10);
-  return `linkedin-job-watcher-backup-${date}.json`;
+  const d = new Date(exportedAt);
+  const date = `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}`;
+  const time = `${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`;
+  return `linkedin-job-watcher-backup-${date}-${time}.json`;
 }
 
 // ── What a file is allowed to contain ────────────────────────────────────────
